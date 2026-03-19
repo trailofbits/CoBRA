@@ -415,9 +415,8 @@ namespace cobra {
             return std::move(stack.top());
         }
 
-        Result< void > ValidateShiftsAndExponents(
-            const std::vector< Token > &postfix, uint32_t bitwidth
-        ) {
+        Result< void >
+        ValidateShiftsAndExponents(const std::vector< Token > &postfix, uint32_t bitwidth) {
             for (size_t i = 0; i < postfix.size(); ++i) {
                 if (postfix[i].type != TokenType::kOp) { continue; }
                 if (postfix[i].value == "<<" || postfix[i].value == ">>") {
@@ -639,8 +638,8 @@ namespace cobra {
                                 r             = 1;
                                 while (exp > 0) {
                                     if ((exp & 1) != 0) { r = (r * base) & kMask; }
-                                    base = (base * base) & kMask;
-                                    exp >>= 1;
+                                    base   = (base * base) & kMask;
+                                    exp  >>= 1;
                                 }
                                 break;
                             }
