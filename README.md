@@ -175,7 +175,7 @@ ctest --test-dir build -R test_simplifier --output-on-failure
 ctest --test-dir build -V
 ```
 
-Dataset benchmarks validate against real-world obfuscated expressions from QSynth and PLDI datasets.
+Dataset benchmarks validate against real-world obfuscated expressions from QSynth and PLDI datasets. See [DATASETS.md](DATASETS.md) for the full benchmark report — 69,380 expressions simplified across 31 dataset files from 6 independent sources, with zero failures.
 
 ## Known Limitations
 
