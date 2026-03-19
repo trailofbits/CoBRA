@@ -135,7 +135,18 @@ namespace cobra {
                     continue;
                 }
 
-                // Two-character shift operators
+                // Two-character operators: **, <<, >>
+                if (expr[i] == '*' && i + 1 < expr.size() && expr[i + 1] == '*') {
+                    tokens.push_back(
+                        { .type        = TokenType::kOp,
+                          .value       = "**",
+                          .precedence  = 1,
+                          .right_assoc = true,
+                          .is_unary    = false }
+                    );
+                    i += 2;
+                    continue;
+                }
                 if (expr[i] == '<' && i + 1 < expr.size() && expr[i + 1] == '<') {
                     tokens.push_back(
                         { .type        = TokenType::kOp,
@@ -332,7 +343,27 @@ namespace cobra {
                         stack.pop();
                         auto lhs = std::move(stack.top());
                         stack.pop();
-                        if (tok.value == "<<" || tok.value == ">>") {
+                        if (tok.value == "**") {
+                            if (rhs->kind != Expr::Kind::kConstant) {
+                                return Err< std::unique_ptr< Expr > >(
+                                    CobraError::kParseError,
+                                    "unsupported: exponent must be "
+                                    "an integer literal"
+                                );
+                            }
+                            const uint64_t kExp = rhs->constant_val;
+                            if (kExp == 0) {
+                                stack.push(Expr::Constant(1ULL & mask));
+                            } else if (kExp == 1) {
+                                stack.push(std::move(lhs));
+                            } else {
+                                auto result = CloneExpr(*lhs);
+                                for (uint64_t p = 2; p <= kExp; ++p) {
+                                    result = Expr::Mul(std::move(result), CloneExpr(*lhs));
+                                }
+                                stack.push(std::move(result));
+                            }
+                        } else if (tok.value == "<<" || tok.value == ">>") {
                             if (rhs->kind != Expr::Kind::kConstant) {
                                 return Err< std::unique_ptr< Expr > >(
                                     CobraError::kParseError,
@@ -384,28 +415,39 @@ namespace cobra {
             return std::move(stack.top());
         }
 
-        Result< void > ValidateShifts(const std::vector< Token > &postfix, uint32_t bitwidth) {
+        Result< void > ValidateShiftsAndExponents(
+            const std::vector< Token > &postfix, uint32_t bitwidth
+        ) {
             for (size_t i = 0; i < postfix.size(); ++i) {
                 if (postfix[i].type != TokenType::kOp) { continue; }
-                if (postfix[i].value != "<<" && postfix[i].value != ">>") { continue; }
-                if (i == 0 || postfix[i - 1].type != TokenType::kNumber) {
-                    return Err< void >(
-                        CobraError::kParseError,
-                        "unsupported: shift amount must be "
-                        "an integer literal"
+                if (postfix[i].value == "<<" || postfix[i].value == ">>") {
+                    if (i == 0 || postfix[i - 1].type != TokenType::kNumber) {
+                        return Err< void >(
+                            CobraError::kParseError,
+                            "unsupported: shift amount must be "
+                            "an integer literal"
+                        );
+                    }
+                    uint64_t k = 0;
+                    std::from_chars(
+                        postfix[i - 1].value.data(),
+                        postfix[i - 1].value.data() + postfix[i - 1].value.size(), k
                     );
-                }
-                uint64_t k = 0;
-                std::from_chars(
-                    postfix[i - 1].value.data(),
-                    postfix[i - 1].value.data() + postfix[i - 1].value.size(), k
-                );
-                if (k >= bitwidth) {
-                    return Err< void >(
-                        CobraError::kParseError,
-                        "shift amount " + std::to_string(k) + " out of range for "
-                            + std::to_string(bitwidth) + "-bit mode"
-                    );
+                    if (k >= bitwidth) {
+                        return Err< void >(
+                            CobraError::kParseError,
+                            "shift amount " + std::to_string(k) + " out of range for "
+                                + std::to_string(bitwidth) + "-bit mode"
+                        );
+                    }
+                } else if (postfix[i].value == "**") {
+                    if (i == 0 || postfix[i - 1].type != TokenType::kNumber) {
+                        return Err< void >(
+                            CobraError::kParseError,
+                            "unsupported: exponent must be "
+                            "an integer literal"
+                        );
+                    }
                 }
             }
             return {};
@@ -440,7 +482,7 @@ namespace cobra {
         auto postfix = ToPostfix(*tokens);
         if (!postfix) { return std::unexpected(std::move(postfix.error())); }
 
-        auto shifts_ok = ValidateShifts(*postfix, bitwidth);
+        auto shifts_ok = ValidateShiftsAndExponents(*postfix, bitwidth);
         if (!shifts_ok) { return std::unexpected(std::move(shifts_ok.error())); }
 
         // Compile postfix into a compact form: resolve variable
@@ -456,6 +498,7 @@ namespace cobra {
             kXor,
             kShl,
             kShr,
+            kPow,
             kNot,
             kNeg
         };
@@ -524,6 +567,8 @@ namespace cobra {
                         op = CompiledOp::kShl;
                     } else if (tok.value == ">>") {
                         op = CompiledOp::kShr;
+                    } else if (tok.value == "**") {
+                        op = CompiledOp::kPow;
                     }
                     compiled.push_back({ .op = op, .operand = 0 });
                 }
@@ -588,6 +633,17 @@ namespace cobra {
                             case CompiledOp::kShr:
                                 r = (a >> b) & kMask;
                                 break;
+                            case CompiledOp::kPow: {
+                                uint64_t base = a & kMask;
+                                uint64_t exp  = b;
+                                r             = 1;
+                                while (exp > 0) {
+                                    if ((exp & 1) != 0) { r = (r * base) & kMask; }
+                                    base = (base * base) & kMask;
+                                    exp >>= 1;
+                                }
+                                break;
+                            }
                             default:
                                 break;
                         }
@@ -628,6 +684,7 @@ namespace cobra {
                     const bool lhs = has_var.top();
                     has_var.pop();
                     if (tok.value == "*" && lhs && rhs) { return false; }
+                    if (tok.value == "**" && lhs) { return false; }
                     has_var.push(lhs || rhs);
                 }
             }
@@ -660,7 +717,7 @@ namespace cobra {
         auto postfix = ToPostfix(*tokens);
         if (!postfix) { return std::unexpected(std::move(postfix.error())); }
 
-        auto shifts_ok = ValidateShifts(*postfix, bitwidth);
+        auto shifts_ok = ValidateShiftsAndExponents(*postfix, bitwidth);
         if (!shifts_ok) { return std::unexpected(std::move(shifts_ok.error())); }
 
         auto tree = BuildAstFromPostfix(*postfix, vars, bitwidth);

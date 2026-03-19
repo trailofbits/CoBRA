@@ -2,7 +2,7 @@
 
 CoBRA is validated against **72,646 expressions** drawn from **31 dataset files** spanning 6 independent sources. Every expression is parsed, simplified, and spot-checked at runtime. The numbers below are enforced by automated test assertions in [`test/verify/test_dataset_benchmarks.cpp`](test/verify/test_dataset_benchmarks.cpp) and verified on every CI run.
 
-**Overall: 69,472 / 69,572 parsed expressions simplified (99.86%), zero failures.**
+**Overall: 69,482 / 69,582 parsed expressions simplified (99.86%), zero failures.**
 
 ---
 
@@ -27,11 +27,11 @@ CoBRA classifies each input expression into one of four semantic classes, then r
 |---------|:-----------:|:------:|:----------:|:-----------:|:----:|
 | `univariate64.txt` | 1,000 | 1,000 | **1,000** | 0 | **100%** |
 | `multivariate64.txt` | 1,000 | 1,000 | **1,000** | 0 | **100%** |
-| `permutation64.txt` | 13 | 3 | **3** | 0 | **100%** |
+| `permutation64.txt` | 13 | 13 | **13** | 0 | **100%** |
 | `msimba.txt` | 1,000 | 1,000 | **1,000** | 0 | **100%** |
 
 - **univariate64** / **multivariate64**: Polynomial expressions (`x0*x0`, `x0*x1`) that simplify to linear targets. All 2,000 pass full-width verification.
-- **permutation64**: High-degree polynomial expressions. 10 of 13 use `**` (exponentiation), which the parser does not support; the 3 parseable expressions simplify correctly.
+- **permutation64**: High-degree polynomial expressions with `**` (exponentiation). All 13 expressions parse and simplify correctly.
 - **msimba**: Semilinear expressions with bit-extraction patterns. All 1,000 simplified via the bit-partitioned pipeline.
 
 ### SiMBA Datasets
@@ -105,9 +105,9 @@ Source: [GAMBA](https://github.com/DenuvoSoftwareSolutions/GAMBA)
 |--------|------:|
 | Total dataset lines | 72,647 |
 | Comment/header lines skipped | 2,063 |
-| Unparsable lines (e.g., `**` operator, no ground truth) | 1,012 |
-| **Parsed expressions** | **69,572** |
-| **Simplified** | **69,472** |
+| Unparsable lines (e.g., no ground truth) | 1,002 |
+| **Parsed expressions** | **69,582** |
+| **Simplified** | **69,482** |
 | Unsupported (by design) | 100 |
 | Errors / failures | **0** |
 
