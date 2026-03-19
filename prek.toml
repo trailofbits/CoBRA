@@ -1,0 +1,28 @@
+# Configuration file for `prek`, a git hook framework written in Rust.
+# See https://prek.j178.dev for more information.
+
+[[repos]]
+repo = "builtin"
+hooks = [
+    { id = "trailing-whitespace" },
+    { id = "end-of-file-fixer" },
+    { id = "check-added-large-files", args = ["--maxkb=500"] },
+    { id = "check-merge-conflict" },
+]
+
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "clang-format"
+name = "clang-format"
+language = "system"
+entry = "clang-format --dry-run --Werror"
+types = ["c", "c++"]
+
+[[repos.hooks]]
+id = "codespell"
+name = "codespell"
+language = "system"
+entry = "codespell"
+types = ["text"]

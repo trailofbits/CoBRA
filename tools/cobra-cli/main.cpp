@@ -1,0 +1,500 @@
+#include "ExprParser.h"
+#include "cobra/core/AtomSimplifier.h"
+#include "cobra/core/BitPartitioner.h"
+#include "cobra/core/Classification.h"
+#include "cobra/core/Classifier.h"
+#include "cobra/core/Expr.h"
+#include "cobra/core/MaskedAtomReconstructor.h"
+#include "cobra/core/SelfCheck.h"
+#include "cobra/core/SemilinearIR.h"
+#include "cobra/core/SemilinearNormalizer.h"
+#include "cobra/core/SignatureChecker.h"
+#include "cobra/core/Simplifier.h"
+#include <cstdint>
+#include <utility>
+#ifdef COBRA_HAS_Z3
+    #include "cobra/core/CoeffInterpolator.h"
+    #include "cobra/verify/Z3Verifier.h"
+#endif
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
+#include <string>
+#include <vector>
+
+namespace {
+
+    void PrintUsage() {
+        std::cerr << "Usage: cobra-cli [options]\n"
+                  << "\nOptions:\n"
+                  << "  --mba <expr>    Simplify an MBA expression\n"
+                  << "  --bitwidth <n>  Bit width (default: 64)\n"
+                  << "  --max-vars <n>  Max variable count (default: 12)\n"
+                  << "  --verify        Enable Z3 verification\n"
+                  << "  --strict        Require Z3 for semilinear results\n"
+                  << "  --verbose       Print intermediate steps\n"
+                  << "  --version       Print version\n"
+                  << "  --help          Show this message\n";
+    }
+
+    void PrintVersion() { std::cout << "cobra-cli 0.1.0\n"; }
+
+    std::vector< uint64_t >
+    EvaluateToSignature(const cobra::Expr &ast, uint32_t num_vars, uint32_t bitwidth) {
+        const size_t len = size_t{ 1 } << num_vars;
+        std::vector< uint64_t > sig(len);
+        for (size_t i = 0; i < len; ++i) {
+            std::vector< uint64_t > var_values(num_vars);
+            for (uint32_t v = 0; v < num_vars; ++v) {
+                var_values[v] = (i >> v) & 1;
+            }
+            sig[i] = cobra::EvalExpr(ast, var_values, bitwidth);
+        }
+        return sig;
+    }
+
+    const char *SemanticClassName(cobra::SemanticClass cls) {
+        switch (cls) {
+            case cobra::SemanticClass::kLinear:
+                return "kLinear";
+            case cobra::SemanticClass::kSemilinear:
+                return "kSemilinear";
+            case cobra::SemanticClass::kPolynomial:
+                return "kPolynomial";
+            case cobra::SemanticClass::kNonPolynomial:
+                return "kNonPolynomial";
+        }
+        return "Unknown";
+    }
+
+    const char *RouteName(cobra::Route r) {
+        switch (r) {
+            case cobra::Route::kBitwiseOnly:
+                return "BitwiseOnly";
+            case cobra::Route::kMultilinear:
+                return "Multilinear";
+            case cobra::Route::kPowerRecovery:
+                return "PowerRecovery";
+            case cobra::Route::kMixedRewrite:
+                return "MixedRewrite";
+            case cobra::Route::kUnsupported:
+                return "Unsupported";
+        }
+        return "Unknown";
+    }
+
+    const char *RouteTechnique(cobra::Route r) {
+        switch (r) {
+            case cobra::Route::kBitwiseOnly:
+                return "Direct Change-of-Basis decomposition";
+            case cobra::Route::kMultilinear:
+                return "Change-of-Basis with multilinear "
+                       "product matching";
+            case cobra::Route::kPowerRecovery:
+                return "Change-of-Basis with polynomial "
+                       "coefficient splitting and power recovery";
+            case cobra::Route::kMixedRewrite:
+                return "Algebraic rewrite of mixed products, "
+                       "then Change-of-Basis decomposition";
+            case cobra::Route::kUnsupported:
+                return "No simplification available";
+        }
+        return "Unknown";
+    }
+
+    void PrintStructuralFlags(cobra::StructuralFlag flags) {
+        bool first = true;
+        auto emit  = [&](const char *name) {
+            if (!first) {
+                std::cerr << ", ";
+            }
+            std::cerr << name;
+            first = false;
+        };
+        if ((flags & cobra::kSfHasBitwise) != 0u) {
+            emit("bitwise");
+        }
+        if ((flags & cobra::kSfHasArithmetic) != 0u) {
+            emit("arithmetic");
+        }
+        if ((flags & cobra::kSfHasMul) != 0u) {
+            emit("mul");
+        }
+        if ((flags & cobra::kSfHasMultilinearProduct) != 0u) {
+            emit("multilinear-product");
+        }
+        if ((flags & cobra::kSfHasSingletonPower) != 0u) {
+            emit("singleton-power");
+        }
+        if ((flags & cobra::kSfHasSingletonPowerGt2) != 0u) {
+            emit("singleton-power-gt2");
+        }
+        if ((flags & cobra::kSfHasMixedProduct) != 0u) {
+            emit("mixed-product");
+        }
+        if ((flags & cobra::kSfHasBitwiseOverArith) != 0u) {
+            emit("bitwise-over-arith");
+        }
+        if ((flags & cobra::kSfHasArithOverBitwise) != 0u) {
+            emit("arith-over-bitwise");
+        }
+        if ((flags & cobra::kSfHasMultivarHighPower) != 0u) {
+            emit("multivar-high-power");
+        }
+        if ((flags & cobra::kSfHasUnknownShape) != 0u) {
+            emit("unknown-shape");
+        }
+        if (first) {
+            std::cerr << "none";
+        }
+    }
+
+    int RunLinearPath(
+        const cobra::Expr &ast, const std::vector< std::string > &vars, uint32_t bitwidth,
+        uint32_t max_vars, bool verbose, bool verify, const cobra::Expr *original_ast = nullptr
+    ) {
+        auto num_vars = static_cast< uint32_t >(vars.size());
+        if (verbose) {
+            std::cerr << "Evaluating signature vector...\n";
+        }
+        auto sig = EvaluateToSignature(ast, num_vars, bitwidth);
+
+        if (verbose) {
+            std::cerr << "Signature vector (" << num_vars << " vars): [";
+            for (size_t i = 0; i < sig.size(); ++i) {
+                if (i > 0) {
+                    std::cerr << ", ";
+                }
+                std::cerr << sig[i];
+            }
+            std::cerr << "]\n";
+        }
+
+        cobra::Options opts{ .bitwidth = bitwidth, .max_vars = max_vars, .spot_check = true };
+
+        if (original_ast != nullptr) {
+            opts.evaluator = [original_ast, num_vars,
+                              bitwidth](const std::vector< uint64_t > &v) -> uint64_t {
+                return cobra::EvalExpr(*original_ast, v, bitwidth);
+            };
+        }
+
+        if (verbose) {
+            std::cerr << "Simplifying...\n";
+        }
+        auto result = cobra::Simplify(sig, vars, original_ast, opts);
+        if (!result.has_value()) {
+            std::cerr << "Error: " << result.error().message << "\n";
+            return 1;
+        }
+        if (result.value().kind == cobra::SimplifyOutcome::Kind::kError) {
+            std::cerr << "Error: " << result.value().diag.reason << "\n";
+            return 1;
+        }
+        if (result.value().kind == cobra::SimplifyOutcome::Kind::kUnchangedUnsupported) {
+            std::cerr << "Unsupported: " << result.value().diag.reason << "\n";
+            if (verbose) {
+                std::cerr << "  Route: " << RouteName(result.value().diag.classification.route)
+                          << ", rewrite rounds: " << result.value().diag.rewrite_rounds << "\n";
+            }
+            auto text = cobra::Render(*result.value().expr, vars, bitwidth);
+            std::cout << text << "\n";
+            return 0;
+        }
+
+        if (verbose && result.value().real_vars.size() < vars.size()) {
+            auto eliminated = vars.size() - result.value().real_vars.size();
+            std::cerr << "Eliminated " << eliminated << " spurious variable"
+                      << (eliminated != 1 ? "s" : "") << " (";
+            bool first = true;
+            for (const auto &v : vars) {
+                bool found = false;
+                for (const auto &rv : result.value().real_vars) {
+                    if (v == rv) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    if (!first) {
+                        std::cerr << ", ";
+                    }
+                    std::cerr << v;
+                    first = false;
+                }
+            }
+            std::cerr << "), reduced to " << result.value().real_vars.size() << " var"
+                      << (result.value().real_vars.size() != 1 ? "s" : "") << ": ";
+            for (size_t i = 0; i < result.value().real_vars.size(); ++i) {
+                if (i > 0) {
+                    std::cerr << ", ";
+                }
+                std::cerr << result.value().real_vars[i];
+            }
+            std::cerr << "\n";
+        }
+
+        if (verbose && result.value().verified) {
+            std::cerr << "Running spot-check... passed\n";
+        }
+
+        // Full-width verification for polynomial expressions:
+        // The CoB result is {0,1}-correct by construction. For polynomial
+        // inputs, verify it also holds at random full-width values.
+        if (original_ast != nullptr) {
+            // Build mapping from simplified var indices to original var
+            // indices (needed when aux var elimination reduced the set).
+            std::vector< uint32_t > var_map;
+            if (result.value().real_vars.size() < vars.size()) {
+                var_map.reserve(result.value().real_vars.size());
+                for (const auto &rv : result.value().real_vars) {
+                    for (uint32_t j = 0; j < vars.size(); ++j) {
+                        if (vars[j] == rv) {
+                            var_map.push_back(j);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            auto fw = cobra::FullWidthCheck(
+                *original_ast, num_vars, *result.value().expr, var_map, bitwidth
+            );
+            if (!fw.passed) {
+                if (verbose) {
+                    std::cerr << "Verifying full-width equivalence..."
+                                 " failed\n";
+                    std::cerr << "  Failing inputs:";
+                    for (auto v : fw.failing_input) {
+                        std::cerr << " " << v;
+                    }
+                    std::cerr << "\n";
+                }
+                std::cerr << "Error: CoB result is only correct on "
+                             "{0,1} inputs (polynomial target)\n";
+                return 1;
+            }
+            if (verbose) {
+                std::cerr << "Verifying full-width equivalence..."
+                             " passed\n";
+            }
+        }
+
+        auto text = cobra::Render(*result.value().expr, result.value().real_vars, bitwidth);
+        std::cout << text << "\n";
+
+#ifdef COBRA_HAS_Z3
+        if (verify) {
+            auto rv = static_cast< uint32_t >(result.value().real_vars.size());
+            auto cob_coeffs =
+                cobra::InterpolateCoefficients(result.value().sig_vector, rv, bitwidth);
+            auto z3r = cobra::Z3Verify(
+                cob_coeffs, *result.value().expr, result.value().real_vars, rv, bitwidth
+            );
+            if (z3r.equivalent) {
+                std::cerr << "[Z3] Verified: equivalent\n";
+            } else {
+                std::cerr << "[Z3] Verification failed: " << z3r.counterexample << "\n";
+                return 1;
+            }
+        }
+#else
+        if (verify) {
+            std::cerr << "Warning: Z3 not available, --verify ignored\n";
+        }
+#endif
+
+        return 0;
+    }
+
+    int RunSemilinearPath(
+        const cobra::Expr &original_ast, const std::vector< std::string > &vars,
+        uint32_t bitwidth, uint32_t max_vars, bool verbose, bool strict
+    ) {
+        if (vars.size() > max_vars) {
+            std::cerr << "Error: expression has " << vars.size() << " variables (max "
+                      << max_vars << ")\n";
+            return 1;
+        }
+
+        if (verbose) {
+            std::cerr << "Normalizing to semilinear IR...\n";
+        }
+        auto ir_result = cobra::NormalizeToSemilinear(original_ast, vars, bitwidth);
+        if (!ir_result.has_value()) {
+            std::cerr << "Error: " << ir_result.error().message << "\n";
+            return 1;
+        }
+        auto &ir = ir_result.value();
+
+        if (verbose) {
+            std::cerr << "kSemilinear IR: " << ir.terms.size() << " terms, "
+                      << ir.atom_table.size() << " atoms\n";
+        }
+
+        if (verbose) {
+            std::cerr << "Simplifying atom structure...\n";
+        }
+        cobra::SimplifyStructure(ir);
+
+        if (verbose) {
+            std::cerr << "After simplification: " << ir.terms.size() << " terms, "
+                      << ir.atom_table.size() << " atoms\n";
+        }
+
+        if (verbose) {
+            std::cerr << "Computing bit partitions...\n";
+        }
+        auto partitions = cobra::ComputePartitions(ir);
+
+        if (verbose) {
+            std::cerr << "Bit partitions: " << partitions.size() << "\n";
+        }
+
+        // Self-check uses plain reconstruction (no OR-rewrite)
+        // to ensure structural round-trip fidelity.
+        auto plain = cobra::ReconstructMaskedAtoms(ir, {});
+        auto check = cobra::SelfChecSemilinear(ir, *plain, vars, bitwidth);
+        if (!check.passed) {
+            if (verbose) {
+                std::cerr << "Running self-check... failed\n";
+            }
+            std::cerr << "Error: self-check failed: " << check.mismatch_detail << "\n";
+            return 1;
+        }
+
+        if (verbose) {
+            std::cerr << "Running self-check... passed\n";
+            std::cerr << "Reconstructing with OR-rewrite...\n";
+        }
+
+        // Final reconstruction uses partitions for OR-rewrite.
+        auto simplified = cobra::ReconstructMaskedAtoms(ir, partitions);
+
+        auto text = cobra::Render(*simplified, vars, bitwidth);
+        std::cout << text << "\n";
+
+#ifdef COBRA_HAS_Z3
+        // Always verify semilinear results when Z3 is available
+        auto z3r = cobra::Z3VerifyExprs(original_ast, *simplified, vars, bitwidth);
+        if (z3r.equivalent) {
+            if (verbose) {
+                std::cerr << "[Z3] Verified: equivalent\n";
+            }
+        } else {
+            std::cerr << "[Z3] Verification failed: " << z3r.counterexample << "\n";
+            return 1;
+        }
+#else
+        if (strict) {
+            std::cerr << "Error: --strict requires Z3 for semilinear verification\n";
+            return 1;
+        }
+        std::cerr << "Warning: semilinear result unverified (Z3 not available)\n";
+#endif
+
+        return 0;
+    }
+
+} // namespace
+
+int main(int argc, char *argv[]) {
+    std::string mba_expr;
+    uint32_t bitwidth = 64;
+    uint32_t max_vars = 12;
+    bool verbose      = false;
+    bool verify       = false;
+    bool strict       = false;
+
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--help") == 0) {
+            PrintUsage();
+            return 0;
+        }
+        if (std::strcmp(argv[i], "--version") == 0) {
+            PrintVersion();
+            return 0;
+        }
+        if (std::strcmp(argv[i], "--mba") == 0 && i + 1 < argc) {
+            mba_expr = argv[++i];
+        } else if (std::strcmp(argv[i], "--bitwidth") == 0 && i + 1 < argc) {
+            bitwidth = static_cast< uint32_t >(std::stoul(argv[++i]));
+        } else if (std::strcmp(argv[i], "--max-vars") == 0 && i + 1 < argc) {
+            max_vars = static_cast< uint32_t >(std::stoul(argv[++i]));
+        } else if (std::strcmp(argv[i], "--verbose") == 0) {
+            verbose = true;
+        } else if (std::strcmp(argv[i], "--verify") == 0) {
+            verify = true;
+        } else if (std::strcmp(argv[i], "--strict") == 0) {
+            strict = true;
+        } else {
+            std::cerr << "Error: unknown option '" << argv[i] << "'\n";
+            PrintUsage();
+            return 1;
+        }
+    }
+
+    if (mba_expr.empty()) {
+        std::cerr << "Error: --mba <expr> is required\n";
+        PrintUsage();
+        return 1;
+    }
+
+    // Parse to AST
+    auto parsed = cobra::ParseToAst(mba_expr, bitwidth);
+    if (!parsed.has_value()) {
+        std::cerr << "Error: " << parsed.error().message << "\n";
+        return 1;
+    }
+
+    auto &vars = parsed.value().vars;
+
+    if (verbose) {
+        std::cerr << "Variables: ";
+        for (size_t i = 0; i < vars.size(); ++i) {
+            if (i > 0) {
+                std::cerr << ", ";
+            }
+            std::cerr << vars[i];
+        }
+        std::cerr << "\n";
+    }
+
+    // Fold constant bitwise subtrees
+    auto folded = cobra::FoldConstantBitwise(std::move(parsed.value().expr), bitwidth);
+
+    auto cls = cobra::ClassifyStructural(*folded);
+
+    if (verbose) {
+        std::cerr << "Classification: " << SemanticClassName(cls.semantic) << "\n";
+        std::cerr << "  Route: " << RouteName(cls.route) << "\n";
+        std::cerr << "  Flags: ";
+        PrintStructuralFlags(cls.flags);
+        std::cerr << "\n";
+        std::cerr << "  Technique: " << RouteTechnique(cls.route) << "\n";
+    }
+
+    switch (cls.semantic) {
+        case cobra::SemanticClass::kLinear:
+            return RunLinearPath(*folded, vars, bitwidth, max_vars, verbose, verify);
+
+        case cobra::SemanticClass::kSemilinear: {
+            const int rc =
+                RunSemilinearPath(*folded, vars, bitwidth, max_vars, verbose, strict);
+            if (rc != 0) {
+                if (verbose) {
+                    std::cerr << "kSemilinear path failed, "
+                                 "falling back to linear\n";
+                }
+                return RunLinearPath(*folded, vars, bitwidth, max_vars, verbose, verify);
+            }
+            return rc;
+        }
+
+        case cobra::SemanticClass::kPolynomial:
+        case cobra::SemanticClass::kNonPolynomial:
+            return RunLinearPath(
+                *folded, vars, bitwidth, max_vars, verbose, verify, folded.get()
+            );
+    }
+}
