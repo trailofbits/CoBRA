@@ -18,7 +18,7 @@ id = "clang-format"
 name = "clang-format"
 language = "system"
 entry = "clang-format --dry-run --Werror"
-types = ["c", "c++"]
+files = '(?i)\.(c|cc|cpp|cxx|h|hh|hpp|hxx)$'
 
 [[repos.hooks]]
 id = "codespell"
