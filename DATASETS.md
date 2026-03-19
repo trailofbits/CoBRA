@@ -105,7 +105,7 @@ Source: [GAMBA](https://github.com/DenuvoSoftwareSolutions/GAMBA)
 |--------|------:|
 | Total dataset lines | 72,647 |
 | Comment/header lines skipped | 2,063 |
-| Unparsable lines (e.g., no ground truth) | 1,002 |
+| Non-expression lines (headers, no ground truth) | 1,002 |
 | **Parsed expressions** | **69,582** |
 | **Simplified** | **69,482** |
 | Unsupported (by design) | 100 |
