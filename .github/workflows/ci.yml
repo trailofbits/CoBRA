@@ -70,7 +70,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Cache GoogleTest
-        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: build-deps/install
           key: gtest-${{ matrix.os }}-${{ matrix.cc }}-v1.16.0
