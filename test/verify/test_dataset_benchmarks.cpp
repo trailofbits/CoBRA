@@ -148,10 +148,9 @@ TEST(DatasetBenchmark, Multivariate64) {
 TEST(DatasetBenchmark, Permutation64) {
     auto stats = run_dataset(DATASET_DIR "/permutation64.txt");
     EXPECT_EQ(stats.total, 13);
-    // 10 lines use ** (unsupported by parser), 3 parse and simplify
-    EXPECT_EQ(stats.skipped_parse, 10);
-    EXPECT_EQ(stats.parsed, 3);
-    EXPECT_EQ(stats.simplified, 3);
+    EXPECT_EQ(stats.skipped_parse, 0);
+    EXPECT_EQ(stats.parsed, 13);
+    EXPECT_EQ(stats.simplified, 13);
     EXPECT_EQ(stats.unsupported, 0);
     EXPECT_EQ(stats.failed_simplify, 0);
 }

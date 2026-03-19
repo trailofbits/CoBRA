@@ -395,6 +395,101 @@ TEST(ExprParserTest, RightShiftSmallBitwidth) {
     EXPECT_EQ(result.value().sig[0], 0xFu);
 }
 
+// --- Exponentiation (**) tests ---
+
+TEST(ExprParserTest, PowerSquare) {
+    auto result = ParseAndEvaluate("x ** 2", 64);
+    ASSERT_TRUE(result.has_value());
+    // x=0: 0, x=1: 1
+    EXPECT_EQ(result.value().sig[0], 0u);
+    EXPECT_EQ(result.value().sig[1], 1u);
+}
+
+TEST(ExprParserTest, PowerCube) {
+    auto result = ParseAndEvaluate("x ** 3", 8);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result.value().sig[0], 0u);
+    EXPECT_EQ(result.value().sig[1], 1u);
+}
+
+TEST(ExprParserTest, PowerZero) {
+    auto result = ParseAndEvaluate("x ** 0", 64);
+    ASSERT_TRUE(result.has_value());
+    // x**0 = 1 for all x
+    EXPECT_EQ(result.value().sig[0], 1u);
+    EXPECT_EQ(result.value().sig[1], 1u);
+}
+
+TEST(ExprParserTest, PowerOne) {
+    auto result = ParseAndEvaluate("x ** 1", 64);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result.value().sig[0], 0u);
+    EXPECT_EQ(result.value().sig[1], 1u);
+}
+
+TEST(ExprParserTest, PowerPrecedenceTighterThanMul) {
+    // x * y ** 2 should parse as x * (y**2), not (x*y)**2
+    auto result = ParseAndEvaluate("x * y ** 2", 64);
+    ASSERT_TRUE(result.has_value());
+    // x=0,y=0: 0*0=0; x=1,y=0: 1*0=0; x=0,y=1: 0*1=0; x=1,y=1: 1*1=1
+    EXPECT_EQ(result.value().sig[0], 0u);
+    EXPECT_EQ(result.value().sig[1], 0u);
+    EXPECT_EQ(result.value().sig[2], 0u);
+    EXPECT_EQ(result.value().sig[3], 1u);
+}
+
+TEST(ExprParserTest, RejectChainedPower) {
+    // Chained ** is rejected because the outer exponent is not a literal
+    auto result = ParseAndEvaluate("2 ** 2 ** 3", 64);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, CobraError::kParseError);
+}
+
+TEST(ExprParserTest, PowerInSubexpression) {
+    // 3*((x^y)**2) + 5*(x^y) — the motivating example from the issue
+    auto result = ParseAndEvaluate("3*((x^y)**2) + 5*(x^y)", 64);
+    ASSERT_TRUE(result.has_value());
+    // x=0,y=0: 3*0+5*0=0; x=1,y=0: 3*1+5*1=8;
+    // x=0,y=1: 3*1+5*1=8; x=1,y=1: 3*0+5*0=0
+    EXPECT_EQ(result.value().sig[0], 0u);
+    EXPECT_EQ(result.value().sig[1], 8u);
+    EXPECT_EQ(result.value().sig[2], 8u);
+    EXPECT_EQ(result.value().sig[3], 0u);
+}
+
+TEST(ExprParserTest, RejectVariableExponent) {
+    auto result = ParseAndEvaluate("x ** y", 64);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, CobraError::kParseError);
+}
+
+TEST(ExprParserTest, ParseToAstPowerSquare) {
+    auto result = ParseToAst("x ** 2", 64);
+    ASSERT_TRUE(result.has_value());
+    // x**2 expands to Mul(x, x)
+    EXPECT_EQ(result.value().expr->kind, Expr::Kind::kMul);
+    EXPECT_EQ(result.value().expr->children[0]->kind, Expr::Kind::kVariable);
+    EXPECT_EQ(result.value().expr->children[1]->kind, Expr::Kind::kVariable);
+}
+
+TEST(ExprParserTest, ParseToAstPowerZero) {
+    auto result = ParseToAst("x ** 0", 64);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result.value().expr->kind, Expr::Kind::kConstant);
+    EXPECT_EQ(result.value().expr->constant_val, 1u);
+}
+
+TEST(ExprParserTest, ParseToAstRejectVariableExponent) {
+    auto result = ParseToAst("x ** y", 64);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, CobraError::kParseError);
+}
+
+TEST(ExprParserTest, PowerIsNonLinear) {
+    EXPECT_FALSE(IsLinearMba("x ** 2"));
+    EXPECT_FALSE(IsLinearMba("(x ^ y) ** 3"));
+}
+
 TEST(ExprParserTest, ParseToAstVariableIndex) {
     // Variables sorted lexicographically: a=0, b=1, x=2
     auto result = ParseToAst("a + b + x", 64);
