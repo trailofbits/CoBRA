@@ -1,0 +1,36 @@
+#pragma once
+
+#include "cobra/core/Classification.h"
+#include "cobra/core/Expr.h"
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace cobra {
+
+    struct Diagnostic
+    {
+        Classification classification      = { .semantic = SemanticClass::kLinear,
+                                               .flags    = kSfNone,
+                                               .route    = Route::kBitwiseOnly };
+        Route attempted_route              = Route::kBitwiseOnly;
+        uint32_t rewrite_rounds            = 0;
+        bool rewrite_produced_candidate    = false;
+        bool candidate_failed_verification = false;
+        std::string reason;
+    };
+
+    struct SimplifyOutcome
+    {
+        enum class Kind { kSimplified, kUnchangedUnsupported, kError };
+
+        Kind kind = Kind::kSimplified;
+        std::unique_ptr< Expr > expr;
+        std::vector< uint64_t > sig_vector;
+        std::vector< std::string > real_vars;
+        bool verified = false;
+        Diagnostic diag;
+    };
+
+} // namespace cobra

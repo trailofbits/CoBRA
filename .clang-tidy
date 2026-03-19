@@ -1,0 +1,219 @@
+---
+# Google C++ Style Guide naming conventions
+# https://google.github.io/styleguide/cppguide.html#Naming
+#
+# misc-non-private-member-variables-in-classes: the options don't do anything
+# modernize-use-nodiscard: too aggressive, attribute is situationally useful
+Checks: "*,\
+  -google-readability-todo,\
+  -altera-*,\
+  -fuchsia-*,\
+  fuchsia-multiple-inheritance,\
+  -llvm-header-guard,\
+  -llvm-include-order,\
+  -llvmlibc-*,\
+  -modernize-use-nodiscard,\
+  -misc-non-private-member-variables-in-classes,\
+  -modernize-use-trailing-return-type,\
+  -readability-convert-member-functions-to-static, \
+  -misc-no-recursion, \
+  -google-build-using-namespace, \
+  -cppcoreguidelines-owning-memory, \
+  -readability-identifier-length, \
+  -readability-function-cognitive-complexity, \
+  -bugprone-easily-swappable-parameters, \
+  -portability-avoid-pragma-once, \
+  -cppcoreguidelines-avoid-magic-numbers, \
+  -readability-magic-numbers, \
+  -cppcoreguidelines-avoid-non-const-global-variables, \
+  -hicpp-signed-bitwise, \
+  -performance-enum-size, \
+  -cppcoreguidelines-pro-type-member-init, \
+  -hicpp-member-init, \
+  -llvm-prefer-static-over-anonymous-namespace, \
+  -bugprone-infinite-loop, \
+  -misc-include-cleaner, \
+  -readability-redundant-casting, \
+  -hicpp-uppercase-literal-suffix, \
+  -readability-uppercase-literal-suffix, \
+  -cppcoreguidelines-init-variables, \
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic, \
+  -misc-use-internal-linkage, \
+  -bugprone-branch-clone "
+HeaderFilterRegex: 'cobra/'
+WarningsAsErrors: ''
+CheckOptions:
+  - key: 'bugprone-argument-comment.StrictMode'
+    value: 'true'
+# Prefer using enum classes with 2 values for parameters instead of bools
+  - key: 'bugprone-argument-comment.CommentBoolLiterals'
+    value: 'true'
+  - key: 'bugprone-misplaced-widening-cast.CheckImplicitCasts'
+    value: 'true'
+  - key: 'bugprone-sizeof-expression.WarnOnSizeOfIntegerExpression'
+    value: 'true'
+  - key: 'bugprone-suspicious-string-compare.WarnOnLogicalNotComparison'
+    value: 'true'
+  - key: 'readability-simplify-boolean-expr.ChainedConditionalReturn'
+    value: 'true'
+  - key: 'readability-simplify-boolean-expr.ChainedConditionalAssignment'
+    value: 'true'
+  - key: 'readability-uniqueptr-delete-release.PreferResetCall'
+    value: 'true'
+  - key: 'cppcoreguidelines-init-variables.MathHeader'
+    value: '<cmath>'
+  - key: 'cppcoreguidelines-narrowing-conversions.PedanticMode'
+    value: 'true'
+  - key: 'readability-else-after-return.WarnOnUnfixable'
+    value: 'true'
+  - key: 'readability-else-after-return.WarnOnConditionVariables'
+    value: 'true'
+  - key: 'readability-inconsistent-declaration-parameter-name.Strict'
+    value: 'true'
+  - key: 'readability-qualified-auto.AddConstToQualified'
+    value: 'true'
+  - key: 'readability-redundant-access-specifiers.CheckFirstDeclaration'
+    value: 'true'
+# Google C++ Style: identifier naming conventions
+# Types: CamelCase
+# Functions/Methods: CamelCase
+# Variables/Parameters: lower_case
+# Class data members: lower_case_ (trailing underscore)
+# Struct data members: lower_case (no trailing underscore)
+# Constants/constexpr: kCamelCase
+# Enum values: kCamelCase
+# Macros: UPPER_CASE
+# Namespaces: lower_case
+  - key: 'readability-identifier-naming.AbstractClassCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.ClassCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.ClassConstantCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.ClassConstantPrefix'
+    value: 'k'
+  - key: 'readability-identifier-naming.ClassMemberCase'
+    value: 'lower_case'
+  - key: 'readability-identifier-naming.ClassMemberSuffix'
+    value: '_'
+  - key: 'readability-identifier-naming.ClassMethodCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.ConstantCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.ConstantPrefix'
+    value: 'k'
+  - key: 'readability-identifier-naming.ConstantMemberCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.ConstantMemberPrefix'
+    value: 'k'
+  - key: 'readability-identifier-naming.ConstantParameterCase'
+    value: 'lower_case'
+  - key: 'readability-identifier-naming.ConstantPointerParameterCase'
+    value: 'lower_case'
+  - key: 'readability-identifier-naming.ConstexprFunctionCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.ConstexprMethodCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.ConstexprVariableCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.ConstexprVariablePrefix'
+    value: 'k'
+  - key: 'readability-identifier-naming.EnumCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.EnumConstantCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.EnumConstantPrefix'
+    value: 'k'
+  - key: 'readability-identifier-naming.FunctionCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.GlobalConstantCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.GlobalConstantPrefix'
+    value: 'k'
+  - key: 'readability-identifier-naming.GlobalConstantPointerCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.GlobalConstantPointerPrefix'
+    value: 'k'
+  - key: 'readability-identifier-naming.GlobalFunctionCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.GlobalPointerCase'
+    value: 'lower_case'
+  - key: 'readability-identifier-naming.GlobalPointerSuffix'
+    value: ''
+  - key: 'readability-identifier-naming.GlobalVariableCase'
+    value: 'lower_case'
+  - key: 'readability-identifier-naming.InlineNamespaceCase'
+    value: 'lower_case'
+  - key: 'readability-identifier-naming.LocalConstantCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.LocalConstantPrefix'
+    value: 'k'
+  - key: 'readability-identifier-naming.LocalConstantPointerCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.LocalConstantPointerPrefix'
+    value: 'k'
+  - key: 'readability-identifier-naming.LocalPointerCase'
+    value: 'lower_case'
+  - key: 'readability-identifier-naming.LocalVariableCase'
+    value: 'lower_case'
+  - key: 'readability-identifier-naming.MacroDefinitionCase'
+    value: 'UPPER_CASE'
+  - key: 'readability-identifier-naming.MemberCase'
+    value: 'lower_case'
+  - key: 'readability-identifier-naming.MethodCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.NamespaceCase'
+    value: 'lower_case'
+  - key: 'readability-identifier-naming.ParameterCase'
+    value: 'lower_case'
+  - key: 'readability-identifier-naming.ParameterPackCase'
+    value: 'lower_case'
+  - key: 'readability-identifier-naming.PointerParameterCase'
+    value: 'lower_case'
+  - key: 'readability-identifier-naming.PrivateMemberCase'
+    value: 'lower_case'
+  - key: 'readability-identifier-naming.PrivateMemberSuffix'
+    value: '_'
+  - key: 'readability-identifier-naming.PrivateMethodCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.ProtectedMemberCase'
+    value: 'lower_case'
+  - key: 'readability-identifier-naming.ProtectedMemberSuffix'
+    value: '_'
+  - key: 'readability-identifier-naming.ProtectedMethodCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.PublicMemberCase'
+    value: 'lower_case'
+  - key: 'readability-identifier-naming.PublicMethodCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.ScopedEnumConstantCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.ScopedEnumConstantPrefix'
+    value: 'k'
+  - key: 'readability-identifier-naming.StaticConstantCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.StaticConstantPrefix'
+    value: 'k'
+  - key: 'readability-identifier-naming.StaticVariableCase'
+    value: 'lower_case'
+  - key: 'readability-identifier-naming.StructCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.TemplateParameterCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.TemplateTemplateParameterCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.TypeAliasCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.TypedefCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.TypeTemplateParameterCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.UnionCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.ValueTemplateParameterCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.VariableCase'
+    value: 'lower_case'
+  - key: 'readability-identifier-naming.VirtualMethodCase'
+    value: 'CamelCase'
+...

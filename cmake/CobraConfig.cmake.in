@@ -1,0 +1,15 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# cobra-verify links z3::libz3; consumers need the target available
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../z3/Z3Config.cmake")
+    # Forwarding config from superbuild
+    include("${CMAKE_CURRENT_LIST_DIR}/../z3/Z3Config.cmake")
+elseif(NOT TARGET z3::libz3)
+    find_dependency(Z3 CONFIG QUIET)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/CobraTargets.cmake")
+
+check_required_components(cobra)
