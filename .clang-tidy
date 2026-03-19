@@ -22,6 +22,7 @@ Checks: "*,\
   -readability-identifier-length, \
   -readability-function-cognitive-complexity, \
   -bugprone-easily-swappable-parameters "
+HeaderFilterRegex: 'cobra/'
 WarningsAsErrors: ''
 CheckOptions:
   - key: 'bugprone-argument-comment.StrictMode'

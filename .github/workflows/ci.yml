@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            cc: gcc-14
+            cxx: g++-14
+            name: Linux GCC
+            lint: false
+          - os: ubuntu-24.04
+            cc: clang-19
+            cxx: clang++-19
+            name: Linux Clang
+            lint: true
+          - os: macos-14
+            cc: clang
+            cxx: clang++
+            name: macOS
+            lint: false
+
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | sudo apt-key add -
+          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-19 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            llvm-19-dev clang-19 clang-format-19 clang-tidy-19 \
+            libz3-dev
+          echo "LLVM_DIR=/usr/lib/llvm-19/lib/cmake/llvm" >> "$GITHUB_ENV"
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install llvm@19 z3
+          LLVM_PREFIX="$(brew --prefix llvm@19)"
+          echo "${LLVM_PREFIX}/bin" >> "$GITHUB_PATH"
+          {
+            echo "LLVM_DIR=${LLVM_PREFIX}/lib/cmake/llvm"
+            echo "CC=${LLVM_PREFIX}/bin/clang"
+            echo "CXX=${LLVM_PREFIX}/bin/clang++"
+            echo "LDFLAGS=-L${LLVM_PREFIX}/lib/c++ -Wl,-rpath,${LLVM_PREFIX}/lib/c++"
+          } >> "$GITHUB_ENV"
+
+      - name: Cache GoogleTest
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        with:
+          path: build-deps/install
+          key: gtest-${{ matrix.os }}-${{ matrix.cc }}-v1.16.0
+
+      - name: Build dependencies
+        run: |
+          cmake -S dependencies -B build-deps \
+            -DCMAKE_C_COMPILER="${CC:-${{ matrix.cc }}}" \
+            -DCMAKE_CXX_COMPILER="${CXX:-${{ matrix.cxx }}}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DUSE_EXTERNAL_LLVM=ON
+          cmake --build build-deps
+
+      - name: Build CoBRA
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_C_COMPILER="${CC:-${{ matrix.cc }}}" \
+            -DCMAKE_CXX_COMPILER="${CXX:-${{ matrix.cxx }}}" \
+            -DCMAKE_PREFIX_PATH="$(pwd)/build-deps/install" \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: clang-format check
+        if: matrix.lint
+        run: |
+          find include lib tools \( -name '*.h' -o -name '*.cpp' \) -print0 \
+            | xargs -0 clang-format-19 --dry-run --Werror
+
+      - name: clang-tidy
+        if: matrix.lint
+        run: |
+          find lib tools -name '*.cpp' -print0 \
+            | xargs -0 clang-tidy-19 -p build

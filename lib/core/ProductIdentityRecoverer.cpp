@@ -39,7 +39,7 @@ namespace cobra {
             const size_t sig_len = 1ULL << num_vars;
 
             // Compute boolean signatures for all 4 factors
-            const const Expr *factors[4] = {
+            const Expr *factors[4] = {
                 add_node.children[0]->children[0].get(),
                 add_node.children[0]->children[1].get(),
                 add_node.children[1]->children[0].get(),

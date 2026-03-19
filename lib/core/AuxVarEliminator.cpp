@@ -85,7 +85,7 @@ namespace cobra {
             return supported;
         }
 
-        __attribute__((target("bmi2"))) std::vector< uint64_t > compact_signature_hw(
+        __attribute__((target("bmi2"))) std::vector< uint64_t > CompactSignatureHw(
             const std::vector< uint64_t > &sig, uint64_t live_mask, uint32_t num_vars
         ) {
             uint32_t new_count = static_cast< uint32_t >(std::popcount(live_mask));
@@ -122,9 +122,9 @@ namespace cobra {
         std::vector< uint64_t > reduced;
 #if COBRA_X86
         if (has_bmi2()) {
-            reduced = compact_signature_hw(sig, live_mask, num_vars);
+            reduced = CompactSignatureHw(sig, live_mask, num_vars);
         } else {
-            reduced = compact_signature_soft(sig, live_mask, num_vars);
+            reduced = CompactSignatureSoft(sig, live_mask, num_vars);
         }
 #else
         reduced = CompactSignatureSoft(sig, live_mask, num_vars);
