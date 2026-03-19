@@ -2,7 +2,7 @@
 
 CoBRA is validated against **72,646 expressions** drawn from **31 dataset files** spanning 6 independent sources. Every expression is parsed, simplified, and spot-checked at runtime. The numbers below are enforced by automated test assertions in [`test/verify/test_dataset_benchmarks.cpp`](test/verify/test_dataset_benchmarks.cpp) and verified on every CI run.
 
-**Overall: 69,380 / 69,480 parsed expressions simplified (99.86%), zero failures.**
+**Overall: 69,472 / 69,572 parsed expressions simplified (99.86%), zero failures.**
 
 ---
 
@@ -68,9 +68,9 @@ Each file contains 1,000 obfuscated linear MBA expressions plus a header comment
 |---------|:-----------:|:------:|:----------:|-------|:----:|
 | `pldi_linear.txt` | 1,012 | 1,008 | **1,008** | 4 comment headers skipped | **100%** |
 | `pldi_poly.txt` | 1,009 | 1,008 | **1,008** | 1 comment header skipped | **100%** |
-| `pldi_nonpoly.txt` | 1,005 | 899 | **899** | 106 skipped (2 comments + 104 unsolvable entries) | **100%** |
+| `pldi_nonpoly.txt` | 1,006 | 991 | **991** | 15 skipped (3 headers + 12 unsolvable) | **100%** |
 
-- **pldi_nonpoly**: Of the 899 parseable expressions, 844 are linear and 55 are polynomial — all handled by CoBRA's evaluator-assisted pipeline.
+- **pldi_nonpoly**: Of the 991 parseable expressions, 844 are linear, 55 are polynomial, and 92 are previously unsolvable mixed expressions (marked unsolvable by the original PLDI/SiMBA tooling) that CoBRA now handles. 12 expressions remain unsolvable due to polynomial-target CoB limitations.
 
 #### Other SiMBA Datasets
 
@@ -103,11 +103,11 @@ Source: [GAMBA](https://github.com/DenuvoSoftwareSolutions/GAMBA)
 
 | Metric | Count |
 |--------|------:|
-| Total dataset lines | 72,646 |
-| Comment/header lines skipped | 2,166 |
-| Unparseable lines (e.g., `**` operator) | 1,000 |
-| **Parsed expressions** | **69,480** |
-| **Simplified** | **69,380** |
+| Total dataset lines | 72,647 |
+| Comment/header lines skipped | 2,063 |
+| Unparseable lines (e.g., `**` operator, no ground truth) | 1,012 |
+| **Parsed expressions** | **69,572** |
+| **Simplified** | **69,472** |
 | Unsupported (by design) | 100 |
 | Errors / failures | **0** |
 
@@ -116,7 +116,7 @@ Source: [GAMBA](https://github.com/DenuvoSoftwareSolutions/GAMBA)
 | Linear | ~55,000 | ~55,000 | **100%** |
 | Semilinear | 1,000 | 1,000 | **100%** |
 | Polynomial | ~5,000 | ~5,000 | **100%** |
-| Mixed / Hybrid | ~8,480 | ~8,380 | **~99%** |
+| Mixed / Hybrid | ~8,572 | ~8,472 | **~99%** |
 
 All simplified results are validated via spot-check (random-input evaluation) at 64-bit width. When Z3 is available, full equivalence proofs are performed.
 

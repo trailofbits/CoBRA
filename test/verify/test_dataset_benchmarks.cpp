@@ -233,12 +233,12 @@ TEST(SiMBADataset, PLDIPoly) {
 
 TEST(SiMBADataset, PLDINonPoly) {
     auto stats = run_dataset(DATASET_DIR "/simba/pldi_nonpoly.txt");
-    // 2 comment lines + 104 lines in "#cannot be solved" section (no groundtruth)
+    // 1 comment header + 1 section header + 12 unsolvable lines (no groundtruth)
     EXPECT_EQ(stats.total, 1005);
-    EXPECT_EQ(stats.skipped_parse, 106);
-    EXPECT_EQ(stats.parsed, 899);
-    // 844 linear + 55 polynomial now handled by evaluator
-    EXPECT_EQ(stats.simplified, 899);
+    EXPECT_EQ(stats.skipped_parse, 14);
+    EXPECT_EQ(stats.parsed, 991);
+    // 844 linear + 55 polynomial + 92 previously unsolvable (now handled)
+    EXPECT_EQ(stats.simplified, 991);
     EXPECT_EQ(stats.unsupported, 0);
     EXPECT_EQ(stats.failed_simplify, 0);
 }
