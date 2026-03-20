@@ -76,6 +76,9 @@ namespace cobra {
             return Route::kMixedRewrite;
         }
         if (HasFlag(flags, kSfHasMixedProduct)) { return Route::kMixedRewrite; }
+        if (HasFlag(flags, kSfHasArithOverBitwise) && HasFlag(flags, kSfHasMul)) {
+            return Route::kMixedRewrite;
+        }
         // kSfHasMultivarHighPower is an informational flag, not an
         // automatic Unsupported. Pure polynomial multivar high power
         // (no hybrid blockers) is handled by the supported pipeline
