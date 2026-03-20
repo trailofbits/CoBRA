@@ -2,6 +2,7 @@
 #include "cobra/core/AuxVarEliminator.h"
 #include "cobra/core/Classification.h"
 #include "cobra/core/Classifier.h"
+#include "cobra/core/DecompositionEngine.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/MixedProductRewriter.h"
 #include "cobra/core/OperandSimplifier.h"
@@ -12,7 +13,6 @@
 #include "cobra/core/SignatureEval.h"
 #include "cobra/core/SignatureSimplifier.h"
 #include "cobra/core/SimplifyOutcome.h"
-#include "cobra/core/TemplateDecomposer.h"
 #include "cobra/core/Trace.h"
 #include <algorithm>
 #include <cstddef>
@@ -26,107 +26,6 @@
 namespace cobra {
 
     namespace {
-
-        Result< SimplifyOutcome > RunSupportedPipeline(
-            const std::vector< uint64_t > &sig, const std::vector< std::string > &vars,
-            const Options &opts
-        ) {
-            const auto kNumVars = static_cast< uint32_t >(vars.size());
-            COBRA_TRACE(
-                "Simplifier", "RunSupportedPipeline: vars={} bitwidth={} max_vars={}",
-                vars.size(), opts.bitwidth, opts.max_vars
-            );
-            COBRA_TRACE_SIG("Simplifier", "RunSupportedPipeline input sig", sig);
-
-            // Step 1: Prune constants
-            {
-                auto pm = MatchPattern(sig, kNumVars, opts.bitwidth);
-                if (pm && (*pm)->kind == Expr::Kind::kConstant) {
-                    COBRA_TRACE(
-                        "Simplifier", "RunSupportedPipeline: constant match val={}",
-                        (*pm)->constant_val
-                    );
-                    SimplifyOutcome outcome;
-                    outcome.kind       = SimplifyOutcome::Kind::kSimplified;
-                    outcome.expr       = std::move(*pm);
-                    outcome.sig_vector = sig;
-                    outcome.verified   = true;
-                    return Ok(std::move(outcome));
-                }
-            }
-
-            // Step 2: Eliminate auxiliary variables
-            auto elim                = EliminateAuxVars(sig, vars);
-            const auto kRealVarCount = static_cast< uint32_t >(elim.real_vars.size());
-            COBRA_TRACE(
-                "Simplifier",
-                "RunSupportedPipeline: after EliminateAuxVars real={} eliminated={}",
-                elim.real_vars.size(), elim.spurious_vars.size()
-            );
-
-            if (kRealVarCount > opts.max_vars) {
-                return Err< SimplifyOutcome >(
-                    CobraError::kTooManyVariables,
-                    "Variable count after elimination (" + std::to_string(kRealVarCount)
-                        + ") exceeds max_vars (" + std::to_string(opts.max_vars) + ")"
-                );
-            }
-
-            // Build SignatureContext with mapped evaluator
-            SignatureContext ctx; // NOLINT(misc-const-correctness)
-            ctx.vars = elim.real_vars;
-
-            ctx.original_indices.reserve(elim.real_vars.size());
-            for (const auto &real_var : elim.real_vars) {
-                for (size_t j = 0; j < vars.size(); ++j) {
-                    if (vars[j] == real_var) {
-                        ctx.original_indices.push_back(static_cast< uint32_t >(j));
-                        break;
-                    }
-                }
-            }
-
-            if (opts.evaluator) {
-                if (elim.real_vars.size() == vars.size()) {
-                    ctx.eval = opts.evaluator;
-                } else {
-                    auto idx_map = ctx.original_indices;
-                    ctx.eval     = [eval = opts.evaluator, idx_map = std::move(idx_map),
-                                    orig_sz = vars.size()](
-                                       const std::vector< uint64_t > &reduced_vals
-                                   ) -> uint64_t {
-                        std::vector< uint64_t > original_vals(orig_sz, 0);
-                        for (size_t i = 0; i < idx_map.size(); ++i) {
-                            original_vals[idx_map[i]] = reduced_vals[i];
-                        }
-                        return eval(original_vals);
-                    };
-                }
-            }
-
-            // Delegate to SignatureSimplifier
-            auto sub = SimplifyFromSignature(elim.reduced_sig, ctx, opts, 0);
-            COBRA_TRACE(
-                "Simplifier", "RunSupportedPipeline: SignatureSimplifier returned has_value={}",
-                sub.has_value()
-            );
-
-            if (sub.has_value()) {
-                SimplifyOutcome outcome;
-                outcome.kind       = SimplifyOutcome::Kind::kSimplified;
-                outcome.expr       = std::move(sub->expr);
-                outcome.sig_vector = elim.reduced_sig;
-                outcome.real_vars  = std::move(elim.real_vars);
-                outcome.verified   = sub->verified;
-                return Ok(std::move(outcome));
-            }
-
-            // Fallback: should not normally reach here since
-            // simplify_from_signature always produces a CoB result.
-            return Err< SimplifyOutcome >(
-                CobraError::kVerificationFailed, "SignatureSimplifier produced no result"
-            );
-        }
 
         void RemapVarIndices(Expr &expr, const std::vector< uint32_t > &index_map) {
             if (expr.kind == Expr::Kind::kVariable) {
@@ -230,105 +129,107 @@ namespace cobra {
             return e;
         }
 
-        // Check if an expression is Mul(var_or_linear, var_or_linear) that
-        // produces a non-affine product (i.e., involves distinct subtrees
-        // that are not constants).
-        bool IsVarProduct(const Expr &e) {
-            if (e.kind != Expr::Kind::kMul || e.children.size() != 2) { return false; }
-            // Both children must be either variables or simple expressions
-            // (not constants). A Mul(const, expr) is a scaled linear term,
-            // not a product we need to extract.
-            const bool kLhsConst = (e.children[0]->kind == Expr::Kind::kConstant);
-            const bool kRhsConst = (e.children[1]->kind == Expr::Kind::kConstant);
-            return !kLhsConst && !kRhsConst;
+    } // namespace
+
+    Result< SimplifyOutcome > RunSupportedPipeline(
+        const std::vector< uint64_t > &sig, const std::vector< std::string > &vars,
+        const Options &opts
+    ) {
+        const auto kNumVars = static_cast< uint32_t >(vars.size());
+        COBRA_TRACE(
+            "Simplifier", "RunSupportedPipeline: vars={} bitwidth={} max_vars={}", vars.size(),
+            opts.bitwidth, opts.max_vars
+        );
+        COBRA_TRACE_SIG("Simplifier", "RunSupportedPipeline input sig", sig);
+
+        // Step 1: Prune constants
+        {
+            auto pm = MatchPattern(sig, kNumVars, opts.bitwidth);
+            if (pm && (*pm)->kind == Expr::Kind::kConstant) {
+                COBRA_TRACE(
+                    "Simplifier", "RunSupportedPipeline: constant match val={}",
+                    (*pm)->constant_val
+                );
+                SimplifyOutcome outcome;
+                outcome.kind       = SimplifyOutcome::Kind::kSimplified;
+                outcome.expr       = std::move(*pm);
+                outcome.sig_vector = sig;
+                outcome.verified   = true;
+                return Ok(std::move(outcome));
+            }
         }
 
-        // Walk a left-leaning Add tree, collecting product terms and
-        // residual (non-product) terms. Handles Add, Neg-wrapped terms.
-        void SplitAddTree(
-            const Expr &e, std::vector< const Expr * > &products,
-            std::vector< std::unique_ptr< Expr > >
-                &residual // NOLINT(hicpp-named-parameter,readability-named-parameter)
-        ) {
-            if (e.kind == Expr::Kind::kAdd && e.children.size() == 2) {
-                SplitAddTree(*e.children[0], products, residual);
-                // rhs could be direct or negated
-                const Expr &rhs = *e.children[1];
-                if (IsVarProduct(rhs)) {
-                    products.push_back(&rhs);
-                } else if (
-                    rhs.kind == Expr::Kind::kNeg && rhs.children.size() == 1
-                    && IsVarProduct(*rhs.children[0])
-                )
-                {
-                    products.push_back(&rhs);
-                } else {
-                    residual.push_back(CloneExpr(rhs));
+        // Step 2: Eliminate auxiliary variables
+        auto elim                = EliminateAuxVars(sig, vars);
+        const auto kRealVarCount = static_cast< uint32_t >(elim.real_vars.size());
+        COBRA_TRACE(
+            "Simplifier", "RunSupportedPipeline: after EliminateAuxVars real={} eliminated={}",
+            elim.real_vars.size(), elim.spurious_vars.size()
+        );
+
+        if (kRealVarCount > opts.max_vars) {
+            return Err< SimplifyOutcome >(
+                CobraError::kTooManyVariables,
+                "Variable count after elimination (" + std::to_string(kRealVarCount)
+                    + ") exceeds max_vars (" + std::to_string(opts.max_vars) + ")"
+            );
+        }
+
+        // Build SignatureContext with mapped evaluator
+        SignatureContext ctx; // NOLINT(misc-const-correctness)
+        ctx.vars = elim.real_vars;
+
+        ctx.original_indices.reserve(elim.real_vars.size());
+        for (const auto &real_var : elim.real_vars) {
+            for (size_t j = 0; j < vars.size(); ++j) {
+                if (vars[j] == real_var) {
+                    ctx.original_indices.push_back(static_cast< uint32_t >(j));
+                    break;
                 }
-                return;
-            }
-            // Base case
-            if (IsVarProduct(e)) {
-                products.push_back(&e);
-            } else {
-                residual.push_back(CloneExpr(e));
             }
         }
 
-        // After product identity collapse, try splitting the expression
-        // into product terms + linear residual, simplify the residual
-        // separately via the standard pipeline, then recombine.
-        std::optional< SimplifyOutcome > TrySplitProductResidual(
-            const Expr &collapsed_expr, const std::vector< std::string > &vars,
-            const Options &opts, const Classification &cls
-        ) {
-            std::vector< const Expr * > products;
-            std::vector< std::unique_ptr< Expr > > residual;
-            SplitAddTree(collapsed_expr, products, residual);
-
-            if (products.empty() || residual.empty()) { return std::nullopt; }
-
-            // Build residual expression
-            auto residual_expr = std::move(residual[0]);
-            for (size_t i = 1; i < residual.size(); ++i) {
-                residual_expr = Expr::Add(std::move(residual_expr), std::move(residual[i]));
+        if (opts.evaluator) {
+            if (elim.real_vars.size() == vars.size()) {
+                ctx.eval = opts.evaluator;
+            } else {
+                auto idx_map = ctx.original_indices;
+                ctx.eval     = [eval = opts.evaluator, idx_map = std::move(idx_map),
+                                orig_sz = vars.size()](
+                                   const std::vector< uint64_t > &reduced_vals
+                               ) -> uint64_t {
+                    std::vector< uint64_t > original_vals(orig_sz, 0);
+                    for (size_t i = 0; i < idx_map.size(); ++i) {
+                        original_vals[idx_map[i]] = reduced_vals[i];
+                    }
+                    return eval(original_vals);
+                };
             }
+        }
 
-            // Compute residual signature and try the standard pipeline
-            const auto kNv = static_cast< uint32_t >(vars.size());
-            auto res_sig   = EvaluateBooleanSignature(*residual_expr, kNv, opts.bitwidth);
+        // Delegate to SignatureSimplifier
+        auto sub = SimplifyFromSignature(elim.reduced_sig, ctx, opts, 0);
+        COBRA_TRACE(
+            "Simplifier", "RunSupportedPipeline: SignatureSimplifier returned has_value={}",
+            sub.has_value()
+        );
 
-            auto res_result = RunSupportedPipeline(res_sig, vars, opts);
-            if (!res_result.has_value()) { return std::nullopt; }
-            if (res_result.value().kind != SimplifyOutcome::Kind::kSimplified) {
-                return std::nullopt;
-            }
-
-            // Recombine: products + simplified residual
-            auto combined = CloneExpr(*products[0]);
-            for (size_t i = 1; i < products.size(); ++i) {
-                combined = Expr::Add(std::move(combined), CloneExpr(*products[i]));
-            }
-            combined = Expr::Add(std::move(combined), std::move(res_result.value().expr));
-
-            // Verify the combined expression
-            if (opts.evaluator) {
-                auto check = FullWidthCheckEval(opts.evaluator, kNv, *combined, opts.bitwidth);
-                if (!check.passed) { return std::nullopt; }
-            }
-
+        if (sub.has_value()) {
             SimplifyOutcome outcome;
             outcome.kind       = SimplifyOutcome::Kind::kSimplified;
-            outcome.expr       = std::move(combined);
-            outcome.sig_vector = EvaluateBooleanSignature(*outcome.expr, kNv, opts.bitwidth);
-            outcome.real_vars  = std::vector< std::string >(vars.begin(), vars.end());
-            outcome.verified   = true;
-            outcome.diag.classification             = cls;
-            outcome.diag.rewrite_produced_candidate = true;
-            return outcome;
+            outcome.expr       = std::move(sub->expr);
+            outcome.sig_vector = elim.reduced_sig;
+            outcome.real_vars  = std::move(elim.real_vars);
+            outcome.verified   = sub->verified;
+            return Ok(std::move(outcome));
         }
 
-    } // namespace
+        // Fallback: should not normally reach here since
+        // simplify_from_signature always produces a CoB result.
+        return Err< SimplifyOutcome >(
+            CobraError::kVerificationFailed, "SignatureSimplifier produced no result"
+        );
+    }
 
     Result< SimplifyOutcome > Simplify(
         const std::vector< uint64_t > &sig, const std::vector< std::string > &vars,
@@ -486,101 +387,37 @@ namespace cobra {
                             return reentry;
                         }
                     }
-
-                    // Step 2.5b: Split product + linear residual.
-                    // After collapse, the expression may be
-                    // x*y + linear_mba. Split off product terms,
-                    // simplify the linear residual separately,
-                    // then recombine.
-                    auto split = TrySplitProductResidual(*current_expr, vars, opts, cls);
-                    COBRA_TRACE(
-                        "Simplifier", "MixedRewrite step 2.5b: split product+residual found={}",
-                        split.has_value()
-                    );
-                    if (split.has_value()) { return Ok(std::move(*split)); }
                 }
 
-                // Step 2.75: Template decomposition fallback.
-                // Evaluator-based; does not depend on AST form.
+                // Phase 2: Decomposition engine
                 {
-                    auto elim           = EliminateAuxVars(working_sig, vars);
-                    const auto kRvCount = static_cast< uint32_t >(elim.real_vars.size());
-
-                    SignatureContext ctx; // NOLINT(misc-const-correctness)
-                    ctx.vars = elim.real_vars;
-                    ctx.original_indices.reserve(elim.real_vars.size());
-                    for (const auto &real_var : elim.real_vars) {
-                        for (size_t j = 0; j < vars.size(); ++j) {
-                            if (vars[j] == real_var) {
-                                ctx.original_indices.push_back(static_cast< uint32_t >(j));
-                                break;
-                            }
-                        }
-                    }
-                    if (elim.real_vars.size() == vars.size()) {
-                        ctx.eval = opts.evaluator;
-                    } else {
-                        auto idx = ctx.original_indices;
-                        ctx.eval = [eval = opts.evaluator, idx, n = vars.size()](
-                                       const std::vector< uint64_t > &rv
-                                   ) -> uint64_t {
-                            std::vector< uint64_t > full(n, 0);
-                            for (size_t i = 0; i < idx.size(); ++i) { full[idx[i]] = rv[i]; }
-                            return eval(full);
-                        };
-                    }
-
-                    auto td = TryTemplateDecomposition(ctx, opts, kRvCount, nullptr);
+                    auto post_cls   = ClassifyStructural(*current_expr);
+                    auto decomp_sig = (op_result.changed || pi_result.changed)
+                        ? EvaluateBooleanSignature(
+                              *current_expr, static_cast< uint32_t >(vars.size()), opts.bitwidth
+                          )
+                        : working_sig;
+                    DecompositionContext dctx{
+                        .opts         = opts,
+                        .vars         = vars,
+                        .sig          = decomp_sig,
+                        .current_expr = current_expr.get(),
+                        .cls          = post_cls,
+                    };
+                    auto decomp = TryDecomposition(dctx);
                     COBRA_TRACE(
-                        "Simplifier",
-                        "MixedRewrite step 2.75: template decomposition (reduced) found={}",
-                        td.has_value()
+                        "Simplifier", "MixedRewrite Phase 2: decomposition found={}",
+                        decomp.has_value()
                     );
-                    if (td.has_value()) {
-                        auto check = VerifyInOriginalSpace(
-                            opts.evaluator, vars, elim.real_vars, *td->expr, opts.bitwidth
-                        );
-                        if (check.passed) {
-                            SimplifyOutcome outcome;
-                            outcome.kind                = SimplifyOutcome::Kind::kSimplified;
-                            outcome.expr                = std::move(td->expr);
-                            outcome.sig_vector          = elim.reduced_sig;
-                            outcome.real_vars           = std::move(elim.real_vars);
-                            outcome.verified            = td->verified;
-                            outcome.diag.classification = cls;
-                            return Ok(std::move(outcome));
-                        }
-                    }
-
-                    // Reduced-var decomposition was rejected — try
-                    // with all variables (catches cases where aux var
-                    // elimination incorrectly dropped a variable).
-                    if (elim.real_vars.size() < vars.size()) {
-                        SignatureContext full_ctx; // NOLINT(misc-const-correctness)
-                        full_ctx.vars = vars;
-                        full_ctx.original_indices.resize(vars.size());
-                        for (uint32_t vi = 0; vi < vars.size(); ++vi) {
-                            full_ctx.original_indices[vi] = vi;
-                        }
-                        full_ctx.eval = opts.evaluator;
-
-                        const auto kAllVars = static_cast< uint32_t >(vars.size());
-                        auto td2 = TryTemplateDecomposition(full_ctx, opts, kAllVars, nullptr);
-                        COBRA_TRACE(
-                            "Simplifier",
-                            "MixedRewrite step 2.75: template decomposition (full) found={}",
-                            td2.has_value()
-                        );
-                        if (td2.has_value()) {
-                            SimplifyOutcome outcome;
-                            outcome.kind                = SimplifyOutcome::Kind::kSimplified;
-                            outcome.expr                = std::move(td2->expr);
-                            outcome.sig_vector          = working_sig;
-                            outcome.real_vars           = { vars.begin(), vars.end() };
-                            outcome.verified            = td2->verified;
-                            outcome.diag.classification = cls;
-                            return Ok(std::move(outcome));
-                        }
+                    if (decomp.has_value()) {
+                        SimplifyOutcome outcome;
+                        outcome.kind                = SimplifyOutcome::Kind::kSimplified;
+                        outcome.expr                = std::move(decomp->expr);
+                        outcome.sig_vector          = decomp_sig;
+                        outcome.real_vars           = { vars.begin(), vars.end() };
+                        outcome.verified            = true;
+                        outcome.diag.classification = cls;
+                        return Ok(std::move(outcome));
                     }
                 }
 

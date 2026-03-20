@@ -28,7 +28,7 @@ cobra_add_test(test_bit_partitioner core/test_bit_partitioner.cpp)
 cobra_add_test(test_masked_atom_reconstructor core/test_masked_atom_reconstructor.cpp)
 cobra_add_test(test_self_check core/test_self_check.cpp)
 cobra_add_test(test_coefficient_splitter core/test_coefficient_splitter.cpp)
-cobra_add_test(test_exponent_tuple core/test_exponent_tuple.cpp)
+cobra_add_test(test_monomial_key core/test_monomial_key.cpp)
 cobra_add_test(test_arithmetic_lowering core/test_arithmetic_lowering.cpp)
 cobra_add_test(test_poly_normalizer core/test_poly_normalizer.cpp)
 cobra_add_test(test_poly_expr_builder core/test_poly_expr_builder.cpp)
@@ -47,6 +47,10 @@ cobra_add_test(test_hybrid_decomposer core/test_hybrid_decomposer.cpp)
 cobra_add_test(test_operand_simplifier core/test_operand_simplifier.cpp)
 cobra_add_test(test_product_identity_recoverer core/test_product_identity_recoverer.cpp)
 cobra_add_test(test_template_decomposer core/test_template_decomposer.cpp)
+cobra_add_test(test_decomposition_engine core/test_decomposition_engine.cpp)
+cobra_add_test(test_ghost_basis core/test_ghost_basis.cpp)
+cobra_add_test(test_ghost_residual_solver core/test_ghost_residual_solver.cpp)
+cobra_add_test(test_weighted_poly_fit core/test_weighted_poly_fit.cpp)
 
 # ProductIdentityRecoverer diagnostic against real datasets.
 # Not registered with gtest_discover_tests — run manually:
@@ -109,6 +113,15 @@ target_link_libraries(test_qsynth_diagnostic PRIVATE cobra-core GTest::gtest_mai
 target_include_directories(test_qsynth_diagnostic PRIVATE
     ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
 target_compile_definitions(test_qsynth_diagnostic PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
+# QSynth trace dive (manual, not auto-discovered)
+add_executable(test_qsynth_trace_dive verify/test_qsynth_trace_dive.cpp
+               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(test_qsynth_trace_dive PRIVATE cobra-core GTest::gtest_main)
+target_include_directories(test_qsynth_trace_dive PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+target_compile_definitions(test_qsynth_trace_dive PRIVATE
     DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
 
 # ExprParser test needs access to tools/cobra-cli headers

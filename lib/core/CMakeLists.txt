@@ -38,6 +38,10 @@ target_sources(cobra-core PRIVATE
     BitwiseDecomposer.cpp
     HybridDecomposer.cpp
     TemplateDecomposer.cpp
+    DecompositionEngine.cpp
+    GhostBasis.cpp
+    GhostResidualSolver.cpp
+    WeightedPolyFit.cpp
 )
 
 target_include_directories(cobra-core PUBLIC
