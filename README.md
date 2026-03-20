@@ -4,7 +4,7 @@
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)](https://en.cppreference.com/w/cpp/23)
-[![Tests](https://img.shields.io/badge/tests-846-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-858-brightgreen.svg)](#testing)
 
 CoBRA deobfuscates expressions that interleave arithmetic (`+`, `-`, `*`) with bitwise (`&`, `|`, `^`, `~`) and shift (`<<`, `>>`) operators — a technique commonly used in software obfuscation.
 
@@ -157,12 +157,12 @@ lib/llvm/                LLVM pass plugin (CobraPass, MBADetector, IRReconstruct
 lib/verify/              Z3-based equivalence verification
 include/cobra/           Public headers
 tools/cobra-cli/         CLI frontend and expression parser
-test/                    846 tests across 47 test files (unit + integration + dataset benchmarks)
+test/                    858 tests across 47 test files (unit + integration + dataset benchmarks)
 ```
 
 ## Testing
 
-CoBRA has 846 tests covering unit, integration, and dataset benchmarks:
+CoBRA has 858 tests covering unit, integration, and dataset benchmarks:
 
 ```bash
 # Run all tests
@@ -175,7 +175,7 @@ ctest --test-dir build -R test_simplifier --output-on-failure
 ctest --test-dir build -V
 ```
 
-Dataset benchmarks validate against real-world obfuscated expressions from QSynth and PLDI datasets. See [DATASETS.md](DATASETS.md) for the full benchmark report — 69,472 expressions simplified across 31 dataset files from 6 independent sources, with zero failures.
+Dataset benchmarks validate against real-world obfuscated expressions from QSynth and PLDI datasets. See [DATASETS.md](DATASETS.md) for the full benchmark report — 69,477 expressions simplified across 31 dataset files from 6 independent sources, with zero failures.
 
 ## Known Limitations
 
