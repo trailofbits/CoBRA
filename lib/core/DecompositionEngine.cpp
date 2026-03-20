@@ -95,8 +95,14 @@ namespace cobra {
     }
 
     bool AcceptCore(const DecompositionContext &ctx, const CoreCandidate &core) {
-        if (!core.expr) { return false; }
-        if (core.expr->kind == Expr::Kind::kConstant) { return false; }
+        if (!core.expr) {
+            COBRA_TRACE("AcceptCore", "rejected: null expression");
+            return false;
+        }
+        if (core.expr->kind == Expr::Kind::kConstant) {
+            COBRA_TRACE("AcceptCore", "rejected: constant core");
+            return false;
+        }
 
         const auto kNv       = static_cast< uint32_t >(ctx.vars.size());
         const uint32_t kBw   = ctx.opts.bitwidth;
@@ -117,8 +123,14 @@ namespace cobra {
             if (kRes != kOrig) { all_same_as_orig = false; }
             if (kRes != 0) { all_zero = false; }
         }
-        if (all_same_as_orig) { return false; }
-        if (all_zero) { return false; }
+        if (all_same_as_orig) {
+            COBRA_TRACE("AcceptCore", "rejected: core is zero (residual == original)");
+            return false;
+        }
+        if (all_zero) {
+            COBRA_TRACE("AcceptCore", "rejected: core equals original (residual == 0)");
+            return false;
+        }
 
         // Non-trivial core that changes the function — let residual solvers
         // decide whether the decomposition is useful.
@@ -259,6 +271,11 @@ namespace cobra {
                 return result;
             }
 
+            COBRA_TRACE(
+                "DecompEngine", "Direct check failed for kind={}, entering residual pipeline",
+                static_cast< int >(core.kind)
+            );
+
             // Accept screen (polynomial extractors only)
             if (core.kind == ExtractorKind::kPolynomial && !AcceptCore(ctx, core)) {
                 COBRA_TRACE("DecompEngine", "AcceptCore rejected polynomial core");
@@ -290,6 +307,11 @@ namespace cobra {
                 }
             }
 
+            COBRA_TRACE(
+                "DecompEngine", "Residual: support={} degree_floor={}", kResRealCount,
+                degree_floor
+            );
+
             bool is_ghost =
                 IsBooleanNullResidual(residual_eval, res_support, kNv, kBw, residual_sig);
 
@@ -319,6 +341,13 @@ namespace cobra {
                             result.core_degree    = core.degree_used;
                             return result;
                         }
+                        COBRA_TRACE("DecompEngine", "Ghost PolyRecovery: recombination failed");
+                    } else {
+                        COBRA_TRACE(
+                            "DecompEngine",
+                            "Ghost PolyRecovery: no polynomial recovered (dfloor={})",
+                            degree_floor
+                        );
                     }
                 }
 
@@ -339,6 +368,11 @@ namespace cobra {
                             result.core_degree    = core.degree_used;
                             return result;
                         }
+                        COBRA_TRACE(
+                            "DecompEngine", "Ghost GhostResidual: recombination failed"
+                        );
+                    } else {
+                        COBRA_TRACE("DecompEngine", "Ghost GhostResidual: no solution");
                     }
                 }
 
@@ -362,6 +396,11 @@ namespace cobra {
                             result.core_degree    = core.degree_used;
                             return result;
                         }
+                        COBRA_TRACE(
+                            "DecompEngine", "Ghost FactoredGhost: recombination failed"
+                        );
+                    } else {
+                        COBRA_TRACE("DecompEngine", "Ghost FactoredGhost: no solution");
                     }
                 }
 
@@ -407,10 +446,20 @@ namespace cobra {
                             result.core_degree    = core.degree_used;
                             return result;
                         }
+                        COBRA_TRACE(
+                            "DecompEngine", "Ghost TemplateDecomp: recombination failed"
+                        );
+                    } else {
+                        COBRA_TRACE("DecompEngine", "Ghost TemplateDecomp: no solution");
                     }
                 }
+                COBRA_TRACE(
+                    "DecompEngine", "Ghost path: all solvers failed for kind={}",
+                    static_cast< int >(core.kind)
+                );
             } else {
                 // Standard routing (non-ghost residual)
+                COBRA_TRACE("DecompEngine", "Standard residual routing");
 
                 // Residual solver 1: Supported pipeline
                 {
@@ -451,6 +500,11 @@ namespace cobra {
                             result.core_degree    = core.degree_used;
                             return result;
                         }
+                        COBRA_TRACE(
+                            "DecompEngine", "SupportedPipeline: solved but recombination failed"
+                        );
+                    } else {
+                        COBRA_TRACE("DecompEngine", "SupportedPipeline: residual unsupported");
                     }
                 }
 
@@ -476,7 +530,17 @@ namespace cobra {
                             result.core_degree    = core.degree_used;
                             return result;
                         }
+                        COBRA_TRACE("DecompEngine", "PolyRecovery: recombination failed");
+                    } else {
+                        COBRA_TRACE(
+                            "DecompEngine", "PolyRecovery: no polynomial recovered (dfloor={})",
+                            degree_floor
+                        );
                     }
+                } else {
+                    COBRA_TRACE(
+                        "DecompEngine", "PolyRecovery: skipped (support={} > 6)", kResRealCount
+                    );
                 }
 
                 // Residual solver 3: Template decomposition
@@ -522,8 +586,15 @@ namespace cobra {
                             result.core_degree    = core.degree_used;
                             return result;
                         }
+                        COBRA_TRACE("DecompEngine", "TemplateDecomp: recombination failed");
+                    } else {
+                        COBRA_TRACE("DecompEngine", "TemplateDecomp: no solution");
                     }
                 }
+                COBRA_TRACE(
+                    "DecompEngine", "Standard path: all solvers failed for kind={}",
+                    static_cast< int >(core.kind)
+                );
             }
 
             return std::nullopt;
@@ -536,6 +607,9 @@ namespace cobra {
                 COBRA_TRACE("DecompEngine", "Trying ProductAST core");
                 auto result = TryCore(*core);
                 if (result.has_value()) { return result; }
+                COBRA_TRACE("DecompEngine", "ProductAST core: all solvers exhausted");
+            } else {
+                COBRA_TRACE("DecompEngine", "ProductAST: no core extracted");
             }
         }
 
@@ -546,6 +620,9 @@ namespace cobra {
                 COBRA_TRACE("DecompEngine", "Trying Polynomial D=2 core");
                 auto result = TryCore(*core);
                 if (result.has_value()) { return result; }
+                COBRA_TRACE("DecompEngine", "Polynomial D=2 core: all solvers exhausted");
+            } else {
+                COBRA_TRACE("DecompEngine", "Polynomial D=2: no core extracted");
             }
         }
 
@@ -556,6 +633,9 @@ namespace cobra {
                 COBRA_TRACE("DecompEngine", "Trying Template core");
                 auto result = TryCore(*core);
                 if (result.has_value()) { return result; }
+                COBRA_TRACE("DecompEngine", "Template core: all solvers exhausted");
+            } else {
+                COBRA_TRACE("DecompEngine", "Template: no core extracted");
             }
         }
 
@@ -566,6 +646,9 @@ namespace cobra {
                 COBRA_TRACE("DecompEngine", "Trying Polynomial D=3 core");
                 auto result = TryCore(*core);
                 if (result.has_value()) { return result; }
+                COBRA_TRACE("DecompEngine", "Polynomial D=3 core: all solvers exhausted");
+            } else {
+                COBRA_TRACE("DecompEngine", "Polynomial D=3: no core extracted");
             }
         }
 
@@ -576,6 +659,9 @@ namespace cobra {
                 COBRA_TRACE("DecompEngine", "Trying Polynomial D=4 core");
                 auto result = TryCore(*core);
                 if (result.has_value()) { return result; }
+                COBRA_TRACE("DecompEngine", "Polynomial D=4 core: all solvers exhausted");
+            } else {
+                COBRA_TRACE("DecompEngine", "Polynomial D=4: no core extracted");
             }
         }
 

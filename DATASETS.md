@@ -91,11 +91,11 @@ Source: [GAMBA](https://github.com/DenuvoSoftwareSolutions/GAMBA)
 | `mba_obf_linear.txt` | GAMBA | 1,001 | 1,000 | **1,000** | 0 | **100%** |
 | `mba_obf_nonlinear.txt` | GAMBA | 1,002 | 1,000 | **1,000** | 0 | **100%** |
 | `syntia.txt` | Syntia | 501 | 500 | **500** | 0 | **100%** |
-| `qsynth_ea.txt` | QSynth | 501 | 500 | **384** | 116 | **76.8%** |
+| `qsynth_ea.txt` | QSynth | 501 | 500 | **406** | 94 | **81.2%** |
 
 - **loki_tiny**: 25 sections covering add, subtract, AND, OR, XOR at depths 1-5. All 25,000 are 2-variable linear MBAs.
 - **mba_obf_nonlinear**: 500 polynomial + 500 linear expressions, all with linear ground-truth targets. All 1,000 pass full-width verification.
-- **qsynth_ea**: The most challenging dataset. 384 of 500 expressions simplify via the multi-step MixedRewrite pipeline and decomposition engine. The 116 unsupported expressions involve complex shift operations and deeply nested mixed products that fall outside current rewrite coverage.
+- **qsynth_ea**: The most challenging dataset. 406 of 500 expressions simplify via the multi-step MixedRewrite pipeline and decomposition engine. The 94 unsupported expressions involve complex shift operations and deeply nested mixed products that fall outside current rewrite coverage.
 
 ---
 
@@ -107,8 +107,8 @@ Source: [GAMBA](https://github.com/DenuvoSoftwareSolutions/GAMBA)
 | Comment/header lines skipped | 2,062 |
 | Non-expression lines (headers, no ground truth) | 990 |
 | **Parsed expressions** | **69,594** |
-| **Simplified** | **69,478** |
-| Unsupported (by design) | 116 |
+| **Simplified** | **69,500** |
+| Unsupported (by design) | 94 |
 | Errors / failures | **0** |
 
 | MBA Class | Expressions | Simplified | Rate |

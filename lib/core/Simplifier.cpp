@@ -318,6 +318,35 @@ namespace cobra {
                     }
                 }
 
+                // Step 1.5: Early decomposition on original AST
+                // Product cores that directly equal f(x) exist in the
+                // original obfuscated form but are destroyed by operand
+                // simplification, so try decomposition before preconditioning.
+                {
+                    DecompositionContext early_dctx{
+                        .opts         = opts,
+                        .vars         = vars,
+                        .sig          = working_sig,
+                        .current_expr = working_expr,
+                        .cls          = cls,
+                    };
+                    auto early_decomp = TryDecomposition(early_dctx);
+                    COBRA_TRACE(
+                        "Simplifier", "MixedRewrite step 1.5: early decomposition found={}",
+                        early_decomp.has_value()
+                    );
+                    if (early_decomp.has_value()) {
+                        SimplifyOutcome outcome;
+                        outcome.kind                = SimplifyOutcome::Kind::kSimplified;
+                        outcome.expr                = std::move(early_decomp->expr);
+                        outcome.sig_vector          = working_sig;
+                        outcome.real_vars           = { vars.begin(), vars.end() };
+                        outcome.verified            = true;
+                        outcome.diag.classification = cls;
+                        return Ok(std::move(outcome));
+                    }
+                }
+
                 // State: best current expression for subsequent steps
                 auto current_expr = CloneExpr(*working_expr);
 

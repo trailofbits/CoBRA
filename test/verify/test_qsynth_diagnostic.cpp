@@ -1,11 +1,14 @@
 #include "ExprParser.h"
 #include "cobra/core/AuxVarEliminator.h"
+#include "cobra/core/BitWidth.h"
 #include "cobra/core/Classifier.h"
 #include "cobra/core/DecompositionEngine.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/GhostBasis.h"
 #include "cobra/core/GhostResidualSolver.h"
 #include "cobra/core/MultivarPolyRecovery.h"
+#include "cobra/core/OperandSimplifier.h"
+#include "cobra/core/ProductIdentityRecoverer.h"
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/SignatureEval.h"
 #include "cobra/core/SignatureSimplifier.h"
@@ -15,6 +18,7 @@
 #include <fstream>
 #include <gtest/gtest.h>
 #include <map>
+#include <random>
 #include <string>
 
 using namespace cobra;
@@ -552,9 +556,70 @@ TEST(QSynthDiagnostic, DecompEngineTelemetry) {
                       << " tmpl_ok=" << probe->tmpl_solved
                       << " tmpl_fw=" << probe->tmpl_recombines << "\n";
         } else {
-            std::string reason = any_core ? "all_direct_fail" : "no_core";
-            failure_reasons[reason]++;
-            std::cerr << "  " << label << " " << reason << "\n";
+            if (!any_core) {
+                failure_reasons["no_core"]++;
+                std::cerr << "  " << label << " no_core\n";
+            } else {
+                // Per-extractor rejection analysis for all_direct_fail
+                failure_reasons["all_direct_fail"]++;
+                std::cerr << "  " << label << " all_direct_fail:";
+
+                auto classify_rejection = [&](CoreCandidate &core,
+                                              const std::string &name) -> std::string {
+                    const auto kNv     = static_cast< uint32_t >(vars.size());
+                    const uint32_t kBw = 64;
+
+                    auto direct = FullWidthCheckEval(opts.evaluator, kNv, *core.expr, kBw);
+                    if (direct.passed) { return "direct_success"; }
+
+                    if (core.kind != ExtractorKind::kPolynomial) {
+                        return "not_poly_not_direct";
+                    }
+
+                    if (!core.expr) { return "null_expr"; }
+                    if (core.expr->kind == Expr::Kind::kConstant) { return "constant_core"; }
+
+                    auto residual_eval =
+                        BuildResidualEvaluator(opts.evaluator, *core.expr, kBw);
+                    const uint64_t kMask = Bitmask(kBw);
+
+                    std::mt19937_64 rng(0xDECAF);
+                    bool all_same_as_orig = true;
+                    bool all_zero         = true;
+                    for (int p = 0; p < 5; ++p) {
+                        std::vector< uint64_t > point(kNv);
+                        for (uint32_t i = 0; i < kNv; ++i) { point[i] = rng() & kMask; }
+                        const uint64_t kOrig = opts.evaluator(point) & kMask;
+                        const uint64_t kRes  = residual_eval(point);
+                        if (kRes != kOrig) { all_same_as_orig = false; }
+                        if (kRes != 0) { all_zero = false; }
+                    }
+                    if (all_same_as_orig) { return "core_is_zero"; }
+                    if (all_zero) { return "core_equals_original"; }
+                    return "accepted_but_no_probe";
+                };
+
+                struct ExtractorInfo
+                {
+                    std::optional< CoreCandidate > *core;
+                    std::string name;
+                };
+
+                std::vector< ExtractorInfo > extractors = {
+                    { &prod,  "Product" },
+                    {   &p2,    "Poly2" },
+                    { &tmpl, "Template" },
+                    {   &p3,    "Poly3" },
+                    {   &p4,    "Poly4" },
+                };
+                for (auto &[core_opt, name] : extractors) {
+                    if (!core_opt->has_value()) { continue; }
+                    auto reason = classify_rejection(core_opt->value(), name);
+                    std::cerr << " " << name << "=" << reason;
+                    failure_reasons["adf_" + name + "_" + reason]++;
+                }
+                std::cerr << "\n";
+            }
         }
     }
 
@@ -579,6 +644,118 @@ TEST(QSynthDiagnostic, DecompEngineTelemetry) {
     std::cerr << "\n--- Failure reasons ---\n";
     for (auto &[k, v] : failure_reasons) { std::cerr << "  " << k << ": " << v << "\n"; }
 
+    std::cerr << "\n";
+}
+
+TEST(QSynthDiagnostic, DirectSuccessProductCoreInvestigation) {
+    // Investigate the 9 all_direct_fail/Product=direct_success cases.
+    // Compare product core extraction on original folded AST vs.
+    // post-preconditioning (Step 2 + Step 2.5) current_expr.
+    std::ifstream file(DATASET_DIR "/gamba/qsynth_ea.txt");
+    ASSERT_TRUE(file.is_open());
+
+    // Lines identified as direct_success product cores
+    const std::set< int > target_lines = { 50, 88, 144, 223, 384, 388, 458, 466, 501 };
+
+    std::string line;
+    int line_num        = 0;
+    int confirmed_miss  = 0;
+    int precond_destroy = 0;
+
+    while (std::getline(file, line)) {
+        ++line_num;
+        if (target_lines.find(line_num) == target_lines.end()) { continue; }
+        if (line.empty()) { continue; }
+
+        size_t sep = find_separator(line);
+        if (sep == std::string::npos) { continue; }
+
+        std::string obfuscated = trim(line.substr(0, sep));
+        if (obfuscated.empty()) { continue; }
+
+        auto parse_result = ParseAndEvaluate(obfuscated, 64);
+        ASSERT_TRUE(parse_result.has_value()) << "L" << line_num;
+
+        auto ast_result = ParseToAst(obfuscated, 64);
+        ASSERT_TRUE(ast_result.has_value()) << "L" << line_num;
+
+        auto folded = FoldConstantBitwise(std::move(ast_result.value().expr), 64);
+
+        const auto &sig  = parse_result.value().sig;
+        const auto &vars = parse_result.value().vars;
+        const auto kNv   = static_cast< uint32_t >(vars.size());
+
+        auto folded_ptr = std::make_shared< std::unique_ptr< Expr > >(CloneExpr(*folded));
+        Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+        opts.evaluator = [folded_ptr](const std::vector< uint64_t > &v) -> uint64_t {
+            return EvalExpr(**folded_ptr, v, 64);
+        };
+
+        std::string label = "L" + std::to_string(line_num);
+
+        // --- Phase A: product core on original folded AST ---
+        auto orig_cls = ClassifyStructural(*folded);
+        DecompositionContext orig_dctx{ .opts         = opts,
+                                        .vars         = vars,
+                                        .sig          = sig,
+                                        .current_expr = folded.get(),
+                                        .cls          = orig_cls };
+        auto orig_prod     = ExtractProductCore(orig_dctx);
+        bool orig_has_core = orig_prod.has_value();
+        bool orig_direct   = false;
+        if (orig_has_core) {
+            auto check  = FullWidthCheckEval(opts.evaluator, kNv, *orig_prod->expr, 64);
+            orig_direct = check.passed;
+        }
+
+        // --- Phase B: apply preconditioning (Step 2 + 2.5) ---
+        auto current_expr = CloneExpr(*folded);
+        auto op_result    = SimplifyMixedOperands(std::move(current_expr), vars, opts);
+        current_expr      = std::move(op_result.expr);
+        auto pi_result    = CollapseProductIdentities(std::move(current_expr), vars, opts);
+        current_expr      = std::move(pi_result.expr);
+
+        // --- Phase C: product core on post-preconditioning expr ---
+        auto post_cls = ClassifyStructural(*current_expr);
+        auto post_sig = (op_result.changed || pi_result.changed)
+            ? EvaluateBooleanSignature(*current_expr, kNv, 64)
+            : sig;
+        DecompositionContext post_dctx{
+            .opts         = opts,
+            .vars         = vars,
+            .sig          = post_sig,
+            .current_expr = current_expr.get(),
+            .cls          = post_cls,
+        };
+        auto post_prod     = ExtractProductCore(post_dctx);
+        bool post_has_core = post_prod.has_value();
+        bool post_direct   = false;
+        if (post_has_core) {
+            auto check  = FullWidthCheckEval(opts.evaluator, kNv, *post_prod->expr, 64);
+            post_direct = check.passed;
+        }
+
+        // --- Phase D: does TryDecomposition succeed? ---
+        auto orig_decomp = TryDecomposition(orig_dctx);
+        auto post_decomp = TryDecomposition(post_dctx);
+
+        std::cerr << "  " << label << " orig_core=" << orig_has_core
+                  << " orig_direct=" << orig_direct
+                  << " orig_decomp=" << orig_decomp.has_value()
+                  << " step2=" << op_result.changed << " step2.5=" << pi_result.changed
+                  << " post_core=" << post_has_core << " post_direct=" << post_direct
+                  << " post_decomp=" << post_decomp.has_value();
+        if (orig_has_core) { std::cerr << " orig_expr=" << Render(*orig_prod->expr, vars, 64); }
+        if (post_has_core) { std::cerr << " post_expr=" << Render(*post_prod->expr, vars, 64); }
+        std::cerr << "\n";
+
+        if (orig_direct && !post_has_core) { precond_destroy++; }
+        if (orig_decomp.has_value() && !post_decomp.has_value()) { confirmed_miss++; }
+    }
+
+    std::cerr << "\n=== Direct-Success Product Core Investigation ===\n";
+    std::cerr << "  Preconditioning destroys core: " << precond_destroy << "\n";
+    std::cerr << "  Confirmed pipeline miss:       " << confirmed_miss << "\n";
     std::cerr << "\n";
 }
 

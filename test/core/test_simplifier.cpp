@@ -537,6 +537,54 @@ TEST(SimplifierTest, MixedRewrite_BooleanConstantSignatureRemainsFullWidthLive) 
     }
 }
 
+TEST(SimplifierTest, EarlyDecomposition_ProductCoreSurvivesPreconditioning) {
+    // Regression: product cores that directly equal f(x) in the original
+    // obfuscated AST but are destroyed by OperandSimplifier.
+    // f(a,c,e) = (2*a + c) * (e & ~a)
+    // The obfuscated form has Mul(non-const, non-const) terms whose sum IS f.
+    // After operand simplification, the AST may restructure so that
+    // ExtractProductCore no longer yields a direct match.
+    // The fix (Step 1.5 in MixedRewrite) tries decomposition on the original
+    // AST before preconditioning.
+    auto evaluator = [](const std::vector< uint64_t > &v) -> uint64_t {
+        uint64_t a = v[0];
+        uint64_t c = v[1];
+        uint64_t e = v[2];
+        return (2 * a + c) * (e & ~a);
+    };
+
+    std::vector< std::string > vars = { "a", "c", "e" };
+    auto sig                        = EvaluateBooleanSignature(evaluator, 3, 64);
+
+    // Build obfuscated AST: (x&y)*(x|y) + (x&~y)*(~x&y) encodes x*y.
+    // Using x = 2*a+c, y = e&~a gives a form where OperandSimplifier
+    // will rewrite operands but destroy the product structure.
+    auto x_expr = Expr::Add(Expr::Mul(Expr::Constant(2), Expr::Variable(0)), Expr::Variable(1));
+    auto y_expr = Expr::BitwiseAnd(Expr::Variable(2), Expr::BitwiseNot(Expr::Variable(0)));
+    auto obf    = Expr::Add(
+        Expr::Mul(
+            Expr::BitwiseAnd(CloneExpr(*x_expr), CloneExpr(*y_expr)),
+            Expr::BitwiseOr(CloneExpr(*x_expr), CloneExpr(*y_expr))
+        ),
+        Expr::Mul(
+            Expr::BitwiseAnd(CloneExpr(*x_expr), Expr::BitwiseNot(CloneExpr(*y_expr))),
+            Expr::BitwiseAnd(Expr::BitwiseNot(CloneExpr(*x_expr)), CloneExpr(*y_expr))
+        )
+    );
+
+    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    opts.evaluator = evaluator;
+
+    auto result = Simplify(sig, vars, obf.get(), opts);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
+
+    if (result.value().kind == SimplifyOutcome::Kind::kSimplified) {
+        auto check = FullWidthCheckEval(evaluator, 3, *result.value().expr, 64);
+        EXPECT_TRUE(check.passed);
+    }
+}
+
 TEST(SimplifierTest, SingletonPower_XCubed) {
     // f(x) = x^3. sig on {0,1}: [0, 1]. CoB: [0, 1] (looks like x).
     // Full-width check rejects "x". Singleton-power recovery recovers x^3.

@@ -23,13 +23,16 @@ Expression
 [Step 1: Opportunistic] ── try standard pipeline directly
     |  (success? → done)
     |
+[Step 1.5: Early Decomposition] ── decompose original AST before preconditioning
+    |  (success? → done)
+    |
 [Step 2: Operand Simplification] ── simplify operands, retry standard pipeline
     |  (success? → done)
     |
 [Step 2.5: Product Identity Collapse] ── collapse MBA identities, retry
     |  (success? → done)
     |
-[Phase 2: Decomposition Engine] ── extract-solve loop
+[Phase 2: Decomposition Engine] ── extract-solve loop on preconditioned AST
     |  Extract polynomial core → solve residual
     |  (success? → done)
     |
@@ -42,6 +45,10 @@ Unsupported (return best effort or original)
 ## Step 1: Opportunistic Standard Pipeline
 
 Before applying mixed-specific techniques, CoBRA attempts to run the standard pipeline (linear or polynomial) directly on the expression. Some structurally mixed expressions can be simplified without specialized handling — for example, when the mixed products cancel out at full width. If the standard pipeline produces a verified result, it is accepted immediately.
+
+## Step 1.5: Early Decomposition
+
+The decomposition engine is run on the **original folded AST** before any preconditioning rewrites. Product cores that directly equal f(x) exist in the obfuscated form (as sums of `Mul(non-const, non-const)` terms) but are destroyed by operand simplification, which restructures the AST and introduces non-product terms. By trying decomposition first, these direct-match product cores are captured before they are lost.
 
 ## Step 2: Operand Simplification
 
@@ -126,4 +133,4 @@ Some mixed expressions remain unsupported:
 - **Ghost residual families**: Boolean-null residuals that are not expressible as a polynomial times a known ghost primitive
 - **Core extraction failures**: Expressions where no polynomial core can be identified from the AST or template search
 
-The QSynth EA dataset contains the most challenging examples — CoBRA simplifies 384 of 500 expressions, with the remaining 116 falling outside current decomposition coverage.
+The QSynth EA dataset contains the most challenging examples — CoBRA simplifies 406 of 500 expressions, with the remaining 94 falling outside current decomposition coverage.
