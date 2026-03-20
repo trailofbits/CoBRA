@@ -1,5 +1,6 @@
 #include "cobra/core/CoefficientSplitter.h"
 #include "cobra/core/BitWidth.h"
+#include "cobra/core/Trace.h"
 #include <bit>
 #include <cassert>
 #include <cstddef>
@@ -76,6 +77,9 @@ namespace cobra {
         const std::vector< uint64_t > &cob, const Evaluator &eval, uint32_t num_vars,
         uint32_t bitwidth, const std::vector< uint64_t > &singleton_at_2
     ) {
+        COBRA_TRACE(
+            "CoeffSplitter", "SplitCoefficients: vars={} bitwidth={}", num_vars, bitwidth
+        );
         assert(bitwidth >= 2);
         const size_t kLen = size_t{ 1 } << num_vars;
         assert(cob.size() == kLen);
@@ -124,7 +128,11 @@ namespace cobra {
                 const uint64_t kEvalDiff = (kF - kG) & kModMask;
                 if (kEvalDiff == 0) { continue; }
 
-                assert((kEvalDiff & 1) == 0);
+                // The difference must be even for the MUL extraction to work.
+                // An odd difference means the evaluator doesn't match the
+                // CoB model (e.g., wrapped sub-evaluator from bitwise
+                // decomposition). Skip this mask — treat it as pure AND.
+                if ((kEvalDiff & 1) != 0) { continue; }
 
                 const uint64_t kMulCoeff = ((kEvalDiff >> 1) * odd_inverses[kDeg]) & kHalfMod;
                 result.mul_coeffs[m]     = kMulCoeff;

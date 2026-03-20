@@ -1,4 +1,5 @@
 #include "cobra/core/AuxVarEliminator.h"
+#include "cobra/core/Trace.h"
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -42,8 +43,17 @@ namespace cobra {
         uint64_t DetectLiveMask(const std::vector< uint64_t > &sig, uint32_t num_vars) {
             uint64_t live = 0;
             for (uint32_t v = 0; v < num_vars; ++v) {
-                if (!IsSpurious(sig, v, num_vars)) { live |= (1ULL << v); }
+                const bool kSpurious = IsSpurious(sig, v, num_vars);
+                COBRA_TRACE(
+                    "AuxVarEliminator", "IsSpurious: var_bit={} result={}", v,
+                    kSpurious ? "spurious" : "live"
+                );
+                if (!kSpurious) { live |= (1ULL << v); }
             }
+            COBRA_TRACE(
+                "AuxVarEliminator", "DetectLiveMask: live_mask=0b{:b} ({}/{} live)", live,
+                std::popcount(live), num_vars
+            );
             return live;
         }
 
@@ -130,6 +140,8 @@ namespace cobra {
         const std::vector< uint64_t > &sig, const std::vector< std::string > &vars
     ) {
         const auto kNumVars = static_cast< uint32_t >(vars.size());
+        COBRA_TRACE("AuxVarEliminator", "EliminateAuxVars: num_vars={}", kNumVars);
+        COBRA_TRACE_SIG("AuxVarEliminator", "input sig", sig);
 
         if (kNumVars == 0) {
             return { .reduced_sig = sig, .real_vars = {}, .spurious_vars = {} };
@@ -160,6 +172,13 @@ namespace cobra {
                 result.spurious_vars.push_back(vars[v]);
             }
         }
+        for (const auto &sv : result.spurious_vars) {
+            COBRA_TRACE("AuxVarEliminator", "  spurious: {}", sv);
+        }
+        for (const auto &rv : result.real_vars) {
+            COBRA_TRACE("AuxVarEliminator", "  live: {}", rv);
+        }
+        COBRA_TRACE_SIG("AuxVarEliminator", "compacted sig", result.reduced_sig);
         return result;
     }
 

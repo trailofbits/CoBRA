@@ -11,6 +11,7 @@ include(CMakePackageConfigHelpers)
 
 option(COBRA_BUILD_LLVM_PASS "Build the LLVM pass plugin" ON)
 option(COBRA_BUILD_TESTS "Build tests" ON)
+option(COBRA_ENABLE_TRACE "Enable detailed pipeline tracing to stderr (debug builds)" OFF)
 
 if(COBRA_BUILD_LLVM_PASS)
     find_package(LLVM REQUIRED CONFIG)
@@ -26,6 +27,10 @@ endif()
 
 add_subdirectory(lib/core)
 add_subdirectory(tools/cobra-cli)
+
+if(COBRA_ENABLE_TRACE)
+    target_compile_definitions(cobra-core PUBLIC COBRA_ENABLE_TRACE)
+endif()
 
 if(Z3_FOUND)
     add_subdirectory(lib/verify)

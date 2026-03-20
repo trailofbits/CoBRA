@@ -4,6 +4,7 @@
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/SignatureSimplifier.h"
 #include "cobra/core/Simplifier.h"
+#include "cobra/core/Trace.h"
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -125,6 +126,9 @@ namespace cobra {
         const std::vector< uint64_t > &sig, const SignatureContext &ctx, const Options &opts,
         uint32_t depth, const ExprCost *baseline_cost
     ) {
+        COBRA_TRACE(
+            "HybridDecomp", "TryHybridDecomposition: vars={} depth={}", ctx.vars.size(), depth
+        );
         if (!ctx.eval) { return std::nullopt; }
         // Only try extraction at the top level (depth 0) to limit
         // combinatorial blowup. The recursive call at depth 1 uses
@@ -212,6 +216,7 @@ namespace cobra {
             best         = std::move(sub);
         }
 
+        COBRA_TRACE("HybridDecomp", "TryHybridDecomposition: found={}", best.has_value());
         return best;
     }
 

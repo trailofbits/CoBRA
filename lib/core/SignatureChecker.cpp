@@ -2,6 +2,7 @@
 #include "cobra/core/BitWidth.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/SignatureEval.h"
+#include "cobra/core/Trace.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -28,6 +29,10 @@ namespace cobra {
         const Expr &original, uint32_t original_num_vars, const Expr &simplified,
         const std::vector< uint32_t > &var_map, uint32_t bitwidth, uint32_t num_samples
     ) {
+        COBRA_TRACE(
+            "Verifier", "FullWidthCheck: vars={} bitwidth={} samples={}", original_num_vars,
+            bitwidth, num_samples
+        );
         const uint64_t kMask = Bitmask(bitwidth);
 
         // Deterministic seed from parameters so results are reproducible.
@@ -55,16 +60,25 @@ namespace cobra {
             const uint64_t kOrigVal = EvalExpr(original, orig_inputs, bitwidth);
             const uint64_t kSimpVal = EvalExpr(simplified, simp_inputs, bitwidth);
             if (kOrigVal != kSimpVal) {
-                return CheckResult{ .passed = false, .failing_input = std::move(orig_inputs) };
+                auto result =
+                    CheckResult{ .passed = false, .failing_input = std::move(orig_inputs) };
+                COBRA_TRACE("Verifier", "FullWidthCheck: passed={}", result.passed);
+                return result;
             }
         }
-        return CheckResult{ .passed = true, .failing_input = {} };
+        auto result = CheckResult{ .passed = true, .failing_input = {} };
+        COBRA_TRACE("Verifier", "FullWidthCheck: passed={}", result.passed);
+        return result;
     }
 
     CheckResult FullWidthCheckEval(
         const std::function< uint64_t(const std::vector< uint64_t > &) > &eval_original,
         uint32_t num_vars, const Expr &simplified, uint32_t bitwidth, uint32_t num_samples
     ) {
+        COBRA_TRACE(
+            "Verifier", "FullWidthCheckEval: vars={} bitwidth={} samples={}", num_vars,
+            bitwidth, num_samples
+        );
         const uint64_t kMask = Bitmask(bitwidth);
         uint64_t rng_state   = (static_cast< uint64_t >(bitwidth) * 2654435761ULL)
             + (static_cast< uint64_t >(num_vars) * 40503ULL);
@@ -77,10 +91,15 @@ namespace cobra {
             const uint64_t kOrigVal = eval_original(inputs) & kMask;
             const uint64_t kSimpVal = EvalExpr(simplified, inputs, bitwidth);
             if (kOrigVal != kSimpVal) {
-                return CheckResult{ .passed = false, .failing_input = std::move(inputs) };
+                auto result =
+                    CheckResult{ .passed = false, .failing_input = std::move(inputs) };
+                COBRA_TRACE("Verifier", "FullWidthCheckEval: passed={}", result.passed);
+                return result;
             }
         }
-        return CheckResult{ .passed = true, .failing_input = {} };
+        auto result = CheckResult{ .passed = true, .failing_input = {} };
+        COBRA_TRACE("Verifier", "FullWidthCheckEval: passed={}", result.passed);
+        return result;
     }
 
     uint64_t
@@ -129,6 +148,7 @@ namespace cobra {
         const std::vector< uint64_t > &original_sig, const Expr &simplified, uint32_t num_vars,
         uint32_t bitwidth
     ) {
+        COBRA_TRACE("Verifier", "SignatureCheck: vars={} bitwidth={}", num_vars, bitwidth);
         // Bottom-up evaluation: walk the tree once to get all outputs.
         auto computed        = EvaluateBooleanSignature(simplified, num_vars, bitwidth);
         const uint64_t kMask = Bitmask(bitwidth);
@@ -137,10 +157,15 @@ namespace cobra {
             if (computed[i] != (original_sig[i] & kMask)) {
                 std::vector< uint64_t > inputs(num_vars);
                 for (uint32_t v = 0; v < num_vars; ++v) { inputs[v] = (i >> v) & 1; }
-                return CheckResult{ .passed = false, .failing_input = std::move(inputs) };
+                auto result =
+                    CheckResult{ .passed = false, .failing_input = std::move(inputs) };
+                COBRA_TRACE("Verifier", "SignatureCheck: passed={}", result.passed);
+                return result;
             }
         }
-        return CheckResult{ .passed = true, .failing_input = {} };
+        auto result = CheckResult{ .passed = true, .failing_input = {} };
+        COBRA_TRACE("Verifier", "SignatureCheck: passed={}", result.passed);
+        return result;
     }
 
 } // namespace cobra

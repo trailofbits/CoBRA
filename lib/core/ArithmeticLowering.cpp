@@ -3,6 +3,7 @@
 #include "cobra/core/ExponentTuple.h"
 #include "cobra/core/PolyIR.h"
 #include "cobra/core/Result.h"
+#include "cobra/core/Trace.h"
 #include <array>
 #include <bit>
 #include <cassert>
@@ -18,6 +19,9 @@ namespace cobra {
         const std::vector< Coeff > &and_coeffs, const std::vector< Coeff > &mul_coeffs,
         uint8_t num_vars, uint32_t bitwidth
     ) {
+        COBRA_TRACE(
+            "ArithLowering", "LowerArithmeticFragment: vars={} bitwidth={}", num_vars, bitwidth
+        );
         if (num_vars > kMaxPolyVars) {
             return Err< LoweringResult >(
                 CobraError::kTooManyVariables,
@@ -83,10 +87,10 @@ namespace cobra {
             }
         }
 
-        return Ok(
-            LoweringResult{ .poly                = std::move(poly),
-                            .residual_and_coeffs = std::move(residual) }
-        );
+        auto result = LoweringResult{ .poly                = std::move(poly),
+                                      .residual_and_coeffs = std::move(residual) };
+        COBRA_TRACE("ArithLowering", "LowerArithmeticFragment: success={}", true);
+        return Ok(std::move(result));
     }
 
 } // namespace cobra

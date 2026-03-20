@@ -5,6 +5,7 @@
 #include "cobra/core/SignatureEval.h"
 #include "cobra/core/SignatureSimplifier.h"
 #include "cobra/core/Simplifier.h"
+#include "cobra/core/Trace.h"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -31,6 +32,10 @@ namespace cobra {
             const Expr &add_node, const std::vector< std::string > &vars, const Options &opts
         ) {
             const auto num_vars = static_cast< uint32_t >(vars.size());
+            COBRA_TRACE(
+                "ProductIdentity", "TryCollapse: num_vars={} bitwidth={}", num_vars,
+                opts.bitwidth
+            );
             if (num_vars == 0) { return std::nullopt; }
 
             const uint64_t mask  = Bitmask(opts.bitwidth);
@@ -46,7 +51,10 @@ namespace cobra {
 
             std::array< std::vector< uint64_t >, 4 > sigs;
             for (int i = 0; i < 4; ++i) {
-                sigs[i] = EvaluateBooleanSignature(*factors[i], num_vars, opts.bitwidth);
+                sigs[i]   = EvaluateBooleanSignature(*factors[i], num_vars, opts.bitwidth);
+                auto ftxt = Render(*factors[i], vars, opts.bitwidth);
+                COBRA_TRACE("ProductIdentity", "  factor[{}]: {}", i, ftxt);
+                COBRA_TRACE_SIG("ProductIdentity", std::format("  factor[{}] sig", i), sigs[i]);
             }
 
             // 8 role assignments: which Mul is (I*O) vs (L*R),
@@ -71,6 +79,10 @@ namespace cobra {
             auto baseline = ComputeCost(add_node).cost;
 
             for (const auto &a : kAssignments) {
+                COBRA_TRACE(
+                    "ProductIdentity", "  trying assignment: I={} O={} L={} R={}", a.i, a.o,
+                    a.l, a.r
+                );
                 const auto &sig_i = sigs[a.i];
                 const auto &sig_o = sigs[a.o];
                 const auto &sig_l = sigs[a.l];
@@ -87,15 +99,28 @@ namespace cobra {
                     const uint64_t mr = sig_r[j] & mask;
 
                     if (((mi & ml) | (mi & mr) | (ml & mr)) != 0u) {
+                        COBRA_TRACE(
+                            "ProductIdentity",
+                            "    disjoint check failed at j={}: I&L={} I&R={} L&R={}", j,
+                            mi & ml, mi & mr, ml & mr
+                        );
                         ok = false;
                         break;
                     }
                     if (mo != (mi | ml | mr)) {
+                        COBRA_TRACE(
+                            "ProductIdentity", "    O != I|L|R at j={}: O={} I|L|R={}", j, mo,
+                            mi | ml | mr
+                        );
                         ok = false;
                         break;
                     }
                 }
-                if (!ok) { continue; }
+                if (!ok) {
+                    COBRA_TRACE("ProductIdentity", "    assignment rejected");
+                    continue;
+                }
+                COBRA_TRACE("ProductIdentity", "    constraints passed!");
 
                 // Reconstruct factor signatures:
                 //   x = I | L,  y = I | R
@@ -105,6 +130,8 @@ namespace cobra {
                     sig_x[j] = (sig_i[j] | sig_l[j]) & mask;
                     sig_y[j] = (sig_i[j] | sig_r[j]) & mask;
                 }
+                COBRA_TRACE_SIG("ProductIdentity", "    sig_x", sig_x);
+                COBRA_TRACE_SIG("ProductIdentity", "    sig_y", sig_y);
 
                 // Simplify reconstructed signatures into expressions
                 SignatureContext ctx;
@@ -116,24 +143,40 @@ namespace cobra {
                 sub_opts.evaluator = Evaluator{};
 
                 auto x_res = SimplifyFromSignature(sig_x, ctx, sub_opts, 0);
-                if (!x_res.has_value()) { continue; }
+                if (!x_res.has_value()) {
+                    COBRA_TRACE("ProductIdentity", "    x simplification failed");
+                    continue;
+                }
+                auto xtxt = Render(*x_res->expr, vars, opts.bitwidth);
+                COBRA_TRACE("ProductIdentity", "    x simplified to: {}", xtxt);
 
                 auto y_res = SimplifyFromSignature(sig_y, ctx, sub_opts, 0);
-                if (!y_res.has_value()) { continue; }
+                if (!y_res.has_value()) {
+                    COBRA_TRACE("ProductIdentity", "    y simplification failed");
+                    continue;
+                }
+                auto ytxt = Render(*y_res->expr, vars, opts.bitwidth);
+                COBRA_TRACE("ProductIdentity", "    y simplified to: {}", ytxt);
 
                 auto candidate = Expr::Mul(std::move(x_res->expr), std::move(y_res->expr));
 
                 // Full-width verification against the original
                 auto check = FullWidthCheck(add_node, num_vars, *candidate, {}, opts.bitwidth);
+                COBRA_TRACE("ProductIdentity", "    full-width check passed={}", check.passed);
                 if (!check.passed) { continue; }
 
                 // Cost gate: only accept if strictly cheaper
                 auto cand_cost = ComputeCost(*candidate).cost;
+                COBRA_TRACE(
+                    "ProductIdentity", "    cost gate: better={}", IsBetter(cand_cost, baseline)
+                );
                 if (!IsBetter(cand_cost, baseline)) { continue; }
 
+                COBRA_TRACE("ProductIdentity", "  TryCollapse: SUCCESS — collapsed to x*y");
                 return std::move(candidate);
             }
 
+            COBRA_TRACE("ProductIdentity", "TryCollapse: no valid assignment found");
             return std::nullopt;
         }
 
@@ -156,15 +199,20 @@ namespace cobra {
                 child_changed = child_changed || child.changed;
             }
 
-            if (expr->kind == Expr::Kind::kAdd && expr->children.size() == 2
-                && expr->children[0]->kind == Expr::Kind::kMul
-                && expr->children[0]->children.size() == 2
-                && expr->children[1]->kind == Expr::Kind::kMul
-                && expr->children[1]->children.size() == 2)
-            {
-                auto collapsed = TryCollapse(*expr, vars, opts);
-                if (collapsed.has_value()) {
-                    return { .expr = std::move(*collapsed), .changed = true };
+            if (expr->kind == Expr::Kind::kAdd && expr->children.size() == 2) {
+                const bool kLhsMul2 = expr->children[0]->kind == Expr::Kind::kMul
+                    && expr->children[0]->children.size() == 2;
+                const bool kRhsMul2 = expr->children[1]->kind == Expr::Kind::kMul
+                    && expr->children[1]->children.size() == 2;
+                COBRA_TRACE(
+                    "ProductIdentity", "Walk: Add node — lhs_is_Mul2={} rhs_is_Mul2={}",
+                    kLhsMul2, kRhsMul2
+                );
+                if (kLhsMul2 && kRhsMul2) {
+                    auto collapsed = TryCollapse(*expr, vars, opts);
+                    if (collapsed.has_value()) {
+                        return { .expr = std::move(*collapsed), .changed = true };
+                    }
                 }
             }
 
@@ -178,7 +226,10 @@ namespace cobra {
         std::unique_ptr< Expr > expr, const std::vector< std::string > &vars,
         const Options &opts
     ) {
+        COBRA_TRACE("ProductIdentity", "CollapseProductIdentities: starting walk");
+        COBRA_TRACE_EXPR("ProductIdentity", "input", *expr, vars, opts.bitwidth);
         auto result = Walk(std::move(expr), vars, opts);
+        COBRA_TRACE("ProductIdentity", "CollapseProductIdentities: changed={}", result.changed);
         return { .expr = std::move(result.expr), .changed = result.changed };
     }
 

@@ -4,6 +4,7 @@
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/SignatureSimplifier.h"
 #include "cobra/core/Simplifier.h"
+#include "cobra/core/Trace.h"
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -165,6 +166,9 @@ namespace cobra {
         const std::vector< uint64_t > &sig, const SignatureContext &ctx, const Options &opts,
         uint32_t depth, const ExprCost *baseline_cost
     ) {
+        COBRA_TRACE(
+            "BitwiseDecomp", "TryBitwiseDecomposition: vars={} depth={}", ctx.vars.size(), depth
+        );
         // Early returns
         if (!ctx.eval) { return std::nullopt; }
         if (depth >= 2) { return std::nullopt; }
@@ -418,6 +422,7 @@ namespace cobra {
             best         = std::move(sub);
         }
 
+        COBRA_TRACE("BitwiseDecomp", "TryBitwiseDecomposition: found={}", best.has_value());
         return best;
     }
 

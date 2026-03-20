@@ -3,6 +3,7 @@
 #include "cobra/core/Expr.h"
 #include "cobra/core/Result.h"
 #include "cobra/core/SemilinearIR.h"
+#include "cobra/core/Trace.h"
 #include <algorithm>
 #include <cstdint>
 #include <string>
@@ -328,8 +329,11 @@ namespace cobra {
     } // namespace
 
     Result< SemilinearIR > NormalizeToSemilinear(
-        const Expr &expr, const std::vector< std::string > & /*vars*/, uint32_t bitwidth
+        const Expr &expr, const std::vector< std::string > &vars, uint32_t bitwidth
     ) {
+        COBRA_TRACE(
+            "Semilinear", "NormalizeToSemilinear: vars={} bitwidth={}", vars.size(), bitwidth
+        );
         CollectCtx ctx; // NOLINT(misc-const-correctness)
         ctx.bitwidth = bitwidth;
         ctx.mask     = Bitmask(bitwidth);
@@ -354,6 +358,11 @@ namespace cobra {
         ir.constant   = result.constant & ctx.mask;
         ir.bitwidth   = bitwidth;
         ir.atom_table = std::move(ctx.atom_table);
+
+        COBRA_TRACE(
+            "Semilinear", "NormalizeToSemilinear: terms={} atoms={}", result.terms.size(),
+            ir.atom_table.size()
+        );
 
         for (const auto &[atom_id, coeff] : coeff_map) {
             if (coeff != 0) { ir.terms.push_back({ .coeff = coeff, .atom_id = atom_id }); }

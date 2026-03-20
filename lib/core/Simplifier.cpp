@@ -13,6 +13,7 @@
 #include "cobra/core/SignatureSimplifier.h"
 #include "cobra/core/SimplifyOutcome.h"
 #include "cobra/core/TemplateDecomposer.h"
+#include "cobra/core/Trace.h"
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -31,11 +32,20 @@ namespace cobra {
             const Options &opts
         ) {
             const auto kNumVars = static_cast< uint32_t >(vars.size());
+            COBRA_TRACE(
+                "Simplifier", "RunSupportedPipeline: vars={} bitwidth={} max_vars={}",
+                vars.size(), opts.bitwidth, opts.max_vars
+            );
+            COBRA_TRACE_SIG("Simplifier", "RunSupportedPipeline input sig", sig);
 
             // Step 1: Prune constants
             {
                 auto pm = MatchPattern(sig, kNumVars, opts.bitwidth);
                 if (pm && (*pm)->kind == Expr::Kind::kConstant) {
+                    COBRA_TRACE(
+                        "Simplifier", "RunSupportedPipeline: constant match val={}",
+                        (*pm)->constant_val
+                    );
                     SimplifyOutcome outcome;
                     outcome.kind       = SimplifyOutcome::Kind::kSimplified;
                     outcome.expr       = std::move(*pm);
@@ -48,6 +58,11 @@ namespace cobra {
             // Step 2: Eliminate auxiliary variables
             auto elim                = EliminateAuxVars(sig, vars);
             const auto kRealVarCount = static_cast< uint32_t >(elim.real_vars.size());
+            COBRA_TRACE(
+                "Simplifier",
+                "RunSupportedPipeline: after EliminateAuxVars real={} eliminated={}",
+                elim.real_vars.size(), elim.spurious_vars.size()
+            );
 
             if (kRealVarCount > opts.max_vars) {
                 return Err< SimplifyOutcome >(
@@ -91,6 +106,10 @@ namespace cobra {
 
             // Delegate to SignatureSimplifier
             auto sub = SimplifyFromSignature(elim.reduced_sig, ctx, opts, 0);
+            COBRA_TRACE(
+                "Simplifier", "RunSupportedPipeline: SignatureSimplifier returned has_value={}",
+                sub.has_value()
+            );
 
             if (sub.has_value()) {
                 SimplifyOutcome outcome;
@@ -109,35 +128,40 @@ namespace cobra {
             );
         }
 
-        Evaluator MapEvaluator(
-            const Evaluator &eval, const std::vector< std::string > &vars,
-            const std::vector< std::string > &real_vars
-        ) {
-            if (real_vars.size() == vars.size()) { return eval; }
-            if (real_vars.empty()) {
-                return [eval, orig_count = static_cast< uint32_t >(vars.size())](
-                           const std::vector< uint64_t > &
-                       ) -> uint64_t { return eval(std::vector< uint64_t >(orig_count, 0)); };
+        void RemapVarIndices(Expr &expr, const std::vector< uint32_t > &index_map) {
+            if (expr.kind == Expr::Kind::kVariable) {
+                expr.var_index = index_map[expr.var_index];
+                return;
             }
-            std::vector< uint32_t > var_map;
-            var_map.reserve(real_vars.size());
+            for (auto &child : expr.children) { RemapVarIndices(*child, index_map); }
+        }
+
+        // Verify a reduced-variable result against the original evaluator
+        // with random values for ALL original variables (including eliminated).
+        // This catches cases where aux var elimination incorrectly dropped a
+        // variable that matters at full width (e.g., x*y == x&y on {0,1}).
+        CheckResult VerifyInOriginalSpace(
+            const Evaluator &eval, const std::vector< std::string > &all_vars,
+            const std::vector< std::string > &real_vars, const Expr &reduced_expr,
+            uint32_t bitwidth
+        ) {
+            const auto kAllCount = static_cast< uint32_t >(all_vars.size());
+            if (real_vars.empty() || real_vars.size() == all_vars.size()) {
+                return FullWidthCheckEval(eval, kAllCount, reduced_expr, bitwidth);
+            }
+            std::vector< uint32_t > idx_map;
+            idx_map.reserve(real_vars.size());
             for (const auto &rv : real_vars) {
-                for (uint32_t j = 0; j < vars.size(); ++j) {
-                    if (vars[j] == rv) {
-                        var_map.push_back(j);
+                for (uint32_t j = 0; j < all_vars.size(); ++j) {
+                    if (all_vars[j] == rv) {
+                        idx_map.push_back(j);
                         break;
                     }
                 }
             }
-            return [eval, var_map, orig_count = static_cast< uint32_t >(vars.size())](
-                       const std::vector< uint64_t > &reduced_vals
-                   ) -> uint64_t {
-                std::vector< uint64_t > original_vals(orig_count, 0);
-                for (size_t i = 0; i < var_map.size(); ++i) {
-                    original_vals[var_map[i]] = reduced_vals[i];
-                }
-                return eval(original_vals);
-            };
+            auto remapped = CloneExpr(reduced_expr);
+            RemapVarIndices(*remapped, idx_map);
+            return FullWidthCheckEval(eval, kAllCount, *remapped, bitwidth);
         }
 
         SimplifyOutcome MakeUnchanged(
@@ -310,6 +334,9 @@ namespace cobra {
         const std::vector< uint64_t > &sig, const std::vector< std::string > &vars,
         const Expr *input_expr, const Options &opts
     ) {
+        COBRA_TRACE(
+            "Simplifier", "Simplify: vars={} has_ast={}", vars.size(), input_expr != nullptr
+        );
         // No AST available: run supported pipeline without classification
         if (input_expr == nullptr) { return RunSupportedPipeline(sig, vars, opts); }
 
@@ -321,6 +348,7 @@ namespace cobra {
         auto working_sig         = sig;
 
         if (HasNotOverArith(*input_expr)) {
+            COBRA_TRACE("Simplifier", "Simplify: lowering NOT-over-Arith patterns");
             lowered_storage = LowerNotOverArith(CloneExpr(*input_expr), opts.bitwidth);
             working_expr    = lowered_storage.get();
             working_sig     = EvaluateBooleanSignature(
@@ -329,6 +357,10 @@ namespace cobra {
         }
 
         auto cls = ClassifyStructural(*working_expr);
+        COBRA_TRACE(
+            "Simplifier", "Simplify: route={} semantic={}", static_cast< int >(cls.route),
+            static_cast< int >(cls.semantic)
+        );
 
         switch (cls.route) {
             case Route::kBitwiseOnly:
@@ -356,6 +388,7 @@ namespace cobra {
             }
 
             case Route::kMixedRewrite: {
+                COBRA_TRACE("Simplifier", "MixedRewrite: starting multi-step pipeline");
                 if (!opts.evaluator) {
                     return Ok(MakeUnchanged(
                         working_expr, cls,
@@ -374,13 +407,9 @@ namespace cobra {
                 if (result.has_value()
                     && result.value().kind == SimplifyOutcome::Kind::kSimplified)
                 {
-                    const auto kRvCount = static_cast< uint32_t >(
-                        result.value().real_vars.empty() ? vars.size()
-                                                         : result.value().real_vars.size()
-                    );
-                    auto mapped = MapEvaluator(opts.evaluator, vars, result.value().real_vars);
-                    auto check  = FullWidthCheckEval(
-                        mapped, kRvCount, *result.value().expr, opts.bitwidth
+                    auto check = VerifyInOriginalSpace(
+                        opts.evaluator, vars, result.value().real_vars, *result.value().expr,
+                        opts.bitwidth
                     );
                     if (check.passed) {
                         result.value().diag.classification = cls;
@@ -394,6 +423,10 @@ namespace cobra {
                 // Step 2: Operand simplification
                 auto op_result = SimplifyMixedOperands(std::move(current_expr), vars, opts);
                 current_expr   = std::move(op_result.expr);
+                COBRA_TRACE(
+                    "Simplifier", "MixedRewrite step 2: operand simplification changed={}",
+                    op_result.changed
+                );
 
                 if (op_result.changed) {
                     auto new_sig = EvaluateBooleanSignature(
@@ -409,14 +442,9 @@ namespace cobra {
                     if (reentry.has_value()
                         && reentry.value().kind == SimplifyOutcome::Kind::kSimplified)
                     {
-                        const auto kRvCount = static_cast< uint32_t >(
-                            reentry.value().real_vars.empty() ? vars.size()
-                                                              : reentry.value().real_vars.size()
-                        );
-                        auto mapped =
-                            MapEvaluator(opts.evaluator, vars, reentry.value().real_vars);
-                        auto check = FullWidthCheckEval(
-                            mapped, kRvCount, *reentry.value().expr, opts.bitwidth
+                        auto check = VerifyInOriginalSpace(
+                            opts.evaluator, vars, reentry.value().real_vars,
+                            *reentry.value().expr, opts.bitwidth
                         );
                         if (check.passed) {
                             reentry.value().diag.classification             = cls;
@@ -429,6 +457,10 @@ namespace cobra {
                 // Step 2.5: Product identity collapse
                 auto pi_result = CollapseProductIdentities(std::move(current_expr), vars, opts);
                 current_expr   = std::move(pi_result.expr);
+                COBRA_TRACE(
+                    "Simplifier", "MixedRewrite step 2.5: product identity collapse changed={}",
+                    pi_result.changed
+                );
 
                 if (pi_result.changed) {
                     auto new_sig = EvaluateBooleanSignature(
@@ -444,14 +476,9 @@ namespace cobra {
                     if (reentry.has_value()
                         && reentry.value().kind == SimplifyOutcome::Kind::kSimplified)
                     {
-                        const auto kRvCount = static_cast< uint32_t >(
-                            reentry.value().real_vars.empty() ? vars.size()
-                                                              : reentry.value().real_vars.size()
-                        );
-                        auto mapped =
-                            MapEvaluator(opts.evaluator, vars, reentry.value().real_vars);
-                        auto check = FullWidthCheckEval(
-                            mapped, kRvCount, *reentry.value().expr, opts.bitwidth
+                        auto check = VerifyInOriginalSpace(
+                            opts.evaluator, vars, reentry.value().real_vars,
+                            *reentry.value().expr, opts.bitwidth
                         );
                         if (check.passed) {
                             reentry.value().diag.classification             = cls;
@@ -466,6 +493,10 @@ namespace cobra {
                     // simplify the linear residual separately,
                     // then recombine.
                     auto split = TrySplitProductResidual(*current_expr, vars, opts, cls);
+                    COBRA_TRACE(
+                        "Simplifier", "MixedRewrite step 2.5b: split product+residual found={}",
+                        split.has_value()
+                    );
                     if (split.has_value()) { return Ok(std::move(*split)); }
                 }
 
@@ -486,18 +517,70 @@ namespace cobra {
                             }
                         }
                     }
-                    ctx.eval = MapEvaluator(opts.evaluator, vars, elim.real_vars);
+                    if (elim.real_vars.size() == vars.size()) {
+                        ctx.eval = opts.evaluator;
+                    } else {
+                        auto idx = ctx.original_indices;
+                        ctx.eval = [eval = opts.evaluator, idx, n = vars.size()](
+                                       const std::vector< uint64_t > &rv
+                                   ) -> uint64_t {
+                            std::vector< uint64_t > full(n, 0);
+                            for (size_t i = 0; i < idx.size(); ++i) { full[idx[i]] = rv[i]; }
+                            return eval(full);
+                        };
+                    }
 
                     auto td = TryTemplateDecomposition(ctx, opts, kRvCount, nullptr);
+                    COBRA_TRACE(
+                        "Simplifier",
+                        "MixedRewrite step 2.75: template decomposition (reduced) found={}",
+                        td.has_value()
+                    );
                     if (td.has_value()) {
-                        SimplifyOutcome outcome;
-                        outcome.kind                = SimplifyOutcome::Kind::kSimplified;
-                        outcome.expr                = std::move(td->expr);
-                        outcome.sig_vector          = elim.reduced_sig;
-                        outcome.real_vars           = std::move(elim.real_vars);
-                        outcome.verified            = td->verified;
-                        outcome.diag.classification = cls;
-                        return Ok(std::move(outcome));
+                        auto check = VerifyInOriginalSpace(
+                            opts.evaluator, vars, elim.real_vars, *td->expr, opts.bitwidth
+                        );
+                        if (check.passed) {
+                            SimplifyOutcome outcome;
+                            outcome.kind                = SimplifyOutcome::Kind::kSimplified;
+                            outcome.expr                = std::move(td->expr);
+                            outcome.sig_vector          = elim.reduced_sig;
+                            outcome.real_vars           = std::move(elim.real_vars);
+                            outcome.verified            = td->verified;
+                            outcome.diag.classification = cls;
+                            return Ok(std::move(outcome));
+                        }
+                    }
+
+                    // Reduced-var decomposition was rejected — try
+                    // with all variables (catches cases where aux var
+                    // elimination incorrectly dropped a variable).
+                    if (elim.real_vars.size() < vars.size()) {
+                        SignatureContext full_ctx; // NOLINT(misc-const-correctness)
+                        full_ctx.vars = vars;
+                        full_ctx.original_indices.resize(vars.size());
+                        for (uint32_t vi = 0; vi < vars.size(); ++vi) {
+                            full_ctx.original_indices[vi] = vi;
+                        }
+                        full_ctx.eval = opts.evaluator;
+
+                        const auto kAllVars = static_cast< uint32_t >(vars.size());
+                        auto td2 = TryTemplateDecomposition(full_ctx, opts, kAllVars, nullptr);
+                        COBRA_TRACE(
+                            "Simplifier",
+                            "MixedRewrite step 2.75: template decomposition (full) found={}",
+                            td2.has_value()
+                        );
+                        if (td2.has_value()) {
+                            SimplifyOutcome outcome;
+                            outcome.kind                = SimplifyOutcome::Kind::kSimplified;
+                            outcome.expr                = std::move(td2->expr);
+                            outcome.sig_vector          = working_sig;
+                            outcome.real_vars           = { vars.begin(), vars.end() };
+                            outcome.verified            = td2->verified;
+                            outcome.diag.classification = cls;
+                            return Ok(std::move(outcome));
+                        }
                     }
                 }
 
@@ -508,6 +591,10 @@ namespace cobra {
                 rw_opts.bitwidth        = opts.bitwidth;
 
                 auto rewritten = RewriteMixedProducts(std::move(current_expr), rw_opts);
+                COBRA_TRACE(
+                    "Simplifier", "MixedRewrite step 3: XOR lowering rounds={} changed={}",
+                    rewritten.rounds_applied, rewritten.structure_changed
+                );
 
                 if (!rewritten.structure_changed) {
                     return Ok(
@@ -516,6 +603,10 @@ namespace cobra {
                 }
 
                 auto new_cls = ClassifyStructural(*rewritten.expr);
+                COBRA_TRACE(
+                    "Simplifier", "MixedRewrite step 3: post-rewrite route={}",
+                    static_cast< int >(new_cls.route)
+                );
                 if (new_cls.route == Route::kMixedRewrite
                     || new_cls.route == Route::kUnsupported)
                 {
@@ -539,13 +630,9 @@ namespace cobra {
                 if (reentry.has_value()
                     && reentry.value().kind == SimplifyOutcome::Kind::kSimplified)
                 {
-                    const auto kRvCount = static_cast< uint32_t >(
-                        reentry.value().real_vars.empty() ? vars.size()
-                                                          : reentry.value().real_vars.size()
-                    );
-                    auto mapped = MapEvaluator(opts.evaluator, vars, reentry.value().real_vars);
-                    auto check  = FullWidthCheckEval(
-                        mapped, kRvCount, *reentry.value().expr, opts.bitwidth
+                    auto check = VerifyInOriginalSpace(
+                        opts.evaluator, vars, reentry.value().real_vars, *reentry.value().expr,
+                        opts.bitwidth
                     );
                     if (check.passed) {
                         reentry.value().diag.classification = cls;

@@ -5,6 +5,7 @@
 #include "cobra/core/SignatureEval.h"
 #include "cobra/core/SignatureSimplifier.h"
 #include "cobra/core/Simplifier.h"
+#include "cobra/core/Trace.h"
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -253,11 +254,15 @@ namespace cobra {
         std::unique_ptr< Expr > expr, const std::vector< std::string > &vars,
         const Options &opts
     ) {
+        COBRA_TRACE("OperandSimp", "SimplifyMixedOperands: starting");
         // Single pass only in v1. The spec allows a second pass
         // if the first changed something, but one pass is sufficient
         // for the target expressions.
-        auto result = Walk(std::move(expr), vars, opts);
-        return { .expr = std::move(result.expr), .changed = result.changed };
+        auto walk_result = Walk(std::move(expr), vars, opts);
+        auto result      = OperandSimplifyResult{ .expr    = std::move(walk_result.expr),
+                                                  .changed = walk_result.changed };
+        COBRA_TRACE("OperandSimp", "SimplifyMixedOperands: changed={}", result.changed);
+        return result;
     }
 
 } // namespace cobra

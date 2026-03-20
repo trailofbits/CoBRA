@@ -4,6 +4,7 @@
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/SignatureSimplifier.h"
 #include "cobra/core/Simplifier.h"
+#include "cobra/core/Trace.h"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -414,6 +415,7 @@ namespace cobra {
         const SignatureContext &ctx, const Options &opts, uint32_t num_vars,
         const ExprCost *baseline_cost
     ) {
+        COBRA_TRACE("TemplateDecomp", "TryTemplateDecomposition: vars={}", num_vars);
         if (!ctx.eval || num_vars > kMaxVars) { return std::nullopt; }
 
         // Zero real variables: the function is a constant.
@@ -602,6 +604,7 @@ namespace cobra {
             }
         }
 
+        COBRA_TRACE("TemplateDecomp", "TryTemplateDecomposition: found={}", false);
         return std::nullopt;
     }
 

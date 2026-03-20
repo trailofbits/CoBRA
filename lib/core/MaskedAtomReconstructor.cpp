@@ -2,6 +2,7 @@
 #include "cobra/core/Expr.h"
 #include "cobra/core/ExprUtils.h"
 #include "cobra/core/SemilinearIR.h"
+#include "cobra/core/Trace.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -31,6 +32,10 @@ namespace cobra {
     std::unique_ptr< Expr > ReconstructMaskedAtoms(
         const SemilinearIR &ir, const std::vector< PartitionClass > &partitions
     ) {
+        COBRA_TRACE(
+            "AtomRecon", "ReconstructMaskedAtoms: terms={} partitions={}", ir.terms.size(),
+            partitions.size()
+        );
         if (ir.terms.empty()) { return Expr::Constant(ir.constant); }
 
         // Build per-term expressions with coefficients applied.

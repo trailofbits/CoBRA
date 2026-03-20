@@ -1,5 +1,6 @@
 #include "cobra/core/CoeffInterpolator.h"
 #include "cobra/core/BitWidth.h"
+#include "cobra/core/Trace.h"
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -11,6 +12,10 @@ namespace cobra {
     ) { // NOLINT(readability-identifier-naming)
         const uint64_t mask = Bitmask(bitwidth);
         const size_t len    = sig.size();
+        COBRA_TRACE(
+            "CoeffInterp", "InterpolateCoefficients: vars={} bitwidth={} sig_len={}", num_vars,
+            bitwidth, len
+        );
 
         // In-place butterfly interpolation: for each variable, subtract the
         // "without this variable" entry from the "with" entry to isolate its
@@ -25,6 +30,7 @@ namespace cobra {
                 }
             }
         }
+        COBRA_TRACE_SIG("CoeffInterp", "output coeffs", sig);
         return sig;
     }
 
