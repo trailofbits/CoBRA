@@ -10,6 +10,7 @@
 #include "cobra/core/SemilinearNormalizer.h"
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/Simplifier.h"
+#include "cobra/core/Trace.h"
 #include <cstdint>
 #include <utility>
 #ifdef COBRA_HAS_Z3
@@ -126,8 +127,13 @@ namespace {
         uint32_t max_vars, bool verbose, bool verify, const cobra::Expr *original_ast = nullptr
     ) {
         auto num_vars = static_cast< uint32_t >(vars.size());
+        COBRA_TRACE(
+            "CLI", "RunLinearPath: vars={} bitwidth={} has_original={}", num_vars, bitwidth,
+            original_ast != nullptr
+        );
         if (verbose) { std::cerr << "Evaluating signature vector...\n"; }
         auto sig = EvaluateToSignature(ast, num_vars, bitwidth);
+        COBRA_TRACE_SIG("CLI", "signature vector", sig);
 
         if (verbose) {
             std::cerr << "Signature vector (" << num_vars << " vars): [";
@@ -148,7 +154,9 @@ namespace {
         }
 
         if (verbose) { std::cerr << "Simplifying...\n"; }
+        COBRA_TRACE("CLI", "Simplify: calling core simplifier");
         auto result = cobra::Simplify(sig, vars, original_ast, opts);
+        COBRA_TRACE("CLI", "Simplify: returned has_value={}", result.has_value());
         if (!result.has_value()) {
             std::cerr << "Error: " << result.error().message << "\n";
             return 1;
@@ -222,7 +230,9 @@ namespace {
             auto fw = cobra::FullWidthCheck(
                 *original_ast, num_vars, *result.value().expr, var_map, bitwidth
             );
+            COBRA_TRACE("CLI", "FullWidthCheck: passed={}", fw.passed);
             if (!fw.passed) {
+                COBRA_TRACE_SIG("CLI", "  failing_input", fw.failing_input);
                 if (verbose) {
                     std::cerr << "Verifying full-width equivalence..."
                                  " failed\n";
@@ -276,6 +286,7 @@ namespace {
             return 1;
         }
 
+        COBRA_TRACE("CLI", "RunSemilinearPath: vars={} bitwidth={}", vars.size(), bitwidth);
         if (verbose) { std::cerr << "Normalizing to semilinear IR...\n"; }
         auto ir_result = cobra::NormalizeToSemilinear(original_ast, vars, bitwidth);
         if (!ir_result.has_value()) {
@@ -306,6 +317,7 @@ namespace {
         // to ensure structural round-trip fidelity.
         auto plain = cobra::ReconstructMaskedAtoms(ir, {});
         auto check = cobra::SelfChecSemilinear(ir, *plain, vars, bitwidth);
+        COBRA_TRACE("CLI", "SelfCheck: passed={}", check.passed);
         if (!check.passed) {
             if (verbose) { std::cerr << "Running self-check... failed\n"; }
             std::cerr << "Error: self-check failed: " << check.mismatch_detail << "\n";
@@ -388,6 +400,7 @@ int main(int argc, char *argv[]) {
     }
 
     // Parse to AST
+    COBRA_TRACE("CLI", "ParseToAst: input=\"{}\" bitwidth={}", mba_expr, bitwidth);
     auto parsed = cobra::ParseToAst(mba_expr, bitwidth);
     if (!parsed.has_value()) {
         std::cerr << "Error: " << parsed.error().message << "\n";
@@ -395,6 +408,9 @@ int main(int argc, char *argv[]) {
     }
 
     auto &vars = parsed.value().vars;
+
+    COBRA_TRACE("CLI", "Variables: count={}", vars.size());
+    for (size_t i = 0; i < vars.size(); ++i) { COBRA_TRACE("CLI", "  var[{}]={}", i, vars[i]); }
 
     if (verbose) {
         std::cerr << "Variables: ";
@@ -407,8 +423,13 @@ int main(int argc, char *argv[]) {
 
     // Fold constant bitwise subtrees
     auto folded = cobra::FoldConstantBitwise(std::move(parsed.value().expr), bitwidth);
+    COBRA_TRACE_EXPR("CLI", "after FoldConstantBitwise", *folded, vars, bitwidth);
 
     auto cls = cobra::ClassifyStructural(*folded);
+    COBRA_TRACE(
+        "CLI", "ClassifyStructural: semantic={} route={}", SemanticClassName(cls.semantic),
+        RouteName(cls.route)
+    );
 
     if (verbose) {
         std::cerr << "Classification: " << SemanticClassName(cls.semantic) << "\n";

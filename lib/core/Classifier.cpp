@@ -3,6 +3,7 @@
 #include "cobra/core/Classification.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/ExprUtils.h"
+#include "cobra/core/Trace.h"
 #include <algorithm>
 #include <bit>
 #include <cstdint>
@@ -33,22 +34,52 @@ namespace cobra {
             const bool kRhsConst = (rhs->kind == Expr::Kind::kConstant);
 
             if (kind == Expr::Kind::kAnd) {
-                if (kRhsConst && rhs->constant_val == kMask) { return lhs; }
-                if (kLhsConst && lhs->constant_val == kMask) { return rhs; }
-                if (kRhsConst && rhs->constant_val == 0) { return Expr::Constant(0); }
-                if (kLhsConst && lhs->constant_val == 0) { return Expr::Constant(0); }
+                if (kRhsConst && rhs->constant_val == kMask) {
+                    COBRA_TRACE("Classifier", "FoldBinaryBitwise: AND identity — rhs all-ones");
+                    return lhs;
+                }
+                if (kLhsConst && lhs->constant_val == kMask) {
+                    COBRA_TRACE("Classifier", "FoldBinaryBitwise: AND identity — lhs all-ones");
+                    return rhs;
+                }
+                if (kRhsConst && rhs->constant_val == 0) {
+                    COBRA_TRACE("Classifier", "FoldBinaryBitwise: AND absorb — rhs zero");
+                    return Expr::Constant(0);
+                }
+                if (kLhsConst && lhs->constant_val == 0) {
+                    COBRA_TRACE("Classifier", "FoldBinaryBitwise: AND absorb — lhs zero");
+                    return Expr::Constant(0);
+                }
             }
 
             if (kind == Expr::Kind::kOr) {
-                if (kRhsConst && rhs->constant_val == 0) { return lhs; }
-                if (kLhsConst && lhs->constant_val == 0) { return rhs; }
-                if (kRhsConst && rhs->constant_val == kMask) { return Expr::Constant(kMask); }
-                if (kLhsConst && lhs->constant_val == kMask) { return Expr::Constant(kMask); }
+                if (kRhsConst && rhs->constant_val == 0) {
+                    COBRA_TRACE("Classifier", "FoldBinaryBitwise: OR identity — rhs zero");
+                    return lhs;
+                }
+                if (kLhsConst && lhs->constant_val == 0) {
+                    COBRA_TRACE("Classifier", "FoldBinaryBitwise: OR identity — lhs zero");
+                    return rhs;
+                }
+                if (kRhsConst && rhs->constant_val == kMask) {
+                    COBRA_TRACE("Classifier", "FoldBinaryBitwise: OR absorb — rhs all-ones");
+                    return Expr::Constant(kMask);
+                }
+                if (kLhsConst && lhs->constant_val == kMask) {
+                    COBRA_TRACE("Classifier", "FoldBinaryBitwise: OR absorb — lhs all-ones");
+                    return Expr::Constant(kMask);
+                }
             }
 
             if (kind == Expr::Kind::kXor) {
-                if (kRhsConst && rhs->constant_val == 0) { return lhs; }
-                if (kLhsConst && lhs->constant_val == 0) { return rhs; }
+                if (kRhsConst && rhs->constant_val == 0) {
+                    COBRA_TRACE("Classifier", "FoldBinaryBitwise: XOR identity — rhs zero");
+                    return lhs;
+                }
+                if (kLhsConst && lhs->constant_val == 0) {
+                    COBRA_TRACE("Classifier", "FoldBinaryBitwise: XOR identity — lhs zero");
+                    return rhs;
+                }
             }
 
             auto result  = std::make_unique< Expr >();
@@ -79,7 +110,11 @@ namespace cobra {
 
         // Constant-only bitwise subtree: evaluate to single constant
         if (IsBitwise(expr->kind) && IsConstantSubtree(*expr)) {
-            const uint64_t val = EvalConstantExpr(*expr, bitwidth);
+            const uint64_t val =
+                EvalConstantExpr(*expr, bitwidth); // NOLINT(readability-identifier-naming)
+            COBRA_TRACE(
+                "Classifier", "FoldConstantBitwise: folded constant subtree to val={}", val
+            );
             return Expr::Constant(val);
         }
 
@@ -162,6 +197,12 @@ namespace cobra {
                     if (lhs.has_non_leaf_bitwise || rhs.has_non_leaf_bitwise) {
                         info.flags |= kSfHasArithOverBitwise;
                     }
+
+                    COBRA_TRACE(
+                        "Classifier",
+                        "ClassifyNode: Mul var_mask=0x{:x} max_degree={} flags=0x{:x}",
+                        info.var_mask, info.max_var_degree, static_cast< uint32_t >(info.flags)
+                    );
 
                     // Product-type classification
                     if (lhs.has_var_dep && rhs.has_var_dep) {
@@ -339,6 +380,11 @@ namespace cobra {
         }
 
         const Route kRoute = DeriveRoute(info.flags);
+        COBRA_TRACE(
+            "Classifier", "ClassifyStructural: semantic={} route={} flags=0x{:x}",
+            static_cast< int >(sem), static_cast< int >(kRoute),
+            static_cast< uint32_t >(info.flags)
+        );
         return { .semantic = sem, .flags = info.flags, .route = kRoute };
     }
 

@@ -19,6 +19,7 @@
 #include "cobra/core/SingletonPowerExprBuilder.h"
 #include "cobra/core/SingletonPowerPoly.h"
 #include "cobra/core/SingletonPowerRecovery.h"
+#include "cobra/core/Trace.h"
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -89,6 +90,11 @@ namespace cobra {
         uint32_t depth, const ExprCost *baseline_cost
     ) {
         const auto kNumVars = static_cast< uint32_t >(ctx.vars.size());
+        COBRA_TRACE(
+            "SigSimplifier", "SimplifyFromSignature: vars={} depth={} has_baseline={}",
+            kNumVars, depth, baseline_cost != nullptr
+        );
+        COBRA_TRACE_SIG("SigSimplifier", "input sig", sig);
         std::optional< SubResult > best;
 
         // Step 1: Fast-match canonical patterns on signature
@@ -113,6 +119,10 @@ namespace cobra {
                     TryUpdateBest(best, std::move(*pm), pm_verified, baseline_cost);
                 }
             }
+            COBRA_TRACE(
+                "SigSimplifier", "Stage1 PatternMatch: found={} accepted={}", pm.has_value(),
+                pm.has_value() && pm_accepted
+            );
         }
 
         // Step 2: ANF fast path for Boolean signatures
@@ -133,13 +143,19 @@ namespace cobra {
             if (anf_accepted) {
                 TryUpdateBest(best, std::move(anf_expr), /*verified=*/true, baseline_cost);
             }
+            COBRA_TRACE(
+                "SigSimplifier", "Stage2 ANF: boolean_valued={} accepted={}",
+                IsBooleanValued(sig), anf_accepted
+            );
         }
 
         // Step 3: Interpolate coefficients
         auto coeffs = InterpolateCoefficients(sig, kNumVars, opts.bitwidth);
+        COBRA_TRACE_SIG("SigSimplifier", "Stage3 coefficients", coeffs);
 
         // Step 4: Build expression from CoB coefficients
         auto expr = BuildCobExpr(coeffs, kNumVars, opts.bitwidth);
+        COBRA_TRACE_EXPR("SigSimplifier", "Stage4 CoB expr", *expr, ctx.vars, opts.bitwidth);
 
         // Step 4b: kPolynomial recovery via singleton powers + coefficient splitting.
         // Singleton recovery runs first so the splitter can use the
@@ -148,6 +164,10 @@ namespace cobra {
         bool poly_recovery_verified = false;
         if (ctx.eval.has_value()) {
             auto singleton_result = RecoverSingletonPowers(*ctx.eval, kNumVars, opts.bitwidth);
+            COBRA_TRACE(
+                "SigSimplifier", "Stage4b: singleton_recovery found={}",
+                singleton_result.has_value()
+            );
 
             std::vector< uint64_t > singleton_at_2;
             if (singleton_result.has_value()) {
@@ -213,6 +233,7 @@ namespace cobra {
             }
 
             auto check = FullWidthCheckEval(*ctx.eval, kNumVars, *combined, opts.bitwidth);
+            COBRA_TRACE("SigSimplifier", "Stage4b: poly_recovery verified={}", check.passed);
             if (check.passed) {
                 poly_recovery_verified = true;
                 expr                   = std::move(combined);
@@ -252,6 +273,7 @@ namespace cobra {
                     best = std::move(decomp);
                 }
             }
+            COBRA_TRACE("SigSimplifier", "Stage5: bitwise_decomp found={}", decomp.has_value());
         }
 
         // Step 5b: Variable-extraction hybrid decomposition.
@@ -268,6 +290,7 @@ namespace cobra {
                     best = std::move(hybrid);
                 }
             }
+            COBRA_TRACE("SigSimplifier", "Stage5b: hybrid_decomp found={}", hybrid.has_value());
         }
 
         // Step 6: Accept CoB result as final candidate
@@ -290,6 +313,10 @@ namespace cobra {
             TryUpdateBest(best, std::move(expr), cob_verified, baseline_cost);
         }
 
+        COBRA_TRACE(
+            "SigSimplifier", "Final: has_result={} verified={}", best.has_value(),
+            best.has_value() && best->verified
+        );
         return best;
     }
 

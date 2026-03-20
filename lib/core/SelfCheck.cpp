@@ -3,6 +3,7 @@
 #include "cobra/core/Expr.h"
 #include "cobra/core/SemilinearIR.h"
 #include "cobra/core/SemilinearNormalizer.h"
+#include "cobra/core/Trace.h"
 #include <cstdint>
 #include <ios>
 #include <sstream>
@@ -39,6 +40,9 @@ namespace cobra {
         const SemilinearIR &original_ir, const Expr &reconstructed,
         const std::vector< std::string > &vars, uint32_t bitwidth
     ) {
+        COBRA_TRACE(
+            "SelfCheck", "SelfChecSemilinear: vars={} bitwidth={}", vars.size(), bitwidth
+        );
         auto re_result = NormalizeToSemilinear(reconstructed, vars, bitwidth);
         if (!re_result.has_value()) {
             return { .passed = false,
@@ -81,7 +85,9 @@ namespace cobra {
             }
         }
 
-        return { .passed = true, .mismatch_detail = "" };
+        auto result = SelfCheckResult{ .passed = true, .mismatch_detail = "" };
+        COBRA_TRACE("SelfCheck", "SelfChecSemilinear: passed={}", result.passed);
+        return result;
     }
 
 } // namespace cobra

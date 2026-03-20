@@ -3,6 +3,7 @@
 #include "cobra/core/Classifier.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/ExprUtils.h"
+#include "cobra/core/Trace.h"
 #include <cstdint>
 #include <memory>
 #include <utility>
@@ -130,6 +131,7 @@ namespace cobra {
             if (expr->kind == Expr::Kind::kXor && IsInUnsupportedContext(child_ctx)
                 && expr->children.size() == 2)
             {
+                COBRA_TRACE("MixedRewriter", "  XOR lowering: x^y -> x+y-2*(x&y)");
                 // x ^ y -> x + y - 2*(x & y)
                 auto lhs  = CloneExpr(*expr->children[0]);
                 auto rhs  = CloneExpr(*expr->children[1]);
@@ -164,6 +166,12 @@ namespace cobra {
         const uint32_t initial_count = NodeCount(*expr);
         auto old_flags               = cls.flags & kUnsupportedFlagMask;
         auto old_sites               = CountRewriteableSites(*expr);
+        COBRA_TRACE(
+            "MixedRewriter",
+            "RewriteMixedProducts: max_rounds={} max_growth={} initial_nodes={} "
+            "initial_sites={}",
+            opts.max_rounds, opts.max_node_growth, initial_count, old_sites
+        );
 
         RewriteResult result;
         result.expr              = std::move(expr);
@@ -175,22 +183,44 @@ namespace cobra {
             auto new_expr = ApplyXorLoweringImpl(CloneExpr(*result.expr), ctx, opts.bitwidth);
 
             const uint32_t new_count = NodeCount(*new_expr);
-            if (new_count > initial_count * opts.max_node_growth) { break; }
+            if (new_count > initial_count * opts.max_node_growth) {
+                COBRA_TRACE(
+                    "MixedRewriter", "Round {}: ABORT — node growth exceeded ({}>{})", round,
+                    new_count, initial_count * opts.max_node_growth
+                );
+                break;
+            }
 
             auto new_cls   = ClassifyStructural(*new_expr);
             auto new_flags = new_cls.flags & kUnsupportedFlagMask;
             auto new_sites = CountRewriteableSites(*new_expr);
+            COBRA_TRACE(
+                "MixedRewriter", "Round {}: nodes={} sites={} flags=0x{:x}", round, new_count,
+                new_sites, static_cast< uint32_t >(new_flags)
+            );
 
             // Safety: reject if new unsupported flags appeared
-            if (static_cast< uint32_t >(new_flags & ~old_flags) != 0) { break; }
+            if (static_cast< uint32_t >(new_flags & ~old_flags) != 0) {
+                COBRA_TRACE(
+                    "MixedRewriter", "Round {}: ABORT — new unsupported flags appeared", round
+                );
+                break;
+            }
 
             // Progress check
             const bool coarse_progress = (new_flags != old_flags)
                 && ((static_cast< uint32_t >(new_flags) & static_cast< uint32_t >(old_flags))
                     == static_cast< uint32_t >(new_flags));
             const bool fine_progress = (new_sites < old_sites);
+            COBRA_TRACE(
+                "MixedRewriter", "Round {}: coarse_progress={} fine_progress={}", round,
+                coarse_progress, fine_progress
+            );
 
-            if (!coarse_progress && !fine_progress) { break; }
+            if (!coarse_progress && !fine_progress) {
+                COBRA_TRACE("MixedRewriter", "Round {}: STOP — no progress", round);
+                break;
+            }
 
             result.expr              = std::move(new_expr);
             old_flags                = new_flags;
@@ -198,9 +228,16 @@ namespace cobra {
             result.structure_changed = true;
             result.rounds_applied    = round;
 
-            if (DeriveRoute(new_flags) != Route::kMixedRewrite) { break; }
+            if (DeriveRoute(new_flags) != Route::kMixedRewrite) {
+                COBRA_TRACE("MixedRewriter", "Round {}: route changed — done", round);
+                break;
+            }
         }
 
+        COBRA_TRACE(
+            "MixedRewriter", "RewriteMixedProducts: total_rounds={} changed={}",
+            result.rounds_applied, result.structure_changed
+        );
         return result;
     }
 

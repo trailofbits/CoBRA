@@ -1,6 +1,7 @@
 #include "cobra/core/BasisTransform.h"
 #include "cobra/core/BitWidth.h"
 #include "cobra/core/PolyIR.h"
+#include "cobra/core/Trace.h"
 #include <cstdint>
 #include <utility>
 
@@ -15,6 +16,11 @@ namespace cobra {
         ) {
             const uint64_t kMask = Bitmask(bitwidth);
             CoeffMap current     = input;
+            COBRA_TRACE(
+                "BasisTransform", "TransformBasis: dir={} vars={} terms={}",
+                dir == Direction::kToFactorial ? "ToFactorial" : "ToMonomial", num_vars,
+                input.size()
+            );
 
             for (uint8_t var = 0; var < num_vars; ++var) {
                 CoeffMap next;
@@ -44,6 +50,7 @@ namespace cobra {
                 }
                 current = std::move(next);
             }
+            COBRA_TRACE("BasisTransform", "TransformBasis: output terms={}", current.size());
             return current;
         }
 

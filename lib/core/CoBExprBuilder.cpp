@@ -2,6 +2,7 @@
 #include "cobra/core/BitWidth.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/ExprUtils.h"
+#include "cobra/core/Trace.h"
 
 #include <algorithm>
 #include <bit>
@@ -89,6 +90,11 @@ namespace cobra {
                         auto rhs     = build_operand(terms[j]);
                         auto or_expr = Expr::BitwiseOr(std::move(lhs), std::move(rhs));
 
+                        COBRA_TRACE(
+                            "CoBBuilder",
+                            "GreedyRewrite: OR match masks=0x{:x},0x{:x} coeff={}", m1, m2, c
+                        );
+
                         terms[i].consumed = true;
                         terms[j].consumed = true;
                         if (union_idx < terms.size()) { terms[union_idx].consumed = true; }
@@ -108,6 +114,11 @@ namespace cobra {
                         auto lhs      = build_operand(terms[i]);
                         auto rhs      = build_operand(terms[j]);
                         auto xor_expr = Expr::BitwiseXor(std::move(lhs), std::move(rhs));
+
+                        COBRA_TRACE(
+                            "CoBBuilder",
+                            "GreedyRewrite: XOR match masks=0x{:x},0x{:x} coeff={}", m1, m2, c
+                        );
 
                         terms[i].consumed = true;
                         terms[j].consumed = true;
@@ -149,6 +160,9 @@ namespace cobra {
             terms[match].expr     = Expr::BitwiseNot(std::move(operand));
             terms[match].coeff    = 1;
             terms[match].consumed = false;
+            COBRA_TRACE(
+                "CoBBuilder", "NotRecognition: match at mask=0x{:x}", terms[match].mask
+            );
             return true;
         }
 
@@ -161,6 +175,10 @@ namespace cobra {
         std::vector< Term > terms;
         std::unordered_map< uint64_t, size_t > mask_index;
         uint64_t const_coeff = coeffs[0];
+        COBRA_TRACE(
+            "CoBBuilder", "BuildCobExpr: coeff_count={} const_coeff={} bitwidth={}",
+            coeffs.size(), const_coeff, bitwidth
+        );
 
         for (size_t i = 1; i < coeffs.size(); ++i) {
             if (coeffs[i] == 0) { continue; }
@@ -207,6 +225,7 @@ namespace cobra {
         }
 
         if (!result) { result = Expr::Constant(0); }
+        COBRA_TRACE("CoBBuilder", "BuildCobExpr: done");
         return result;
     }
 

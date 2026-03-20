@@ -1,6 +1,7 @@
 #include "cobra/core/BitPartitioner.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/SemilinearIR.h"
+#include "cobra/core/Trace.h"
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -103,6 +104,7 @@ namespace cobra {
     } // namespace
 
     std::vector< PartitionClass > ComputePartitions(const SemilinearIR &ir) {
+        COBRA_TRACE("BitPartitioner", "ComputePartitions: atoms={}", ir.atom_table.size());
         if (ir.atom_table.empty()) { return {}; }
 
         if (ir.bitwidth == 0 || ir.bitwidth > 64) { return {}; }
@@ -148,6 +150,7 @@ namespace cobra {
         for (auto &[prof, mask] : profile_to_mask) {
             result.push_back({ .mask = mask, .profile = prof });
         }
+        COBRA_TRACE("BitPartitioner", "ComputePartitions: partitions={}", result.size());
         return result;
     }
 

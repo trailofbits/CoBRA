@@ -1,6 +1,7 @@
 #include "cobra/core/PatternMatcher.h"
 #include "cobra/core/BitWidth.h"
 #include "cobra/core/Expr.h"
+#include "cobra/core/Trace.h"
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -1063,33 +1064,37 @@ namespace cobra {
 
     std::optional< std::unique_ptr< Expr > >
     MatchPattern(const std::vector< uint64_t > &sig, uint32_t num_vars, uint32_t bitwidth) {
+        COBRA_TRACE("PatternMatcher", "MatchPattern: vars={} bitwidth={}", num_vars, bitwidth);
+
         // Constant: all entries equal (works for any variable count)
-        if (AllEqual(sig)) { return Expr::Constant(sig[0]); }
-
-        if (num_vars == 1) { return Match1var(sig, bitwidth); }
-
-        // 2-var Boolean: table lookup for all 16 functions
-        if (num_vars == 2 && IsBooleanSig(sig)) {
-            return Match2varBoolean(static_cast< uint8_t >(PackBoolSig(sig)));
+        if (AllEqual(sig)) {
+            COBRA_TRACE("PatternMatcher", "MatchPattern: {}", "HIT");
+            return Expr::Constant(sig[0]);
         }
 
-        // 3-var Boolean: table lookup for all 256 functions
-        if (num_vars == 3 && IsBooleanSig(sig)) {
-            return Match3varBoolean(static_cast< uint8_t >(PackBoolSig(sig)));
+        std::optional< std::unique_ptr< Expr > > result;
+
+        if (num_vars == 1) {
+            result = Match1var(sig, bitwidth);
+        } else if (num_vars == 2 && IsBooleanSig(sig)) {
+            // 2-var Boolean: table lookup for all 16 functions
+            result = Match2varBoolean(static_cast< uint8_t >(PackBoolSig(sig)));
+        } else if (num_vars == 3 && IsBooleanSig(sig)) {
+            // 3-var Boolean: table lookup for all 256 functions
+            result = Match3varBoolean(static_cast< uint8_t >(PackBoolSig(sig)));
+        } else if (num_vars == 4 && IsBooleanSig(sig)) {
+            // 4-var Boolean: Shannon decomposition into two 3-var lookups
+            result = Match4varBoolean(static_cast< uint16_t >(PackBoolSig(sig)));
+        } else if (num_vars == 5 && IsBooleanSig(sig)) {
+            // 5-var Boolean: Shannon decomposition into two 4-var lookups
+            result = Match5varBoolean(PackBoolSig(sig));
+        } else if (!IsBooleanSig(sig)) {
+            // Scaled boolean: c + k * boolean_pattern
+            result = MatchScaledBoolean(sig, num_vars, bitwidth);
         }
 
-        // 4-var Boolean: Shannon decomposition into two 3-var lookups
-        if (num_vars == 4 && IsBooleanSig(sig)) {
-            return Match4varBoolean(static_cast< uint16_t >(PackBoolSig(sig)));
-        }
-
-        // 5-var Boolean: Shannon decomposition into two 4-var lookups
-        if (num_vars == 5 && IsBooleanSig(sig)) { return Match5varBoolean(PackBoolSig(sig)); }
-
-        // Scaled boolean: c + k * boolean_pattern
-        if (!IsBooleanSig(sig)) { return MatchScaledBoolean(sig, num_vars, bitwidth); }
-
-        return std::nullopt;
+        COBRA_TRACE("PatternMatcher", "MatchPattern: {}", result ? "HIT" : "MISS");
+        return result;
     }
 
 } // namespace cobra

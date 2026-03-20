@@ -4,6 +4,7 @@
 #include "cobra/core/MathUtils.h"
 #include "cobra/core/Result.h"
 #include "cobra/core/SingletonPowerPoly.h"
+#include "cobra/core/Trace.h"
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -13,6 +14,9 @@ namespace cobra {
 
     Result< SingletonPowerResult >
     RecoverSingletonPowers(const Evaluator &eval, uint32_t num_vars, uint32_t bitwidth) {
+        COBRA_TRACE(
+            "PowerRecovery", "RecoverSingletonPowers: vars={} bitwidth={}", num_vars, bitwidth
+        );
         if (bitwidth < 2 || bitwidth > 64) {
             return Err< SingletonPowerResult >(
                 CobraError::kNoReduction,
@@ -95,6 +99,7 @@ namespace cobra {
             result.per_var[var].terms = std::move(terms);
         }
 
+        COBRA_TRACE("PowerRecovery", "RecoverSingletonPowers: found={}", true);
         return Ok(std::move(result));
     }
 
