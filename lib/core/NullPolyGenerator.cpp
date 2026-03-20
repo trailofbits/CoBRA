@@ -1,7 +1,7 @@
 #include "cobra/core/NullPolyGenerator.h"
 #include "cobra/core/BasisTransform.h"
 #include "cobra/core/BitWidth.h"
-#include "cobra/core/ExponentTuple.h"
+#include "cobra/core/MonomialKey.h"
 #include "cobra/core/PolyIR.h"
 
 #include <array>
@@ -23,22 +23,22 @@ namespace cobra {
             return x ^ (x >> 31);
         }
 
-        // Sample a random exponent tuple with at least one digit == max_degree.
-        // Tuples with k=0 (no digit == max_degree) are always zero in the null
-        // space and must be excluded.
-        ExponentTuple
-        SampleTupleWithSquared(std::mt19937_64 &rng, uint8_t num_vars, uint8_t max_degree) {
+        // Sample a random exponent tuple with positive V2FactorialWeight (at least one exponent
+        // >= 2). Tuples with zero V2FactorialWeight are always zero in the null space and must
+        // be excluded.
+        MonomialKey SampleTupleWithPositiveNullWeight(
+            std::mt19937_64 &rng, uint8_t num_vars, uint8_t max_degree
+        ) {
             // Use unsigned, not uint8_t — uniform_int_distribution<uint8_t>
             // is undefined behavior per C++17 [rand.req.genl].
             std::uniform_int_distribution< unsigned > digit_dist(0, max_degree);
-            std::array< uint8_t, kMaxPolyVars > exps;
+            std::array< uint8_t, kMaxPolyVars > exps{};
             for (;;) {
-                bool has_max = false;
                 for (uint8_t i = 0; i < num_vars; ++i) {
                     exps[i] = static_cast< uint8_t >(digit_dist(rng));
-                    if (exps[i] == max_degree) { has_max = true; }
                 }
-                if (has_max) { return ExponentTuple::FromExponents(exps.data(), num_vars); }
+                auto candidate = MonomialKey::FromExponents(exps.data(), num_vars);
+                if (candidate.V2FactorialWeight(num_vars) > 0) { return candidate; }
             }
         }
 
@@ -46,8 +46,8 @@ namespace cobra {
 
     PolyIR AddNullPolynomial(const PolyIR &seed, const NullPolyConfig &config) {
         assert(seed.bitwidth >= 2 && seed.bitwidth <= 64);
-        assert(config.max_degree == 2);
-        assert(seed.num_vars <= kMaxPolyVars);
+        assert(seed.num_vars > 0 && seed.num_vars <= kMaxPolyVars);
+        if (config.max_degree < 2) { return seed; }
 
         const uint8_t kN     = seed.num_vars;
         const uint32_t kW    = seed.bitwidth;
@@ -57,32 +57,27 @@ namespace cobra {
 
         // Step 1: Generate null coefficients in factorial basis.
         // A factorial-basis coefficient is null iff it is a multiple of
-        // 2^{w-k} where k = #{i : exp_i == 2}.
-        // When k >= w, every coefficient is valid (bound is 1).
+        // 2^{w-q} where q = V2FactorialWeight.
+        // When q >= w, every coefficient is valid (bound is 1).
         CoeffMap null_factorial;
 
         for (uint32_t t = 0; t < config.num_terms; ++t) {
-            const ExponentTuple kTuple = SampleTupleWithSquared(rng, kN, config.max_degree);
+            const MonomialKey kTuple =
+                SampleTupleWithPositiveNullWeight(rng, kN, config.max_degree);
 
-            // Count squared coordinates
-            std::array< uint8_t, kMaxPolyVars > exps;
-            kTuple.ToExponents(exps.data(), kN);
-            uint8_t k = 0;
-            for (uint8_t i = 0; i < kN; ++i) {
-                if (exps[i] == 2) { ++k; }
-            }
+            const uint32_t q = kTuple.V2FactorialWeight(kN);
 
             Coeff coeff = 0;
-            if (k >= kW) {
+            if (q >= kW) {
                 // Unconstrained: any nonzero value
                 std::uniform_int_distribution< uint64_t > dist(
                     1, (kW < 64) ? ((1ULL << kW) - 1) : UINT64_MAX
                 );
                 coeff = dist(rng);
             } else {
-                // Constrained: multiple of 2^{kW-k}
-                const uint64_t kBound   = 1ULL << (kW - k);
-                const uint64_t kMaxMult = (1ULL << k) - 1; // k >= 1, fits
+                // Constrained: multiple of 2^{kW-q}
+                const uint64_t kBound   = 1ULL << (kW - q);
+                const uint64_t kMaxMult = (1ULL << q) - 1; // q < kW <= 64
                 std::uniform_int_distribution< uint64_t > dist(1, kMaxMult);
                 coeff = (dist(rng) * kBound) & kMask;
             }

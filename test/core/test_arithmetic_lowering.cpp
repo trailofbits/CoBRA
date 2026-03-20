@@ -5,9 +5,9 @@ using namespace cobra;
 
 namespace {
 
-    ExponentTuple make_exp(std::initializer_list< uint8_t > exps) {
+    MonomialKey make_exp(std::initializer_list< uint8_t > exps) {
         auto data = exps.begin();
-        return ExponentTuple::FromExponents(data, static_cast< uint8_t >(exps.size()));
+        return MonomialKey::FromExponents(data, static_cast< uint8_t >(exps.size()));
     }
 
 } // namespace

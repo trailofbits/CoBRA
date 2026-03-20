@@ -1,7 +1,7 @@
 #include "cobra/core/BasisTransform.h"
 #include "cobra/core/BitWidth.h"
+#include "cobra/core/MathUtils.h"
 #include "cobra/core/PolyIR.h"
-#include "cobra/core/Trace.h"
 #include <cstdint>
 #include <utility>
 
@@ -16,31 +16,38 @@ namespace cobra {
         ) {
             const uint64_t kMask = Bitmask(bitwidth);
             CoeffMap current     = input;
-            COBRA_TRACE(
-                "BasisTransform", "TransformBasis: dir={} vars={} terms={}",
-                dir == Direction::kToFactorial ? "ToFactorial" : "ToMonomial", num_vars,
-                input.size()
-            );
+
+            // Infer max degree from input
+            uint8_t max_deg = 0;
+            for (const auto &[key, _] : current) {
+                uint8_t md = key.MaxDegree(num_vars);
+                if (md > max_deg) { max_deg = md; }
+            }
+            if (max_deg <= 1) { return current; } // identity for degree <= 1
+
+            // Precompute Stirling table
+            auto stirling = (dir == Direction::kToFactorial)
+                ? BuildStirlingSecondKind(max_deg, bitwidth)
+                : BuildStirlingFirstKind(max_deg, bitwidth);
 
             for (uint8_t var = 0; var < num_vars; ++var) {
                 CoeffMap next;
                 for (const auto &[tuple, c] : current) {
-                    const uint8_t exp_i = tuple.ExponentAt(var, num_vars);
-                    if (exp_i <= 1) {
+                    const uint8_t e = tuple.ExponentAt(var);
+                    if (e <= 1) {
                         next[tuple] = (next[tuple] + c) & kMask;
                     } else {
-                        // exp_i == 2: split contribution to rows 1 and 2.
-                        // F_3 (ToFactorial): +c to row 1, +c to row 2
-                        // C_3 (ToMonomial):  -c to row 1, +c to row 2
-                        auto t1 = tuple.WithExponent(var, 1, num_vars);
-                        if (dir == Direction::kToFactorial) {
-                            next[t1] = (next[t1] + c) & kMask;
-                        } else {
-                            next[t1] = (next[t1] + ModNeg(c, bitwidth)) & kMask;
+                        // Redistribute across j = 1..e using Stirling row
+                        for (uint8_t j = 1; j <= e; ++j) {
+                            uint64_t s_coeff = stirling[e][j];
+                            if (s_coeff == 0) { continue; }
+                            auto new_tuple = tuple.WithExponent(var, j);
+                            next[new_tuple] =
+                                (next[new_tuple] + ((c * s_coeff) & kMask)) & kMask;
                         }
-                        next[tuple] = (next[tuple] + c) & kMask;
                     }
                 }
+                // Strip zeros
                 for (auto it = next.begin(); it != next.end();) {
                     if (it->second == 0) {
                         it = next.erase(it);
@@ -50,7 +57,6 @@ namespace cobra {
                 }
                 current = std::move(next);
             }
-            COBRA_TRACE("BasisTransform", "TransformBasis: output terms={}", current.size());
             return current;
         }
 

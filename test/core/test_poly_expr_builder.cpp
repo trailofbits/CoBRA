@@ -7,26 +7,9 @@ using namespace cobra;
 
 namespace {
 
-    ExponentTuple make_exp(std::initializer_list< uint8_t > exps) {
+    MonomialKey make_exp(std::initializer_list< uint8_t > exps) {
         auto data = exps.begin();
-        return ExponentTuple::FromExponents(data, static_cast< uint8_t >(exps.size()));
-    }
-
-    // Evaluate a polynomial in monomial basis at given values.
-    uint64_t eval_monomial(
-        const std::vector< std::pair< std::vector< uint8_t >, uint64_t > > &terms,
-        const std::vector< uint64_t > &vals, uint32_t w
-    ) {
-        uint64_t mask = Bitmask(w);
-        uint64_t sum  = 0;
-        for (const auto &[exps, coeff] : terms) {
-            uint64_t product = coeff;
-            for (size_t i = 0; i < exps.size(); ++i) {
-                for (uint8_t e = 0; e < exps[i]; ++e) { product = (product * vals[i]) & mask; }
-            }
-            sum = (sum + product) & mask;
-        }
-        return sum;
+        return MonomialKey::FromExponents(data, static_cast< uint8_t >(exps.size()));
     }
 
 } // namespace
@@ -155,6 +138,56 @@ TEST(PolyExprBuilderTest, DeterministicOutput) {
         for (uint64_t y = 0; y < 4; ++y) {
             std::vector< uint64_t > v = { x, y };
             EXPECT_EQ(EvalExpr(*e1, v, 64), EvalExpr(*e2, v, 64));
+        }
+    }
+}
+
+TEST(PolyExprBuilderTest, CubicTerm) {
+    // x_(3) with coeff 1. x_(3) = x(x-1)(x-2) = x^3 - 3x^2 + 2x
+    NormalizedPoly np{ 1, 64, { { make_exp({ 3 }), 1 } } };
+    auto r = BuildPolyExpr(np);
+    ASSERT_TRUE(r.has_value());
+    auto &expr = r.value();
+
+    // x_(3) at x=4 -> 4*3*2 = 24
+    std::vector< uint64_t > v4 = { 4 };
+    EXPECT_EQ(EvalExpr(*expr, v4, 64), 24u);
+    // x_(3) at x=2 -> 2*1*0 = 0
+    std::vector< uint64_t > v2 = { 2 };
+    EXPECT_EQ(EvalExpr(*expr, v2, 64), 0u);
+}
+
+TEST(PolyExprBuilderTest, Degree4Term) {
+    // x_(4) with coeff 1. x_(4) = x(x-1)(x-2)(x-3)
+    NormalizedPoly np{ 1, 64, { { make_exp({ 4 }), 1 } } };
+    auto r = BuildPolyExpr(np);
+    ASSERT_TRUE(r.has_value());
+    auto &expr = r.value();
+
+    // x_(4) at x=5 -> 5*4*3*2 = 120
+    std::vector< uint64_t > v5 = { 5 };
+    EXPECT_EQ(EvalExpr(*expr, v5, 64), 120u);
+    // x_(4) at x=3 -> 3*2*1*0 = 0
+    std::vector< uint64_t > v3 = { 3 };
+    EXPECT_EQ(EvalExpr(*expr, v3, 64), 0u);
+}
+
+TEST(PolyExprBuilderTest, MixedDegreeMultivariate) {
+    // x^3 * y = x_(1)*y_(1) + 3*x_(2)*y_(1) + x_(3)*y_(1)
+    // Check eval at x=2, y=3 -> 2^3 * 3 = 24
+    NormalizedPoly np{
+        2,
+        64,
+        { { make_exp({ 1, 1 }), 1 }, { make_exp({ 2, 1 }), 3 }, { make_exp({ 3, 1 }), 1 } }
+    };
+    auto r = BuildPolyExpr(np);
+    ASSERT_TRUE(r.has_value());
+
+    for (uint64_t x = 0; x < 5; ++x) {
+        for (uint64_t y = 0; y < 5; ++y) {
+            std::vector< uint64_t > v = { x, y };
+            uint64_t expected         = x * x * x * y;
+            EXPECT_EQ(EvalExpr(*r.value(), v, 64), expected) << "x=" << x << " y=" << y;
         }
     }
 }

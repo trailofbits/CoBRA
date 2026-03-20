@@ -6,9 +6,9 @@ using namespace cobra;
 
 namespace {
 
-    ExponentTuple make_exp(std::initializer_list< uint8_t > exps) {
+    MonomialKey make_exp(std::initializer_list< uint8_t > exps) {
         auto data = exps.begin();
-        return ExponentTuple::FromExponents(data, static_cast< uint8_t >(exps.size()));
+        return MonomialKey::FromExponents(data, static_cast< uint8_t >(exps.size()));
     }
 
 } // namespace
@@ -183,4 +183,39 @@ TEST(PolyNormalizerTest, EmptyInput) {
     auto np = NormalizePolynomial(poly);
     EXPECT_TRUE(np.IsValid());
     EXPECT_TRUE(np.coeffs.empty());
+}
+
+TEST(PolyNormalizerTest, CubicTerm) {
+    // x^3 in monomial. S(3,j) distributes to factorial.
+    // Factorial should have entries for exp 1, 2, 3.
+    PolyIR poly{ 1, 64, { { make_exp({ 3 }), 1 } } };
+    auto np = NormalizePolynomial(poly);
+    EXPECT_TRUE(np.IsValid());
+    EXPECT_FALSE(np.coeffs.empty());
+}
+
+TEST(PolyNormalizerTest, Degree4_NullSpaceErase) {
+    // At w=4: v_2(4!) = 3. For exp=(4): q=3 >= w=4? No, 3 < 4.
+    // But bound_bits = 4 - 3 = 1, so coefficient must be 0 or 1.
+    // At w=3: q=3 >= w=3, so the term is null and erased.
+    PolyIR poly{ 1, 3, { { make_exp({ 4 }), 1 } } };
+    auto np = NormalizePolynomial(poly);
+    EXPECT_TRUE(np.IsValid());
+    // All degree-4 terms should be erased at w=3
+    EXPECT_EQ(np.coeffs.count(make_exp({ 4 })), 0u);
+}
+
+TEST(NormalizedPolyValidatorTest, Degree3Valid) {
+    // exp=(3): v_2(3!) = 1, bound = 2^{64-1} = huge. Any coefficient valid.
+    NormalizedPoly np{ 1, 64, { { make_exp({ 3 }), 42 } } };
+    EXPECT_TRUE(np.IsValid());
+}
+
+TEST(NormalizedPolyValidatorTest, Degree4_CoefficientBound) {
+    // exp=(4): v_2(4!) = 3, bound = 2^{8-3} = 32. Coeff 50 > 32 => invalid.
+    NormalizedPoly np{ 1, 8, { { make_exp({ 4 }), 50 } } };
+    EXPECT_FALSE(np.IsValid());
+    // Coeff 31 <= 32 => valid.
+    NormalizedPoly np2{ 1, 8, { { make_exp({ 4 }), 31 } } };
+    EXPECT_TRUE(np2.IsValid());
 }

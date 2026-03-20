@@ -1,6 +1,6 @@
 #include "cobra/core/ArithmeticLowering.h"
 #include "cobra/core/BitWidth.h"
-#include "cobra/core/ExponentTuple.h"
+#include "cobra/core/MonomialKey.h"
 #include "cobra/core/PolyIR.h"
 #include "cobra/core/Result.h"
 #include "cobra/core/Trace.h"
@@ -50,14 +50,14 @@ namespace cobra {
             if (kLinear != 0) {
                 std::array< uint8_t, kMaxPolyVars > exps{};
                 exps[i]         = 1;
-                auto key        = ExponentTuple::FromExponents(exps.data(), num_vars);
+                auto key        = MonomialKey::FromExponents(exps.data(), num_vars);
                 poly.terms[key] = (poly.terms[key] + kLinear) & kMask;
             }
 
             if (kSquare != 0) {
                 std::array< uint8_t, kMaxPolyVars > exps{};
                 exps[i]         = 2;
-                auto key        = ExponentTuple::FromExponents(exps.data(), num_vars);
+                auto key        = MonomialKey::FromExponents(exps.data(), num_vars);
                 poly.terms[key] = (poly.terms[key] + kSquare) & kMask;
             }
 
@@ -74,7 +74,7 @@ namespace cobra {
             for (uint8_t v = 0; v < num_vars; ++v) {
                 if ((m & (1ULL << v)) != 0u) { exps[v] = 1; }
             }
-            auto key        = ExponentTuple::FromExponents(exps.data(), num_vars);
+            auto key        = MonomialKey::FromExponents(exps.data(), num_vars);
             poly.terms[key] = (poly.terms[key] + kC) & kMask;
         }
 

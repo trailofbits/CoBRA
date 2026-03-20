@@ -13,19 +13,14 @@ namespace cobra {
         // Step 1: Per-variable basis transform (monomial -> factorial)
         CoeffMap current = ToFactorialBasis(poly.terms, kN, kW);
 
-        // Step 2: Coefficient reduction — mod 2^{kW - #twos} per entry
+        // Step 2: Coefficient reduction — mod 2^{kW - v2(e!)} per entry
         for (auto it = current.begin(); it != current.end();) {
-            uint32_t p   = it->first.packed;
-            uint8_t twos = 0;
-            for (uint8_t i = 0; i < kN; ++i) {
-                if (p % 3 == 2) { ++twos; }
-                p /= 3;
-            }
-            if (twos >= kW) {
+            uint32_t q = it->first.V2FactorialWeight(kN);
+            if (q >= kW) {
                 it = current.erase(it);
                 continue;
             }
-            const uint32_t kBoundBits = kW - twos;
+            const uint32_t kBoundBits = kW - q;
             // kBoundBits >= 64: all uint64_t values valid mod 2^64
             if (kBoundBits < 64) { it->second &= (1ULL << kBoundBits) - 1; }
             if (it->second == 0) {

@@ -11,9 +11,9 @@ using namespace cobra;
 
 namespace {
 
-    ExponentTuple make_exp(std::initializer_list< uint8_t > exps) {
+    MonomialKey make_exp(std::initializer_list< uint8_t > exps) {
         auto data = exps.begin();
-        return ExponentTuple::FromExponents(data, static_cast< uint8_t >(exps.size()));
+        return MonomialKey::FromExponents(data, static_cast< uint8_t >(exps.size()));
     }
 
     // Add monomial null polynomial terms to a seed and verify normalization.
@@ -194,6 +194,48 @@ TEST(NullPolyGeneratorTest, DeterministicReproducibility) {
     EXPECT_EQ(r1.terms, r2.terms);
 }
 
+TEST(NullPolyGeneratorTest, MaxDegree1_ReturnsSeed) {
+    PolyIR seed{ 1, 8, { { make_exp({ 1 }), 5 } } };
+    NullPolyConfig config{ 10, 1, 42 };
+    auto result = AddNullPolynomial(seed, config);
+    EXPECT_EQ(result.terms, seed.terms);
+}
+
+TEST(NullPolyGeneratorTest, MaxDegree3_PreservesNormalization) {
+    PolyIR seed{
+        2,
+        16,
+        { { make_exp({ 1, 0 }), 3 }, { make_exp({ 0, 1 }), 5 }, { make_exp({ 2, 0 }), 1 } }
+    };
+    NullPolyConfig config{ 10, 3, 42 };
+    auto perturbed      = AddNullPolynomial(seed, config);
+    auto norm_seed      = NormalizePolynomial(seed);
+    auto norm_perturbed = NormalizePolynomial(perturbed);
+    EXPECT_EQ(norm_seed, norm_perturbed);
+}
+
+TEST(NullPolyGeneratorTest, MaxDegree4_EvalEquivalence) {
+    PolyIR seed{
+        1, 64, { { make_exp({ 1 }), 7 }, { make_exp({ 2 }), 3 } }
+    };
+    NullPolyConfig config{ 15, 4, 12345 };
+    auto variant = AddNullPolynomial(seed, config);
+
+    auto norm_seed    = NormalizePolynomial(seed);
+    auto norm_variant = NormalizePolynomial(variant);
+
+    auto seed_expr    = BuildPolyExpr(norm_seed);
+    auto variant_expr = BuildPolyExpr(norm_variant);
+    ASSERT_TRUE(seed_expr.has_value());
+    ASSERT_TRUE(variant_expr.has_value());
+
+    for (uint64_t x = 0; x < 20; ++x) {
+        std::vector< uint64_t > v = { x };
+        EXPECT_EQ(EvalExpr(*seed_expr.value(), v, 64), EvalExpr(*variant_expr.value(), v, 64))
+            << "Mismatch at x=" << x;
+    }
+}
+
 // --- Randomized equivalence ---
 
 class RandomizedEquivalenceTest
@@ -220,7 +262,7 @@ TEST_P(RandomizedEquivalenceTest, NormalizationInvariant) {
         for (uint8_t i = 0; i < num_vars; ++i) {
             exps[i] = static_cast< uint8_t >(exp_dist(seed_rng));
         }
-        auto tuple        = ExponentTuple::FromExponents(exps, num_vars);
+        auto tuple        = MonomialKey::FromExponents(exps, num_vars);
         Coeff c           = coeff_dist(seed_rng);
         seed.terms[tuple] = (seed.terms[tuple] + c) & mask;
     }
@@ -286,7 +328,7 @@ TEST_P(EndToEndEquivalenceTest, EvalIdentical) {
         for (uint8_t i = 0; i < num_vars; ++i) {
             exps[i] = static_cast< uint8_t >(exp_dist(seed_rng));
         }
-        auto tuple        = ExponentTuple::FromExponents(exps, num_vars);
+        auto tuple        = MonomialKey::FromExponents(exps, num_vars);
         Coeff c           = coeff_dist(seed_rng);
         seed.terms[tuple] = (seed.terms[tuple] + c) & mask;
     }

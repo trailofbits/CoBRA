@@ -2,6 +2,6 @@
 builtin = clear,rare,en-GB_to_en-US,names,informal,code
 check-filenames =
 check-hidden =
-skip = */.git,*/build,*/build-deps
+skip = */.git,*/build,*/build-deps,.gitignore
 ignore-words-list = abd,iff,createor
 quiet-level = 2

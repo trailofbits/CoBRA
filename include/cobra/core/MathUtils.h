@@ -4,6 +4,7 @@
 #include <bit>
 #include <cassert>
 #include <cstdint>
+#include <vector>
 
 namespace cobra {
 
@@ -46,6 +47,41 @@ namespace cobra {
         uint64_t inv            = x & kModMask;
         for (uint32_t b = 3; b < bits; b *= 2) { inv = (inv * (2 - (x * inv))) & kModMask; }
         return inv & kModMask;
+    }
+
+    // Stirling numbers of the second kind S(n,k) mod 2^bitwidth.
+    // Returns a (max_degree+1) x (max_degree+1) table.
+    // Recurrence: S(n,k) = k*S(n-1,k) + S(n-1,k-1).
+    inline std::vector< std::vector< uint64_t > >
+    BuildStirlingSecondKind(uint8_t max_degree, uint32_t bitwidth) {
+        const uint64_t kMask = Bitmask(bitwidth);
+        const auto kN        = static_cast< size_t >(max_degree) + 1;
+        std::vector< std::vector< uint64_t > > s(kN, std::vector< uint64_t >(kN, 0));
+        s[0][0] = 1;
+        for (size_t n = 1; n < kN; ++n) {
+            for (size_t k = 1; k <= n; ++k) {
+                s[n][k] = ((k * s[n - 1][k]) + s[n - 1][k - 1]) & kMask;
+            }
+        }
+        return s;
+    }
+
+    // Signed Stirling numbers of the first kind s(n,k) mod 2^bitwidth.
+    // Returns a (max_degree+1) x (max_degree+1) table.
+    // Recurrence: s(n,k) = -(n-1)*s(n-1,k) + s(n-1,k-1).
+    inline std::vector< std::vector< uint64_t > >
+    BuildStirlingFirstKind(uint8_t max_degree, uint32_t bitwidth) {
+        const uint64_t kMask = Bitmask(bitwidth);
+        const auto kN        = static_cast< size_t >(max_degree) + 1;
+        std::vector< std::vector< uint64_t > > s(kN, std::vector< uint64_t >(kN, 0));
+        s[0][0] = 1;
+        for (size_t n = 1; n < kN; ++n) {
+            for (size_t k = 1; k <= n; ++k) {
+                uint64_t neg_nm1 = (0 - (n - 1)) & kMask;
+                s[n][k]          = ((neg_nm1 * s[n - 1][k]) + s[n - 1][k - 1]) & kMask;
+            }
+        }
+        return s;
     }
 
 } // namespace cobra

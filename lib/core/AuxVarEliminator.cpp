@@ -1,8 +1,10 @@
 #include "cobra/core/AuxVarEliminator.h"
 #include "cobra/core/Trace.h"
+#include <algorithm>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -55,6 +57,36 @@ namespace cobra {
                 std::popcount(live), num_vars
             );
             return live;
+        }
+
+        uint64_t Splitmix64(uint64_t &state) {
+            state      += 0x9E3779B97F4A7C15ULL;
+            uint64_t z  = state;
+            z           = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+            z           = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+            return z ^ (z >> 31);
+        }
+
+        bool IsSpuriousFullWidth(
+            const std::function< uint64_t(const std::vector< uint64_t > &) > &eval,
+            uint32_t var_index, uint32_t num_vars, uint32_t bitwidth
+        ) {
+            constexpr uint32_t kNumSamples = 8;
+            const uint64_t kMask = (bitwidth >= 64) ? UINT64_MAX : ((1ULL << bitwidth) - 1);
+            uint64_t rng_state   = (static_cast< uint64_t >(var_index) * 2654435761ULL)
+                + (static_cast< uint64_t >(num_vars) * 40503ULL) + 0xDEADBEEFULL;
+
+            std::vector< uint64_t > inputs(num_vars);
+            for (uint32_t s = 0; s < kNumSamples; ++s) {
+                for (uint32_t v = 0; v < num_vars; ++v) {
+                    inputs[v] = Splitmix64(rng_state) & kMask;
+                }
+                const uint64_t kVal1 = eval(inputs) & kMask;
+                inputs[var_index]    = Splitmix64(rng_state) & kMask;
+                const uint64_t kVal2 = eval(inputs) & kMask;
+                if (kVal1 != kVal2) { return false; }
+            }
+            return true;
         }
 
         inline uint64_t PextSoft(uint64_t val, uint64_t mask) {
@@ -179,6 +211,65 @@ namespace cobra {
             COBRA_TRACE("AuxVarEliminator", "  live: {}", rv);
         }
         COBRA_TRACE_SIG("AuxVarEliminator", "compacted sig", result.reduced_sig);
+        return result;
+    }
+
+    EliminationResult EliminateAuxVars(
+        const std::vector< uint64_t > &sig, const std::vector< std::string > &vars,
+        const std::function< uint64_t(const std::vector< uint64_t > &) > &eval,
+        uint32_t bitwidth
+    ) {
+        // Start with the boolean-signature-based elimination
+        auto result = EliminateAuxVars(sig, vars);
+
+        // Re-check each spurious variable at full width
+        const auto kNumVars = static_cast< uint32_t >(vars.size());
+        std::vector< std::string > still_spurious;
+        for (const auto &sv : result.spurious_vars) {
+            // Find the original index of this variable
+            uint32_t idx = 0;
+            for (uint32_t j = 0; j < kNumVars; ++j) {
+                if (vars[j] == sv) {
+                    idx = j;
+                    break;
+                }
+            }
+            if (IsSpuriousFullWidth(eval, idx, kNumVars, bitwidth)) {
+                still_spurious.push_back(sv);
+                COBRA_TRACE("AuxVarEliminator", "FullWidth: {} is spurious (confirmed)", sv);
+            } else {
+                result.real_vars.push_back(sv);
+                COBRA_TRACE("AuxVarEliminator", "FullWidth: {} is LIVE at full width", sv);
+            }
+        }
+        result.spurious_vars = std::move(still_spurious);
+
+        // Recompute live mask and reduced sig from the updated real_vars
+        uint64_t live_mask = 0;
+        for (const auto &rv : result.real_vars) {
+            for (uint32_t j = 0; j < kNumVars; ++j) {
+                if (vars[j] == rv) {
+                    live_mask |= (1ULL << j);
+                    break;
+                }
+            }
+        }
+
+        // Sort real_vars and spurious_vars by original index order
+        auto by_original_index = [&vars](const std::string &a, const std::string &b) {
+            uint32_t ia = 0;
+            uint32_t ib = 0;
+            for (uint32_t j = 0; j < vars.size(); ++j) {
+                if (vars[j] == a) { ia = j; }
+                if (vars[j] == b) { ib = j; }
+            }
+            return ia < ib;
+        };
+        std::sort(result.real_vars.begin(), result.real_vars.end(), by_original_index);
+        std::sort(result.spurious_vars.begin(), result.spurious_vars.end(), by_original_index);
+
+        result.reduced_sig = CompactSignatureSoft(sig, live_mask, kNumVars);
+
         return result;
     }
 

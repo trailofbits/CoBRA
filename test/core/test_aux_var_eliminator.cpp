@@ -151,3 +151,42 @@ TEST(AuxVarEliminatorTest, MultipleInterleavedSpurious) {
     EXPECT_EQ(result.reduced_sig[6], 2u);
     EXPECT_EQ(result.reduced_sig[7], 3u);
 }
+
+// Full-width sensitivity: x*y looks spurious for y on {0,1}
+// because x*y == x&y on {0,1}, but y matters at full width.
+TEST(AuxVarEliminatorTest, FullWidthKeepsLiveVar) {
+    // g(x,y) = x*y - x&y is zero on all {0,1} inputs, so both x and y
+    // look spurious. But g(2,3) = 6 - 2 = 4, so both matter at full width.
+    std::vector< uint64_t > sig     = { 0, 0, 0, 0 }; // g=0 on all {0,1}
+    std::vector< std::string > vars = { "x", "y" };
+
+    auto eval = [](const std::vector< uint64_t > &v) -> uint64_t {
+        return (v[0] * v[1]) - (v[0] & v[1]);
+    };
+
+    auto result = EliminateAuxVars(sig, vars, eval, 64);
+
+    // Both x and y must be kept as real vars
+    EXPECT_EQ(result.real_vars.size(), 2u);
+    EXPECT_EQ(result.spurious_vars.size(), 0u);
+}
+
+// Full-width sensitivity: y is truly spurious at all widths.
+TEST(AuxVarEliminatorTest, FullWidthEliminatesGenuineSpurious) {
+    // f(x,y) = x + 0*y = x. y never affects the output.
+    std::vector< uint64_t > sig     = { 0, 1, 0, 1 }; // f(0,0)=0,f(1,0)=1,f(0,1)=0,f(1,1)=1
+    std::vector< std::string > vars = { "x", "y" };
+
+    auto eval = [](const std::vector< uint64_t > &v) -> uint64_t { return v[0]; };
+
+    auto result = EliminateAuxVars(sig, vars, eval, 64);
+
+    EXPECT_EQ(result.real_vars.size(), 1u);
+    EXPECT_EQ(result.real_vars[0], "x");
+    EXPECT_EQ(result.spurious_vars.size(), 1u);
+    EXPECT_EQ(result.spurious_vars[0], "y");
+    // Reduced sig: f(0)=0, f(1)=1
+    EXPECT_EQ(result.reduced_sig.size(), 2u);
+    EXPECT_EQ(result.reduced_sig[0], 0u);
+    EXPECT_EQ(result.reduced_sig[1], 1u);
+}

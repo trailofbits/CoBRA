@@ -561,3 +561,4 @@ build_check/
 Testing/
 compile_commands.json
 CMakeFiles/
+.worktrees/

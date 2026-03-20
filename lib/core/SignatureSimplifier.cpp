@@ -248,19 +248,11 @@ namespace cobra {
         {
             std::vector< uint32_t > support(kNumVars);
             for (uint32_t i = 0; i < kNumVars; ++i) { support[i] = i; }
-            auto multivar = RecoverMultivarPoly(*ctx.eval, support, kNumVars, opts.bitwidth);
-            if (multivar.has_value()) {
-                auto poly_expr = BuildPolyExpr(*multivar);
-                if (poly_expr.has_value()) {
-                    auto check = FullWidthCheckEval(
-                        *ctx.eval, kNumVars, *poly_expr.value(), opts.bitwidth
-                    );
-                    if (check.passed) {
-                        TryUpdateBest(
-                            best, std::move(poly_expr.value()), /*verified=*/true, baseline_cost
-                        );
-                    }
-                }
+            auto recovery = RecoverAndVerifyPoly(*ctx.eval, support, kNumVars, opts.bitwidth);
+            if (recovery.has_value()) {
+                TryUpdateBest(
+                    best, std::move(recovery->expr), /*verified=*/true, baseline_cost
+                );
             }
         }
 

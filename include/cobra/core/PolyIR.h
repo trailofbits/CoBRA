@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cobra/core/ExponentTuple.h"
+#include "cobra/core/MonomialKey.h"
 #include <cstdint>
 #include <unordered_map>
 
@@ -8,7 +8,7 @@ namespace cobra {
 
     using Coeff = uint64_t;
 
-    using CoeffMap = std::unordered_map< ExponentTuple, Coeff, ExponentTupleHash >;
+    using CoeffMap = std::unordered_map< MonomialKey, Coeff, MonomialKeyHash >;
 
     struct PolyIR
     {
@@ -29,16 +29,9 @@ namespace cobra {
             }
             for (const auto &[tuple, c] : coeffs) {
                 if (c == 0) { return false; }
-                uint32_t p   = tuple.packed;
-                uint8_t twos = 0;
-                for (uint8_t i = 0; i < num_vars; ++i) {
-                    const uint8_t d = p % 3;
-                    if (d > 2) { return false; }
-                    if (d == 2) { ++twos; }
-                    p /= 3;
-                }
-                if (twos >= bitwidth) { return false; }
-                const uint32_t bound_bits = bitwidth - twos;
+                uint32_t q = tuple.V2FactorialWeight(num_vars);
+                if (q >= bitwidth) { return false; }
+                const uint32_t bound_bits = bitwidth - q;
                 if (bound_bits < 64) {
                     if (c >= (1ULL << bound_bits)) { return false; }
                 }

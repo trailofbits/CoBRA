@@ -9,7 +9,7 @@ namespace cobra {
     struct NullPolyConfig
     {
         uint32_t num_terms; // upper bound on sampled factorial-basis coordinates
-        uint8_t max_degree; // max exponent per variable; asserted == 2
+        uint8_t max_degree; // max exponent per variable (>= 2 for non-trivial null space)
         uint64_t rng_seed;  // deterministic reproducibility
     };
 

@@ -6,9 +6,9 @@ using namespace cobra;
 
 namespace {
 
-    ExponentTuple make_exp(std::initializer_list< uint8_t > exps) {
+    MonomialKey make_exp(std::initializer_list< uint8_t > exps) {
         auto data = exps.begin();
-        return ExponentTuple::FromExponents(data, static_cast< uint8_t >(exps.size()));
+        return MonomialKey::FromExponents(data, static_cast< uint8_t >(exps.size()));
     }
 
 } // namespace
@@ -157,4 +157,72 @@ TEST(BasisTransformTest, CrossCheckKnownValues) {
     EXPECT_EQ(m.size(), 2u);
     EXPECT_EQ(m.at(make_exp({ 1 })), 3u);
     EXPECT_EQ(m.at(make_exp({ 2 })), 5u);
+}
+
+TEST(BasisTransformTest, CubicToFactorial) {
+    // x^3 in monomial -> factorial basis
+    // S(3,1)=1, S(3,2)=3, S(3,3)=1
+    // So x^3 -> 1*x_(1) + 3*x_(2) + 1*x_(3)
+    CoeffMap input = {
+        { make_exp({ 3 }), 1 }
+    };
+    auto f = ToFactorialBasis(input, 1, 64);
+    EXPECT_EQ(f.size(), 3u);
+    EXPECT_EQ(f.at(make_exp({ 1 })), 1u);
+    EXPECT_EQ(f.at(make_exp({ 2 })), 3u);
+    EXPECT_EQ(f.at(make_exp({ 3 })), 1u);
+}
+
+TEST(BasisTransformTest, CubicFactorialToMonomial) {
+    // x_(3) in factorial -> monomial
+    // s(3,1)=2, s(3,2)=-3 mod 2^64, s(3,3)=1
+    // So x_(3) -> 2*x + (-3)*x^2 + 1*x^3
+    CoeffMap input = {
+        { make_exp({ 3 }), 1 }
+    };
+    auto m = ToMonomialBasis(input, 1, 64);
+    EXPECT_EQ(m.size(), 3u);
+    EXPECT_EQ(m.at(make_exp({ 1 })), 2u);
+    EXPECT_EQ(m.at(make_exp({ 2 })), UINT64_MAX - 2); // -3 mod 2^64
+    EXPECT_EQ(m.at(make_exp({ 3 })), 1u);
+}
+
+TEST(BasisTransformTest, CubicRoundtrip) {
+    CoeffMap original = {
+        { make_exp({ 1 }), 5 },
+        { make_exp({ 2 }), 3 },
+        { make_exp({ 3 }), 7 }
+    };
+    auto f = ToFactorialBasis(original, 1, 64);
+    auto m = ToMonomialBasis(f, 1, 64);
+    EXPECT_EQ(m.size(), original.size());
+    for (const auto &[k, v] : original) {
+        ASSERT_TRUE(m.count(k)) << "Missing tuple in cubic roundtrip";
+        EXPECT_EQ(m.at(k), v);
+    }
+}
+
+TEST(BasisTransformTest, Degree4Roundtrip) {
+    CoeffMap original = {
+        { make_exp({ 4 }), 1 },
+        { make_exp({ 2 }), 3 }
+    };
+    auto f = ToFactorialBasis(original, 1, 64);
+    auto m = ToMonomialBasis(f, 1, 64);
+    for (const auto &[k, v] : original) {
+        ASSERT_TRUE(m.count(k)) << "Missing tuple in degree-4 roundtrip";
+        EXPECT_EQ(m.at(k), v);
+    }
+}
+
+TEST(BasisTransformTest, MultivariateCubic) {
+    // x^3 * y in monomial. Stirling applied per-variable.
+    // x^3 -> S(3,j) contributions, y stays degree 1 (identity).
+    CoeffMap input = {
+        { make_exp({ 3, 1 }), 1 }
+    };
+    auto f = ToFactorialBasis(input, 2, 64);
+    EXPECT_EQ(f.at(make_exp({ 1, 1 })), 1u); // S(3,1)*1
+    EXPECT_EQ(f.at(make_exp({ 2, 1 })), 3u); // S(3,2)*1
+    EXPECT_EQ(f.at(make_exp({ 3, 1 })), 1u); // S(3,3)*1
 }

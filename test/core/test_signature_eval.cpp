@@ -1,6 +1,7 @@
 #include "cobra/core/Expr.h"
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/SignatureEval.h"
+#include "cobra/core/Simplifier.h"
 #include <gtest/gtest.h>
 
 using namespace cobra;
@@ -109,4 +110,43 @@ TEST(SignatureEvalTest, Bitwidth8) {
     EXPECT_EQ(sig[1], 200u);
     EXPECT_EQ(sig[2], 100u);
     EXPECT_EQ(sig[3], (200u + 100u) & 0xFF);
+}
+
+TEST(SignatureEvalTest, EvaluatorOverload_XorFunction) {
+    // f(x0, x1) = x0 ^ x1
+    cobra::Evaluator eval = [](const std::vector< uint64_t > &v) -> uint64_t {
+        return v[0] ^ v[1];
+    };
+    auto sig = cobra::EvaluateBooleanSignature(eval, 2, 64);
+    // sig[0b00]=0, sig[0b01]=1, sig[0b10]=1, sig[0b11]=0
+    ASSERT_EQ(sig.size(), 4u);
+    EXPECT_EQ(sig[0], 0u);
+    EXPECT_EQ(sig[1], 1u);
+    EXPECT_EQ(sig[2], 1u);
+    EXPECT_EQ(sig[3], 0u);
+}
+
+TEST(SignatureEvalTest, EvaluatorOverload_MatchesExprOverload) {
+    // f(x0, x1) = x0 & x1
+    auto expr     = cobra::Expr::BitwiseAnd(cobra::Expr::Variable(0), cobra::Expr::Variable(1));
+    auto sig_expr = cobra::EvaluateBooleanSignature(*expr, 2, 64);
+
+    cobra::Evaluator eval = [](const std::vector< uint64_t > &v) -> uint64_t {
+        return v[0] & v[1];
+    };
+    auto sig_eval = cobra::EvaluateBooleanSignature(eval, 2, 64);
+
+    ASSERT_EQ(sig_expr.size(), sig_eval.size());
+    for (size_t i = 0; i < sig_expr.size(); ++i) {
+        EXPECT_EQ(sig_expr[i], sig_eval[i]) << "mismatch at index " << i;
+    }
+}
+
+TEST(SignatureEvalTest, EvaluatorOverload_BitwidthMasking) {
+    // f(x0) = ~x0 (should mask to 8-bit)
+    cobra::Evaluator eval = [](const std::vector< uint64_t > &v) -> uint64_t { return ~v[0]; };
+    auto sig              = cobra::EvaluateBooleanSignature(eval, 1, 8);
+    ASSERT_EQ(sig.size(), 2u);
+    EXPECT_EQ(sig[0], 0xFFu); // ~0 & 0xFF
+    EXPECT_EQ(sig[1], 0xFEu); // ~1 & 0xFF
 }
