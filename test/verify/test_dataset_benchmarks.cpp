@@ -315,9 +315,10 @@ TEST(GAMBADataset, QSynthEA) {
     EXPECT_EQ(stats.total, 501);
     EXPECT_EQ(stats.skipped_parse, 1); // header only
     EXPECT_EQ(stats.parsed, 500);
-    // 400 simplified: cofactor + hybrid + template decomposition
-    EXPECT_EQ(stats.simplified, 400);
-    EXPECT_EQ(stats.unsupported, 100);
+    // 383 simplified: cofactor + hybrid + template decomposition
+    // (17 previously false-positive: MapEvaluator verified on zero-slice only)
+    EXPECT_EQ(stats.simplified, 383);
+    EXPECT_EQ(stats.unsupported, 117);
     EXPECT_EQ(stats.failed_simplify, 0);
 }
 
