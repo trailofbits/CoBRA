@@ -15,32 +15,95 @@ These patterns cannot be handled by direct evaluation at Boolean points because 
 
 ## Pipeline Stages
 
-The mixed pipeline tries multiple decomposition strategies in order of increasing cost. The first strategy to produce a valid, simpler result wins.
+The mixed pipeline uses a multi-step MixedRewrite pipeline followed by a decomposition engine. Each step either produces a simplified result (verified at full width) or passes control to the next step.
 
 ```
 Expression
     |
-[MixedProductRewriter] ── algebraic lowering of products
-    |  (success? → re-enter classification)
-    |
-[HybridDecomposer] ── variable-extraction decomposition
+[Step 1: Opportunistic] ── try standard pipeline directly
     |  (success? → done)
     |
-[TemplateDecomposer] ── bounded template matching
+[Step 2: Operand Simplification] ── simplify operands, retry standard pipeline
     |  (success? → done)
     |
-[BitwiseDecomposer] ── gate enumeration reconstruction
+[Step 2.5: Product Identity Collapse] ── collapse MBA identities, retry
     |  (success? → done)
     |
-[ProductIdentityRecoverer] ── MBA product identity collapse
+[Phase 2: Decomposition Engine] ── extract-solve loop
+    |  Extract polynomial core → solve residual
+    |  (success? → done)
+    |
+[Step 3: XOR Lowering] ── algebraic rewriting, re-enter classification
     |  (success? → done)
     |
 Unsupported (return best effort or original)
 ```
 
-## Strategy 1: Mixed Product Rewriting
+## Step 1: Opportunistic Standard Pipeline
 
-The **MixedProductRewriter** applies algebraic identities to eliminate mixed products. The primary rewrite is **XOR lowering**:
+Before applying mixed-specific techniques, CoBRA attempts to run the standard pipeline (linear or polynomial) directly on the expression. Some structurally mixed expressions can be simplified without specialized handling — for example, when the mixed products cancel out at full width. If the standard pipeline produces a verified result, it is accepted immediately.
+
+## Step 2: Operand Simplification
+
+The **OperandSimplifier** recursively simplifies the operands of mixed product nodes. If a product like `(complex_bitwise_expr) * (another_expr)` has operands that can be individually simplified, the overall expression may become tractable for the standard pipeline.
+
+After operand simplification, CoBRA re-attempts the standard pipeline. If the simplified operands reveal a linear or polynomial structure, the expression is resolved here.
+
+## Step 2.5: Product Identity Collapse
+
+The **ProductIdentityRecoverer** recognizes specific MBA product identities and collapses them. The primary identity is:
+
+```
+x * y = (x & y) * (x | y) + (x & ~y) * (~x & y)
+```
+
+This identity holds for all integer values, not just Boolean inputs. It is commonly used in obfuscation to replace a simple product with a complex sum of bitwise-product terms.
+
+The recoverer checks whether the expression matches one of 8 role assignments (permutations of the factors) and, if so, collapses it back to the simple product form. It validates the match using Boolean-cube constraints on the factor signatures. After collapsing, the standard pipeline is re-attempted.
+
+## Phase 2: Decomposition Engine
+
+The **DecompositionEngine** uses an extract-solve architecture to decompose mixed expressions into a polynomial core plus a residual that can be solved independently.
+
+### Core Extraction
+
+Two extractors produce candidate polynomial cores:
+
+1. **ExtractProductCore**: Identifies variable-variable products in the AST (e.g., `c * x * y`) and builds a polynomial core from these terms.
+2. **ExtractTemplateCore**: Uses bounded template matching to find a polynomial expression that partially explains the target function.
+
+### Residual Solving
+
+For each candidate core, the engine computes a **residual evaluator**: `r(x) = f(x) - core(x)`. The residual is what remains after subtracting the core from the target expression. The engine then classifies and solves the residual:
+
+1. **Zero residual**: If the residual is identically zero, the core alone is the answer.
+
+2. **Polynomial residual**: The engine attempts falling-factorial polynomial recovery on the residual via `RecoverAndVerifyPoly` with degree escalation. This iteratively increases the polynomial degree from a minimum bound up to a cap, accepting the first degree that passes full-width verification.
+
+3. **Boolean-null residual**: If the residual is zero on all {0,1}^n Boolean inputs but nonzero at some full-width point, it is classified as **boolean-null** by the `IsBooleanNullResidual` classifier. This indicates a "ghost" — a function invisible to Boolean-domain analysis. The engine then applies two ghost solvers in sequence:
+
+   - **SolveGhostResidual**: Attempts to express the residual as `c * g(tuple)`, where `c` is a constant and `g` is a ghost primitive from the `GhostBasis` library (e.g., `mul_sub_and(x,y) = x*y - (x&y)`). Uses 2-adic coefficient inference with mixed-parity probe points.
+
+   - **SolveFactoredGhostResidual**: Attempts to express the residual as `q(x) * g(tuple)`, where `q` is a polynomial quotient recovered via `WeightedPolyFit` (a 2-adic weighted linear solver). Enumerates ghost primitives in priority order with the ghost function as the weight.
+
+4. **Template fallback**: If no polynomial or ghost solver succeeds, the engine falls back to template decomposition on the residual.
+
+All solver results are gated by `FullWidthCheckEval` — deterministic exhaustive verification at full bitwidth — before acceptance.
+
+### Ghost Primitives
+
+The `GhostBasis` library provides functions that are identically zero on Boolean inputs but nonzero at full width:
+
+| Primitive | Definition | Property |
+|-----------|-----------|----------|
+| `mul_sub_and(x,y)` | `x*y - (x&y)` | Zero when both inputs are 0 or 1 |
+| `mul3_sub_and3(x,y,z)` | `x*y*z - (x&y&z)` | Zero when all three inputs are 0 or 1 |
+
+These "ghost" functions arise naturally in MBA obfuscation: they can be added to any expression without changing its Boolean-domain behavior, but they alter the full-width semantics.
+
+## Step 3: XOR Lowering
+
+The **MixedProductRewriter** applies algebraic identities to eliminate XOR from product subtrees. The primary rewrite is:
 
 ```
 x ^ y  →  x + y - 2*(x & y)
@@ -50,57 +113,9 @@ This converts XOR (a bitwise operator that blocks polynomial analysis) into pure
 
 After rewriting, the expression is re-classified. If the products are now between plain variables and AND-terms, it can enter the polynomial pipeline. The rewriter limits the number of rounds and monitors node growth to avoid expression explosion.
 
-## Strategy 2: Hybrid Decomposition
-
-The **HybridDecomposer** uses a variable-extraction technique. The idea is to peel off one variable at a time using an invertible operator:
-
-1. For each variable `xᵢ` and each invertible operator `OP` (XOR or ADD):
-   - Compute the **residual**: `r(vars) = f(vars) OP⁻¹ xᵢ`
-   - If `r` depends on fewer variables or has lower cost than `f`, recursively simplify `r`
-   - Compose: `f = xᵢ OP r_simplified`
-
-2. The decomposition is accepted only if the result is strictly simpler than the input (measured by expression cost).
-
-3. Full-width verification ensures the decomposition is correct.
-
-This is effective for expressions where one variable can be "factored out" of a complex combination, reducing the remaining expression to something the linear or polynomial pipelines can handle.
-
-## Strategy 3: Template Decomposition
-
-The **TemplateDecomposer** performs bounded search over small compositions of known atoms. It builds a pool of candidate subexpressions:
-
-- Constants, single variables, and negations
-- Unary operations: NOT, NEG
-- Pairwise operations: AND, OR, XOR, ADD, SUB, MUL applied to pairs from the pool
-
-Then it searches for compositions that match the target signature:
-
-- **Layer 1**: `target = G(A, B)` — can the target be expressed as a single operation over two atoms from the pool?
-- **Layer 2**: `target = G_out(A, G_in(B, C))` — can it be expressed as a nested pair of operations over three atoms?
-
-All candidates are verified by comparing their signature vectors against the target's signature. This is a brute-force approach but with bounded search depth, making it tractable for expressions that resist algebraic decomposition.
-
-## Strategy 4: Bitwise Decomposition
-
-The **BitwiseDecomposer** attempts to reconstruct the expression using only bitwise operations. It enumerates combinations of Boolean gates (AND, OR, XOR, NOT) applied to the input variables and checks whether any combination matches the target signature.
-
-This is useful when the mixed product structure is actually a disguised Boolean function — for example, `(x & y) * (x | y)` over Boolean inputs behaves identically to `x & y`, and the bitwise decomposer can detect this.
-
-## Strategy 5: Product Identity Recovery
-
-The **ProductIdentityRecoverer** recognizes specific MBA product identities and collapses them. The primary identity is:
-
-```
-x * y = (x & y) * (x | y) + (x & ~y) * (~x & y)
-```
-
-This identity holds for all integer values, not just Boolean inputs. It is often used in obfuscation to replace a simple product with a complex sum of bitwise-product terms.
-
-The recoverer checks whether the expression matches one of 8 role assignments (permutations of the factors) and, if so, collapses it back to the simple product form. It validates the match using Boolean-cube constraints on the factor signatures.
-
 ## Recursive Simplification
 
-When any strategy succeeds in decomposing a mixed expression, the resulting subexpressions are fed back through CoBRA's classifier for further simplification. This recursive approach allows CoBRA to handle layered obfuscation where multiple techniques are stacked.
+When any step succeeds in decomposing a mixed expression, the resulting subexpressions are fed back through CoBRA's classifier for further simplification. This recursive approach allows CoBRA to handle layered obfuscation where multiple techniques are stacked.
 
 ## Known Limitations
 
@@ -108,6 +123,7 @@ Some mixed expressions remain unsupported:
 
 - **Complex shift interactions**: Deeply nested combinations of shifts and bitwise products where no rewrite rule applies
 - **High-degree mixed products**: Products of three or more bitwise subexpressions that don't match known identities
-- **Incompatible decompositions**: Cases where hybrid extraction produces a residual that is more complex than the original
+- **Ghost residual families**: Boolean-null residuals that are not expressible as a polynomial times a known ghost primitive
+- **Core extraction failures**: Expressions where no polynomial core can be identified from the AST or template search
 
-The QSynth EA dataset contains the most challenging examples — CoBRA simplifies 400 of 500 expressions, with the remaining 100 falling outside current rewrite coverage.
+The QSynth EA dataset contains the most challenging examples — CoBRA simplifies 384 of 500 expressions, with the remaining 116 falling outside current decomposition coverage.

@@ -2,7 +2,7 @@
 
 CoBRA is validated against **72,646 expressions** drawn from **31 dataset files** spanning 6 independent sources. Every expression is parsed, simplified, and spot-checked at runtime. The numbers below are enforced by automated test assertions in [`test/verify/test_dataset_benchmarks.cpp`](test/verify/test_dataset_benchmarks.cpp) and verified on every CI run.
 
-**Overall: 69,477 / 69,594 parsed expressions simplified (99.83%), zero failures.**
+**Overall: 69,478 / 69,594 parsed expressions simplified (99.83%), zero failures.**
 
 ---
 
@@ -91,11 +91,11 @@ Source: [GAMBA](https://github.com/DenuvoSoftwareSolutions/GAMBA)
 | `mba_obf_linear.txt` | GAMBA | 1,001 | 1,000 | **1,000** | 0 | **100%** |
 | `mba_obf_nonlinear.txt` | GAMBA | 1,002 | 1,000 | **1,000** | 0 | **100%** |
 | `syntia.txt` | Syntia | 501 | 500 | **500** | 0 | **100%** |
-| `qsynth_ea.txt` | QSynth | 501 | 500 | **383** | 117 | **76.6%** |
+| `qsynth_ea.txt` | QSynth | 501 | 500 | **384** | 116 | **76.8%** |
 
 - **loki_tiny**: 25 sections covering add, subtract, AND, OR, XOR at depths 1-5. All 25,000 are 2-variable linear MBAs.
 - **mba_obf_nonlinear**: 500 polynomial + 500 linear expressions, all with linear ground-truth targets. All 1,000 pass full-width verification.
-- **qsynth_ea**: The most challenging dataset. 383 of 500 expressions simplify via cofactor, hybrid, and template decomposition. The 117 unsupported expressions involve complex shift operations and deeply nested mixed products that fall outside current rewrite coverage.
+- **qsynth_ea**: The most challenging dataset. 384 of 500 expressions simplify via the multi-step MixedRewrite pipeline and decomposition engine. The 116 unsupported expressions involve complex shift operations and deeply nested mixed products that fall outside current rewrite coverage.
 
 ---
 
@@ -107,8 +107,8 @@ Source: [GAMBA](https://github.com/DenuvoSoftwareSolutions/GAMBA)
 | Comment/header lines skipped | 2,062 |
 | Non-expression lines (headers, no ground truth) | 990 |
 | **Parsed expressions** | **69,594** |
-| **Simplified** | **69,477** |
-| Unsupported (by design) | 117 |
+| **Simplified** | **69,478** |
+| Unsupported (by design) | 116 |
 | Errors / failures | **0** |
 
 | MBA Class | Expressions | Simplified | Rate |

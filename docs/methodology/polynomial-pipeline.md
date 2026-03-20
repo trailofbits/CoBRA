@@ -72,6 +72,18 @@ Recovered polynomial terms are canonicalized by `PolyNormalizer` into a standard
 
 **Reference:** Gamez-Montolio et al., [Efficient Normalized Reduction and Generation of Equivalent Multivariate Binary Polynomials](https://openaccess.city.ac.uk/id/eprint/32695/) (BAR/NDSS 2024) — null polynomial reduction ensures that distinct coefficient vectors correspond to distinct polynomial functions.
 
+## Degree Escalation
+
+When the polynomial degree is unknown, CoBRA uses **degree escalation** via `RecoverAndVerifyPoly`. Starting from a minimum degree (typically 1), it iteratively increases the degree cap and attempts polynomial recovery at each level. The first degree that produces a result passing full-width verification is accepted.
+
+This avoids committing to a fixed degree upfront and handles cases where the true degree is higher than the multilinear assumption. The escalation is bounded by a configurable maximum cap to prevent excessive computation.
+
+## Evaluator-Based Recovery
+
+In addition to the CoB-coefficient-based recovery described above, CoBRA supports **evaluator-based polynomial recovery**. Given an evaluator function (rather than an explicit expression), it evaluates on the {0, 1, ..., d}^n grid, builds the falling-factorial interpolation system, and recovers polynomial coefficients directly.
+
+This is used by the [decomposition engine](mixed-pipeline.md#phase-2-decomposition-engine) to recover polynomial residuals after subtracting a core, and by `WeightedPolyFit` to recover polynomial quotients in weighted systems.
+
 ## Combining Bitwise and Polynomial Parts
 
 After splitting, CoBRA separately simplifies:

@@ -33,7 +33,7 @@ Input Expression
        |                      (coefficient splitting, finite differences, interpolation)
        |
        +-- Mixed ───────────> MixedRewrite pipeline
-       |                      (hybrid/template decomposition, product identity recovery)
+       |                      (multi-step rewriting, decomposition engine, ghost residual solving)
        |
   [Verification] ── spot-check (random inputs) or Z3 equivalence proof
        |
@@ -58,7 +58,7 @@ These flags determine the **route**:
 | BitwiseOnly | No products, no mixed ops | [Linear](linear-pipeline.md) / [Semilinear](semilinear-pipeline.md) |
 | Multilinear | Has `x * y` products | [Polynomial](polynomial-pipeline.md) |
 | PowerRecovery | Has `x^k` terms | [Polynomial](polynomial-pipeline.md) |
-| MixedRewrite | Has mixed/bitwise-over-arithmetic products | [Mixed](mixed-pipeline.md) |
+| MixedRewrite | Has mixed/bitwise-over-arithmetic products | [Mixed](mixed-pipeline.md) (multi-step + decomposition engine) |
 
 ## Auxiliary Variable Elimination
 

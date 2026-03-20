@@ -40,14 +40,6 @@ Decomposes constant masks into minimal groups of bit positions where all masks h
 
 ---
 
-### Bitwise Decomposition
-
-Reconstructs an expression using only Boolean gates (AND, OR, XOR, NOT) by enumerating gate combinations and matching against the target signature vector.
-
-**Used in:** [Mixed Pipeline](mixed-pipeline.md#strategy-4-bitwise-decomposition)
-
----
-
 ### Change of Basis (CoB) Butterfly Transform
 
 In-place recurrence that converts a signature vector into AND-product basis coefficients. For each variable, subtracts the "without" entry from the "with" entry, analogous to an FFT butterfly. Recovers the weight of each AND-combination of variables.
@@ -55,6 +47,14 @@ In-place recurrence that converts a signature vector into AND-product basis coef
 **Used in:** [Linear Pipeline](linear-pipeline.md#stage-3-change-of-basis-cob-butterfly-interpolation)
 
 **Reference:** Reichenwallner & Meerwald-Stadler, [Efficient Deobfuscation of Linear Mixed Boolean-Arithmetic Expressions](https://arxiv.org/abs/2209.06335) (SiMBA, 2022)
+
+---
+
+### Boolean-Null Residual Classification
+
+Identifies residuals that are zero on all {0,1}^n Boolean inputs but nonzero at some full-width point. These "ghost" residuals arise from functions like `x*y - (x&y)` that are invisible to Boolean-domain analysis. Classification uses a deterministic mixed-parity probe bank mapped through support-local coordinates.
+
+**Used in:** [Mixed Pipeline](mixed-pipeline.md#phase-2-decomposition-engine)
 
 ---
 
@@ -68,11 +68,35 @@ Separates AND and MUL contributions in CoB coefficients by evaluating the expres
 
 ---
 
+### Decomposition Engine (Extract-Solve)
+
+Decomposes mixed expressions by extracting a polynomial core and solving the residual independently. Core extractors (product-AST and template-based) produce candidates; the residual is classified (zero, polynomial, boolean-null) and solved by specialized solvers including polynomial recovery, ghost residual solving, and template fallback. All results are gated by full-width verification.
+
+**Used in:** [Mixed Pipeline](mixed-pipeline.md#phase-2-decomposition-engine)
+
+---
+
+### Degree Escalation
+
+Iteratively increases polynomial degree from a minimum bound up to a configurable cap, accepting the first degree that passes full-width verification. Avoids committing to a fixed degree upfront for expressions where the true polynomial degree is unknown.
+
+**Used in:** [Polynomial Pipeline](polynomial-pipeline.md#degree-escalation), [Mixed Pipeline](mixed-pipeline.md#phase-2-decomposition-engine)
+
+---
+
 ### Common-Cube Factoring
 
 ANF cleanup pass that extracts shared AND-factors from multiple terms. For example, `(x & y) XOR (x & z)` becomes `x & (y XOR z)`.
 
 **Used in:** [Linear Pipeline](linear-pipeline.md#stage-5-anf-cleanup)
+
+---
+
+### Evaluator-Based Polynomial Recovery
+
+Recovers polynomial coefficients from an evaluator function (rather than an explicit expression) by evaluating on the {0, 1, ..., d}^n grid and solving the falling-factorial interpolation system directly. Used by the decomposition engine to recover polynomial residuals and by WeightedPolyFit for weighted quotient systems.
+
+**Used in:** [Polynomial Pipeline](polynomial-pipeline.md#evaluator-based-recovery), [Mixed Pipeline](mixed-pipeline.md#phase-2-decomposition-engine)
 
 ---
 
@@ -83,6 +107,14 @@ Recovers polynomial coefficients using the falling factorial basis `t·(t-1)·(t
 **Used in:** [Polynomial Pipeline](polynomial-pipeline.md#singleton-power-recovery)
 
 **Reference:** Newton, *Principia Mathematica* (1687) — [Wikipedia: Newton polynomial](https://en.wikipedia.org/wiki/Newton_polynomial)
+
+---
+
+### Ghost Residual Solving
+
+Solves boolean-null residuals (zero on Boolean inputs, nonzero at full width) by expressing them as a constant or polynomial times a ghost primitive. Two solvers are applied in sequence: `SolveGhostResidual` infers a constant coefficient via 2-adic arithmetic on mixed-parity probes; `SolveFactoredGhostResidual` recovers a polynomial quotient via `WeightedPolyFit` with the ghost function as weight. Both enumerate ghost primitives from the `GhostBasis` library in priority order.
+
+**Used in:** [Mixed Pipeline](mixed-pipeline.md#phase-2-decomposition-engine)
 
 ---
 
@@ -104,19 +136,11 @@ Iterative algorithm for computing modular inverses of odd numbers modulo 2^w. St
 
 ---
 
-### Hybrid Decomposition
-
-Variable-extraction technique for mixed expressions. For each variable and invertible operator (XOR, ADD), computes the residual after "removing" that variable. If the residual is simpler, accepts the decomposition `f = x OP residual`.
-
-**Used in:** [Mixed Pipeline](mixed-pipeline.md#strategy-2-hybrid-decomposition)
-
----
-
 ### Mixed Product Rewriting
 
 Algebraic lowering of bitwise operators within products. The primary rewrite is XOR lowering: `x ^ y → x + y - 2*(x & y)`, which converts XOR to pure arithmetic, enabling the polynomial pipeline to handle the result.
 
-**Used in:** [Mixed Pipeline](mixed-pipeline.md#strategy-1-mixed-product-rewriting)
+**Used in:** [Mixed Pipeline](mixed-pipeline.md#step-3-xor-lowering)
 
 ---
 
@@ -160,7 +184,7 @@ Canonicalizes polynomial expressions by sorting terms by total degree, then lexi
 
 Recognizes the MBA identity `x * y = (x & y) * (x | y) + (x & ~y) * (~x & y)` and collapses structured products back to simple form. Checks 8 role assignments for factor arrangements and validates via Boolean-cube constraints.
 
-**Used in:** [Mixed Pipeline](mixed-pipeline.md#strategy-5-product-identity-recovery)
+**Used in:** [Mixed Pipeline](mixed-pipeline.md#step-25-product-identity-collapse)
 
 ---
 
@@ -196,7 +220,15 @@ Detects `x^k` terms via finite differences. Evaluates a univariate slice at cons
 
 Bounded brute-force search over small compositions of known atoms. Builds a pool of candidate subexpressions (constants, variables, unary/pairwise ops) and searches for 1- or 2-layer compositions that match the target signature.
 
-**Used in:** [Mixed Pipeline](mixed-pipeline.md#strategy-3-template-decomposition)
+**Used in:** [Mixed Pipeline](mixed-pipeline.md#phase-2-decomposition-engine)
+
+---
+
+### WeightedPolyFit (2-adic Weighted Linear Solve)
+
+Recovers a polynomial quotient `q(x)` from the equation `target(x) = q(x) * weight(x)` using a 2-adic aware Gaussian elimination on the falling-factorial interpolation grid. Handles the precision loss from dividing by weight values with high 2-adic valuation (many trailing zero bits) by performing forward elimination at reduced precision and back-substitution on the pivot system.
+
+**Used in:** [Mixed Pipeline](mixed-pipeline.md#phase-2-decomposition-engine)
 
 ---
 
@@ -204,4 +236,4 @@ Bounded brute-force search over small compositions of known atoms. Builds a pool
 
 Algebraic identity `x ^ y → x + y - 2*(x & y)` that converts XOR to pure arithmetic. Enables the polynomial pipeline to analyze expressions containing XOR within product subtrees.
 
-**Used in:** [Mixed Pipeline](mixed-pipeline.md#strategy-1-mixed-product-rewriting)
+**Used in:** [Mixed Pipeline](mixed-pipeline.md#step-3-xor-lowering)

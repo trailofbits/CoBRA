@@ -4,7 +4,7 @@
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)](https://en.cppreference.com/w/cpp/23)
-[![Tests](https://img.shields.io/badge/tests-858-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-962-brightgreen.svg)](#testing)
 
 CoBRA deobfuscates expressions that interleave arithmetic (`+`, `-`, `*`) with bitwise (`&`, `|`, `^`, `~`) and shift (`<<`, `>>`) operators — a technique commonly used in software obfuscation.
 
@@ -53,7 +53,7 @@ CoBRA classifies each expression and routes it through the appropriate pipeline:
 | **Linear** | Weighted sums of bitwise atoms | Signature vector → CoB butterfly transform → pattern matching / ANF cleanup |
 | **Semilinear** | Constant-masked atoms (`x & 0xFF`) | Bit-partitioned decomposition per mask partition |
 | **Polynomial** | Variable products (`x*y`, `x^2`) | Coefficient splitting + singleton power recovery |
-| **Mixed** | Products of bitwise subexpressions | Hybrid/template decomposition, product identity recovery, algebraic rewriting |
+| **Mixed** | Products of bitwise subexpressions | Multi-step rewriting, decomposition engine (extract-solve), ghost residual solving |
 
 The core insight is the **Change of Basis (CoB) transform**: evaluate the expression on all 2^n Boolean inputs to produce a signature vector, then apply a butterfly recurrence to recover the coefficients of each AND-product basis term. Pattern matching recognizes all 2- and 3-variable Boolean functions, including scaled forms like `67*(a|b|c)`. For 4- and 5-variable Boolean expressions, **Shannon decomposition** recursively splits on a variable to reduce to smaller cases covered by the lookup tables. Complex Boolean results fall back to ANF (Algebraic Normal Form) with cleanup passes for absorption, common-cube factoring, and OR recognition.
 
@@ -63,7 +63,8 @@ The core insight is the **Change of Basis (CoB) transform**: evaluate the expres
 - **Scaled pattern matching** — expressions like `k * f(vars) + c` where `f` is a bitwise function; Shannon decomposition extends coverage to 4- and 5-variable Boolean expressions
 - **Semilinear support** — constant-masked atoms like `x & 0xFF`, `y | 0xF0` via bit-partitioned reconstruction
 - **Polynomial recovery** — multilinear terms (`x*y`) and singleton powers (`x^2`) via coefficient splitting
-- **Mixed product handling** — hybrid/template decomposition and product identity recovery for bitwise-product expressions
+- **Mixed product handling** — multi-step rewriting pipeline with operand simplification, product identity collapse, and XOR lowering
+- **Decomposition engine** — extract-solve architecture that splits mixed expressions into polynomial cores and residuals, with ghost residual solving for boolean-null components
 - **Constant shifts** — `<<` desugars to multiplication, `>>` on bitwise subtrees simplifies via the semilinear pipeline
 - **ANF cleanup** — absorption, common-cube factoring, and OR recognition for compact Boolean output
 - **Configurable bitwidth** — 1-bit to 64-bit modular arithmetic
@@ -131,7 +132,7 @@ cobra-cli --mba "(x&y)+(x|y)" --verbose
 ## Project Structure
 
 ```
-lib/core/                Core simplification pipeline (36 source files)
+lib/core/                Core simplification pipeline (42 source files)
   Simplifier               Top-level orchestration and route dispatch
   Classifier               Route: Linear / Semilinear / Polynomial / Mixed
   SignatureVector           Evaluate expression on {0,1}^n inputs
@@ -145,9 +146,11 @@ lib/core/                Core simplification pipeline (36 source files)
   ArithmeticLowering       Lower arithmetic fragment to polynomial IR
   PolyNormalizer           Canonical form for polynomial expressions
   SingletonPowerRecovery   Detect x^k terms via finite differences
+  DecompositionEngine      Extract-solve loop: polynomial core + residual solving
+  GhostBasis               Ghost primitive library (mul_sub_and, mul3_sub_and3)
+  GhostResidualSolver      Boolean-null classification and ghost residual solving
+  WeightedPolyFit          2-adic weighted linear solve for polynomial quotients
   MixedProductRewriter     Expand bitwise products into linear sums
-  BitwiseDecomposer        Bitwise-only decomposition for non-polynomial products
-  HybridDecomposer         Combined bitwise-polynomial decomposition
   TemplateDecomposer       Bounded template matching for mixed expressions
   ProductIdentityRecoverer Recover product-of-sums identities
   SemilinearNormalizer     Decompose into weighted bitwise atoms
@@ -157,12 +160,12 @@ lib/llvm/                LLVM pass plugin (CobraPass, MBADetector, IRReconstruct
 lib/verify/              Z3-based equivalence verification
 include/cobra/           Public headers
 tools/cobra-cli/         CLI frontend and expression parser
-test/                    858 tests across 47 test files (unit + integration + dataset benchmarks)
+test/                    962 tests across 54 test files (unit + integration + dataset benchmarks)
 ```
 
 ## Testing
 
-CoBRA has 858 tests covering unit, integration, and dataset benchmarks:
+CoBRA has 962 tests covering unit, integration, and dataset benchmarks:
 
 ```bash
 # Run all tests
@@ -179,7 +182,7 @@ Dataset benchmarks validate against real-world obfuscated expressions from QSynt
 
 ## Known Limitations
 
-- **Some mixed products unsupported** — complex combinations of bitwise-product subexpressions (e.g., `2*(x&y)*(x|y) + x*y`) may not simplify when no rewrite rule applies
+- **Some mixed products unsupported** — complex combinations of bitwise-product subexpressions may not simplify when the decomposition engine cannot extract a valid polynomial core or the residual falls outside supported families
 - **No general logic minimization** — CoBRA uses greedy algebraic rewrites, not Quine-McCluskey/Espresso/BDD
 
 ## License
