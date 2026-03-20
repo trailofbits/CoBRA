@@ -1,3 +1,4 @@
+#include "cobra/core/AuxVarEliminator.h"
 #include "cobra/core/Classification.h"
 #include "cobra/core/Classifier.h"
 #include "cobra/core/Expr.h"
@@ -492,6 +493,47 @@ TEST(SimplifierTest, AllZeroMulFragment) {
     for (uint64_t x = 0; x < 8; ++x) {
         std::vector< uint64_t > v = { x };
         EXPECT_EQ(EvalExpr(*result.value().expr, v, 3), 0u) << "x=" << x;
+    }
+}
+
+TEST(SimplifierTest, MixedRewrite_BooleanConstantSignatureRemainsFullWidthLive) {
+    // g(x,y) = x*y - (x&y) is zero on all {0,1} inputs, so the boolean
+    // signature collapses to a single constant entry. At full width it is
+    // still live in both variables and must not be accepted as constant 0.
+    std::vector< uint64_t > sig     = { 0, 0, 0, 0 };
+    std::vector< std::string > vars = { "x", "y" };
+
+    auto input = Expr::Add(
+        Expr::Mul(Expr::Variable(0), Expr::Variable(1)),
+        Expr::Negate(Expr::BitwiseAnd(Expr::Variable(0), Expr::Variable(1)))
+    );
+
+    auto evaluator = [](const std::vector< uint64_t > &v) -> uint64_t {
+        return v[0] * v[1] - (v[0] & v[1]);
+    };
+
+    auto bool_elim = EliminateAuxVars(sig, vars);
+    EXPECT_TRUE(bool_elim.real_vars.empty());
+    EXPECT_EQ(bool_elim.reduced_sig.size(), 1u);
+    EXPECT_EQ(bool_elim.reduced_sig[0], 0u);
+
+    auto fw_elim = EliminateAuxVars(sig, vars, evaluator, 64);
+    EXPECT_EQ(fw_elim.real_vars, vars);
+    EXPECT_TRUE(fw_elim.spurious_vars.empty());
+
+    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    opts.evaluator = evaluator;
+
+    auto result = Simplify(sig, vars, input.get(), opts);
+    ASSERT_TRUE(result.has_value());
+
+    if (result.value().kind == SimplifyOutcome::Kind::kSimplified) {
+        auto check = FullWidthCheckEval(evaluator, 2, *result.value().expr, 64);
+        EXPECT_TRUE(check.passed);
+        EXPECT_NE(Render(*result.value().expr, result.value().real_vars), "0");
+    } else {
+        EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kUnchangedUnsupported);
+        EXPECT_EQ(result.value().diag.classification.route, Route::kMixedRewrite);
     }
 }
 
