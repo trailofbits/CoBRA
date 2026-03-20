@@ -185,6 +185,10 @@ Dataset benchmarks validate against real-world obfuscated expressions from QSynt
 - **Some mixed products unsupported** — complex combinations of bitwise-product subexpressions may not simplify when the decomposition engine cannot extract a valid polynomial core or the residual falls outside supported families
 - **No general logic minimization** — CoBRA uses greedy algebraic rewrites, not Quine-McCluskey/Espresso/BDD
 
+## Acknowledgments
+
+Thanks to [Bas Zweers](https://github.com/AnalogCyberNuke) and the [Back Engineering](https://github.com/backengineering) team for the inspiration and guidance that helped shape this project. Recommended viewing: their re//verse 2026 talk [Deobfuscation of a Real World Binary Obfuscator](https://www.youtube.com/watch?v=3LtwqJM3Qjg).
+
 ## License
 
 [Apache-2.0](LICENSE)
