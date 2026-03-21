@@ -314,10 +314,11 @@ TEST(GAMBADataset, QSynthEA) {
     EXPECT_EQ(stats.total, 501);
     EXPECT_EQ(stats.skipped_parse, 1); // header only
     EXPECT_EQ(stats.parsed, 500);
-    // 406 simplified: cofactor + hybrid + template decomposition + poly recovery
-    //   + early decomposition on original AST (product cores destroyed by preconditioning)
-    EXPECT_EQ(stats.simplified, 406);
-    EXPECT_EQ(stats.unsupported, 94);
+    // 407 simplified: cofactor + hybrid + template decomposition + poly recovery
+    //   + early decomposition on original AST
+    //   + OperandSimplifier FW guard + Not(product) extraction
+    EXPECT_EQ(stats.simplified, 407);
+    EXPECT_EQ(stats.unsupported, 93);
     EXPECT_EQ(stats.failed_simplify, 0);
 }
 

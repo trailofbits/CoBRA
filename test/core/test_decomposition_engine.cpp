@@ -360,3 +360,81 @@ TEST(TryDecompositionTest, NonGhostResidual_StillRoutes) {
     auto check = FullWidthCheckEval(eval, 2, *result->expr, 64);
     EXPECT_TRUE(check.passed);
 }
+
+// Regression: residual solver must not accept boolean-correct but
+// full-width-incorrect expressions from the supported pipeline.
+// Based on QSynthEA L295: f(b,c) = ((-c ^ c) * b) & ~(b + c*c).
+// Product core = -2*b*c, residual on booleans looks like -2*(b&c),
+// but at full width the residual is a nonlinear function that the
+// CoB transform cannot capture. The weak 8-probe FW check used to
+// false-positive here; the hardened 64-probe residual recheck in
+// DecompositionEngine must reject it.
+TEST(TryDecompositionTest, ResidualFalsePositiveRejection) {
+    // f(b,c) = ((-c ^ c) * b) & ~(b + c*c)
+    Evaluator eval = [](const std::vector< uint64_t > &v) -> uint64_t {
+        uint64_t b = v[0];
+        uint64_t c = v[1];
+        return (((~c + 1) ^ c) * b) & ~(b + c * c);
+    };
+    Options opts{ .bitwidth = 64, .spot_check = true };
+    opts.evaluator                  = eval;
+    std::vector< std::string > vars = { "b", "c" };
+    auto sig                        = EvaluateBooleanSignature(eval, 2, 64);
+
+    // Verify expected boolean signature: [0, 0, 0, -4]
+    ASSERT_EQ(sig.size(), 4u);
+    EXPECT_EQ(sig[0], 0u);
+    EXPECT_EQ(sig[3], static_cast< uint64_t >(-4));
+
+    // Build an AST for classification
+    auto ast = Expr::BitwiseAnd(
+        Expr::Mul(
+            Expr::BitwiseXor(Expr::Negate(Expr::Variable(1)), Expr::Variable(1)),
+            Expr::Variable(0)
+        ),
+        Expr::BitwiseNot(
+            Expr::Add(Expr::Variable(0), Expr::Mul(Expr::Variable(1), Expr::Variable(1)))
+        )
+    );
+    auto cls = ClassifyStructural(*ast);
+
+    // The core -2*b*c is NOT a direct match for f
+    auto core = Expr::Mul(
+        Expr::Constant(static_cast< uint64_t >(-2)),
+        Expr::Mul(Expr::Variable(0), Expr::Variable(1))
+    );
+    auto direct = FullWidthCheckEval(eval, 2, *core, 64);
+    EXPECT_FALSE(direct.passed);
+
+    // The residual has a nonzero boolean signature (non-boolean-null)
+    auto residual_eval = BuildResidualEvaluator(eval, *core, 64);
+    auto residual_sig  = EvaluateBooleanSignature(residual_eval, 2, 64);
+    bool all_zero      = true;
+    for (auto v : residual_sig) {
+        if (v != 0) { all_zero = false; }
+    }
+    EXPECT_FALSE(all_zero);
+
+    // RunSupportedPipeline returns a "simplified" residual that is
+    // only boolean-correct (its internal 8-probe FW check is a
+    // false positive).
+    Options res_opts   = opts;
+    res_opts.evaluator = residual_eval;
+    auto res_result    = RunSupportedPipeline(residual_sig, vars, res_opts);
+    ASSERT_TRUE(res_result.has_value());
+    EXPECT_EQ(res_result.value().kind, SimplifyOutcome::Kind::kSimplified);
+
+    // Stronger FW check catches the mismatch
+    auto strong_check = FullWidthCheckEval(residual_eval, 2, *res_result.value().expr, 64, 64);
+    EXPECT_FALSE(strong_check.passed) << "Residual solution should fail stronger FW check";
+
+    // TryDecomposition must not return an incorrect result.
+    // It may return nullopt (no decomposition found) or a correct
+    // alternative.
+    auto dctx   = MakeCtx(opts, vars, sig, ast.get(), cls);
+    auto decomp = TryDecomposition(dctx);
+    if (decomp.has_value()) {
+        auto fwc = FullWidthCheckEval(eval, 2, *decomp->expr, 64);
+        EXPECT_TRUE(fwc.passed) << "Any decomposition result must be FW-correct";
+    }
+}
