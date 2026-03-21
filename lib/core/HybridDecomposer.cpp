@@ -139,6 +139,7 @@ namespace cobra {
         const auto kN = static_cast< uint32_t >(ctx.vars.size());
 
         std::vector< ExtractionCandidate > candidates;
+        candidates.reserve(2 * kN);
 
         for (uint32_t k = 0; k < kN; ++k) {
             for (auto op : { ExtractOp::kXor, ExtractOp::kAdd }) {

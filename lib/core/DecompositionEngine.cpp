@@ -122,8 +122,8 @@ namespace cobra {
         bool all_same_as_orig = true;
         bool all_zero         = true;
         constexpr int kProbes = 5;
+        std::vector< uint64_t > point(kNv);
         for (int p = 0; p < kProbes; ++p) {
-            std::vector< uint64_t > point(kNv);
             for (uint32_t i = 0; i < kNv; ++i) { point[i] = rng() & kMask; }
             const uint64_t kOrig = ctx.opts.evaluator(point) & kMask;
             const uint64_t kRes  = residual_eval(point);
@@ -188,12 +188,14 @@ namespace cobra {
         if (elim.real_vars.size() == ctx.vars.size()) {
             sig_ctx.eval = ctx.opts.evaluator;
         } else {
-            sig_ctx.eval =
-                [eval = ctx.opts.evaluator, idx = sig_ctx.original_indices,
-                 n = ctx.vars.size()](const std::vector< uint64_t > &rv) -> uint64_t {
-                std::vector< uint64_t > full(n, 0);
+            sig_ctx.eval = [eval = ctx.opts.evaluator, idx = sig_ctx.original_indices,
+                            full = std::vector< uint64_t >(ctx.vars.size(), 0)](
+                               const std::vector< uint64_t > &rv
+                           ) mutable -> uint64_t {
                 for (size_t i = 0; i < idx.size(); ++i) { full[idx[i]] = rv[i]; }
-                return eval(full);
+                uint64_t result = eval(full);
+                for (size_t i = 0; i < idx.size(); ++i) { full[idx[i]] = 0; }
+                return result;
             };
         }
 
@@ -469,12 +471,13 @@ namespace cobra {
                         res_sig_ctx.eval = residual_eval;
                     } else {
                         res_sig_ctx.eval = [residual_eval, idx = res_support,
-                                            n = ctx.vars.size()](
+                                            full = std::vector< uint64_t >(ctx.vars.size(), 0)](
                                                const std::vector< uint64_t > &rv
-                                           ) -> uint64_t {
-                            std::vector< uint64_t > full(n, 0);
+                                           ) mutable -> uint64_t {
                             for (size_t i = 0; i < idx.size(); ++i) { full[idx[i]] = rv[i]; }
-                            return residual_eval(full);
+                            uint64_t result = residual_eval(full);
+                            for (size_t i = 0; i < idx.size(); ++i) { full[idx[i]] = 0; }
+                            return result;
                         };
                     }
 
@@ -621,12 +624,13 @@ namespace cobra {
                         res_sig_ctx.eval = residual_eval;
                     } else {
                         res_sig_ctx.eval = [residual_eval, idx = res_support,
-                                            n = ctx.vars.size()](
+                                            full = std::vector< uint64_t >(ctx.vars.size(), 0)](
                                                const std::vector< uint64_t > &rv
-                                           ) -> uint64_t {
-                            std::vector< uint64_t > full(n, 0);
+                                           ) mutable -> uint64_t {
                             for (size_t i = 0; i < idx.size(); ++i) { full[idx[i]] = rv[i]; }
-                            return residual_eval(full);
+                            uint64_t result = residual_eval(full);
+                            for (size_t i = 0; i < idx.size(); ++i) { full[idx[i]] = 0; }
+                            return result;
                         };
                     }
 

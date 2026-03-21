@@ -9,6 +9,7 @@
 #include <array>
 #include <bit>
 #include <cstdint>
+#include <span>
 
 namespace cobra {
 
@@ -24,14 +25,15 @@ namespace cobra {
 
         constexpr int kNumProbes = 8;
 
-        bool NextCombo(std::vector< uint32_t > &combo, uint8_t arity, uint32_t support_size) {
-            int i = static_cast< int >(arity) - 1;
+        bool NextCombo(std::span< uint32_t > combo, uint32_t support_size) {
+            const auto kArity = static_cast< uint32_t >(combo.size());
+            int i             = static_cast< int >(kArity) - 1;
             while (i >= 0) {
                 combo[static_cast< size_t >(i)]++;
                 if (combo[static_cast< size_t >(i)]
-                    <= support_size - arity + static_cast< uint32_t >(i))
+                    <= support_size - kArity + static_cast< uint32_t >(i))
                 {
-                    for (uint32_t j = static_cast< uint32_t >(i) + 1; j < arity; ++j) {
+                    for (uint32_t j = static_cast< uint32_t >(i) + 1; j < kArity; ++j) {
                         combo[j] = combo[j - 1] + 1;
                     }
                     return true;
@@ -82,12 +84,13 @@ namespace cobra {
         GenerateProbeBank(bank, kSupportSize, bitwidth);
 
         const uint64_t kMask = Bitmask(bitwidth);
+        std::vector< uint64_t > point(num_vars, 0);
         for (int p = 0; p < kNumProbes; ++p) {
-            std::vector< uint64_t > point(num_vars, 0);
             for (uint32_t v = 0; v < kSupportSize; ++v) {
                 point[support[v]] = bank[static_cast< size_t >(p)].values[v];
             }
             uint64_t val = residual_eval(point) & kMask;
+            for (uint32_t v = 0; v < kSupportSize; ++v) { point[support[v]] = 0; }
             if (val != 0) { return true; }
         }
         return false;
@@ -106,30 +109,34 @@ namespace cobra {
 
         // Evaluate residual at each probe point (in full original space)
         std::array< uint64_t, kNumProbes > r_vals{};
+        std::vector< uint64_t > full(num_vars, 0);
         for (int p = 0; p < kNumProbes; ++p) {
-            std::vector< uint64_t > full(num_vars, 0);
             for (uint32_t v = 0; v < kSupportSize; ++v) {
                 full[support[v]] = bank[static_cast< size_t >(p)].values[v];
             }
             r_vals[static_cast< size_t >(p)] = residual_eval(full) & kMask;
+            for (uint32_t v = 0; v < kSupportSize; ++v) { full[support[v]] = 0; }
         }
 
         for (const auto &prim : basis) {
             if (prim.arity > kSupportSize) { continue; }
 
             // Enumerate strictly increasing index combinations
-            std::vector< uint32_t > combo(prim.arity);
+            std::array< uint32_t, 6 > combo{};
             for (uint8_t i = 0; i < prim.arity; ++i) { combo[i] = i; }
+            auto combo_span = std::span< uint32_t >{ combo.data(), prim.arity };
 
             do {
                 // Evaluate ghost at each probe point
                 std::array< uint64_t, kNumProbes > g_vals{};
+                std::array< uint64_t, 6 > args{};
                 for (int p = 0; p < kNumProbes; ++p) {
-                    std::vector< uint64_t > args(prim.arity);
                     for (uint8_t a = 0; a < prim.arity; ++a) {
                         args[a] = bank[static_cast< size_t >(p)].values[combo[a]];
                     }
-                    g_vals[static_cast< size_t >(p)] = prim.eval(args, bitwidth);
+                    g_vals[static_cast< size_t >(p)] = prim.eval(
+                        std::span< const uint64_t >{ args.data(), prim.arity }, bitwidth
+                    );
                 }
 
                 // 2-adic coefficient inference
@@ -175,9 +182,10 @@ namespace cobra {
                 if (!cross_ok) { continue; }
 
                 // Build the expression: c * ghost(var_indices)
-                std::vector< uint32_t > var_indices(prim.arity);
+                std::array< uint32_t, 6 > var_indices{};
                 for (uint8_t a = 0; a < prim.arity; ++a) { var_indices[a] = support[combo[a]]; }
-                auto ghost_expr = prim.build(var_indices);
+                auto ghost_expr =
+                    prim.build(std::span< const uint32_t >{ var_indices.data(), prim.arity });
 
                 std::unique_ptr< Expr > result_expr;
                 if (best_c == 1) {
@@ -196,7 +204,7 @@ namespace cobra {
                     res.num_terms = 1;
                     return res;
                 }
-            } while (NextCombo(combo, prim.arity, kSupportSize));
+            } while (NextCombo(combo_span, kSupportSize));
         }
 
         return std::nullopt;
@@ -213,20 +221,23 @@ namespace cobra {
             if (prim.arity > kSupportSize) { continue; }
 
             // Enumerate strictly increasing index combinations
-            std::vector< uint32_t > combo(prim.arity);
+            std::array< uint32_t, 6 > combo{};
             for (uint8_t i = 0; i < prim.arity; ++i) { combo[i] = i; }
+            auto combo_span = std::span< uint32_t >{ combo.data(), prim.arity };
 
             do {
                 // Map support-local combo to original-space variable indices
-                std::vector< uint32_t > var_indices(prim.arity);
+                std::array< uint32_t, 6 > var_indices{};
                 for (uint8_t a = 0; a < prim.arity; ++a) { var_indices[a] = support[combo[a]]; }
 
                 // Build weight function from ghost primitive + tuple
                 WeightFn weight =
                     [&prim, combo](std::span< const uint64_t > args, uint32_t bw) -> uint64_t {
-                    std::vector< uint64_t > ghost_args(prim.arity);
+                    std::array< uint64_t, 6 > ghost_args{};
                     for (uint8_t a = 0; a < prim.arity; ++a) { ghost_args[a] = args[combo[a]]; }
-                    return prim.eval(ghost_args, bw);
+                    return prim.eval(
+                        std::span< const uint64_t >{ ghost_args.data(), prim.arity }, bw
+                    );
                 };
 
                 auto fit = RecoverWeightedPoly(
@@ -237,7 +248,8 @@ namespace cobra {
                 auto q_expr = BuildPolyExpr(fit->poly);
                 if (!q_expr.has_value()) { continue; }
 
-                auto g_expr   = prim.build(var_indices);
+                auto g_expr =
+                    prim.build(std::span< const uint32_t >{ var_indices.data(), prim.arity });
                 auto combined = Expr::Mul(std::move(*q_expr), std::move(g_expr));
 
                 auto check = FullWidthCheckEval(residual_eval, num_vars, *combined, bitwidth);
@@ -248,7 +260,7 @@ namespace cobra {
                     res.num_terms = 1;
                     return res;
                 }
-            } while (NextCombo(combo, prim.arity, kSupportSize));
+            } while (NextCombo(combo_span, kSupportSize));
         }
 
         return std::nullopt;

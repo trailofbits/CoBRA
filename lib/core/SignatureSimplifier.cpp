@@ -213,22 +213,20 @@ namespace cobra {
 
             auto bit_expr = BuildCobExpr(residual, kNumVars, opts.bitwidth);
 
-            std::vector< std::unique_ptr< Expr > > pieces;
             const bool kBitIsZero = bit_expr && bit_expr->kind == Expr::Kind::kConstant
                 && bit_expr->constant_val == 0;
-            if (bit_expr && !kBitIsZero) { pieces.push_back(std::move(bit_expr)); }
-            if (poly_expr) { pieces.push_back(std::move(poly_expr)); }
-            if (singleton_expr) { pieces.push_back(std::move(singleton_expr)); }
 
             std::unique_ptr< Expr > combined;
-            if (pieces.empty()) {
-                combined = Expr::Constant(0);
-            } else {
-                combined = std::move(pieces[0]);
-                for (size_t i = 1; i < pieces.size(); ++i) {
-                    combined = Expr::Add(std::move(combined), std::move(pieces[i]));
-                }
+            if (bit_expr && !kBitIsZero) { combined = std::move(bit_expr); }
+            if (poly_expr) {
+                combined = combined ? Expr::Add(std::move(combined), std::move(poly_expr))
+                                    : std::move(poly_expr);
             }
+            if (singleton_expr) {
+                combined = combined ? Expr::Add(std::move(combined), std::move(singleton_expr))
+                                    : std::move(singleton_expr);
+            }
+            if (!combined) { combined = Expr::Constant(0); }
 
             auto check = FullWidthCheckEval(*ctx.eval, kNumVars, *combined, opts.bitwidth);
             COBRA_TRACE("SigSimplifier", "Stage4b: poly_recovery verified={}", check.passed);

@@ -179,14 +179,17 @@ namespace cobra {
                 ctx.eval = opts.evaluator;
             } else {
                 ctx.eval = [eval = opts.evaluator, idx_map = ctx.original_indices,
-                            orig_sz = vars.size()](
+                            original_vals = std::vector< uint64_t >(vars.size(), 0)](
                                const std::vector< uint64_t > &reduced_vals
-                           ) -> uint64_t {
-                    std::vector< uint64_t > original_vals(orig_sz, 0);
+                           ) mutable -> uint64_t {
                     for (size_t i = 0; i < idx_map.size(); ++i) {
                         original_vals[idx_map[i]] = reduced_vals[i];
                     }
-                    return eval(original_vals);
+                    uint64_t result = eval(original_vals);
+                    for (size_t i = 0; i < idx_map.size(); ++i) {
+                        original_vals[idx_map[i]] = 0;
+                    }
+                    return result;
                 };
             }
         }

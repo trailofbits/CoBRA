@@ -75,6 +75,8 @@ namespace cobra {
             };
 
             auto baseline = ComputeCost(add_node).cost;
+            std::vector< uint64_t > sig_x(sig_len);
+            std::vector< uint64_t > sig_y(sig_len);
 
             for (const auto &a : kAssignments) {
                 COBRA_TRACE(
@@ -122,8 +124,6 @@ namespace cobra {
 
                 // Reconstruct factor signatures:
                 //   x = I | L,  y = I | R
-                std::vector< uint64_t > sig_x(sig_len);
-                std::vector< uint64_t > sig_y(sig_len);
                 for (size_t j = 0; j < sig_len; ++j) {
                     sig_x[j] = (sig_i[j] | sig_l[j]) & mask;
                     sig_y[j] = (sig_i[j] | sig_r[j]) & mask;

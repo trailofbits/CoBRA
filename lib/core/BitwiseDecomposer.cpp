@@ -180,13 +180,15 @@ namespace cobra {
         // When the entire signature is boolean-valued, the decomposed
         // Collect candidates across all variables and gate types
         std::vector< Candidate > candidates;
+        std::vector< uint64_t > cof0;
+        std::vector< uint64_t > cof1;
+        cof0.reserve(kHalf);
+        cof1.reserve(kHalf);
 
         for (uint32_t k = 0; k < kN; ++k) {
             // Extract cofactors
-            std::vector< uint64_t > cof0;
-            std::vector< uint64_t > cof1;
-            cof0.reserve(kHalf);
-            cof1.reserve(kHalf);
+            cof0.clear();
+            cof1.clear();
 
             for (size_t j = 0; j < sig.size(); ++j) {
                 if (((j >> k) & 1) == 0) {
@@ -377,15 +379,20 @@ namespace cobra {
                     compact_to_ctx.push_back(ctx_idx);
                 }
 
-                g_ctx.eval =
-                    [eval = *ctx.eval, n_parent = kN, k = cand.var_k, fixed_val,
-                     compact_to_ctx](const std::vector< uint64_t > &sub_vals) -> uint64_t {
-                    std::vector< uint64_t > parent_vals(n_parent, 0);
+                g_ctx.eval = [eval = *ctx.eval, k = cand.var_k, fixed_val, compact_to_ctx,
+                              parent_vals = std::vector< uint64_t >(kN, 0)](
+                                 const std::vector< uint64_t > &sub_vals
+                             ) mutable -> uint64_t {
                     parent_vals[k] = fixed_val;
                     for (size_t i = 0; i < compact_to_ctx.size(); ++i) {
                         parent_vals[compact_to_ctx[i]] = sub_vals[i];
                     }
-                    return eval(parent_vals);
+                    uint64_t result = eval(parent_vals);
+                    parent_vals[k]  = 0;
+                    for (size_t i = 0; i < compact_to_ctx.size(); ++i) {
+                        parent_vals[compact_to_ctx[i]] = 0;
+                    }
+                    return result;
                 };
             }
 

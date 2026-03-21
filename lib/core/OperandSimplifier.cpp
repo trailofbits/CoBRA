@@ -165,8 +165,8 @@ namespace cobra {
             const uint64_t kMask = Bitmask(opts.bitwidth);
             std::mt19937_64 rng(0xCA5E + num_vars);
             constexpr int kProbes = 8;
+            std::vector< uint64_t > pt(num_vars);
             for (int p = 0; p < kProbes; ++p) {
-                std::vector< uint64_t > pt(num_vars);
                 for (uint32_t i = 0; i < num_vars; ++i) { pt[i] = rng() & kMask; }
                 uint64_t orig_val = EvalExpr(operand, pt, opts.bitwidth) & kMask;
                 uint64_t simp_val = EvalExpr(*result->expr, pt, opts.bitwidth) & kMask;
