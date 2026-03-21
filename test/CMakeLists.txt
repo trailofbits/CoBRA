@@ -118,6 +118,28 @@ target_include_directories(test_qsynth_diagnostic PRIVATE
 target_compile_definitions(test_qsynth_diagnostic PRIVATE
     DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
 
+# ArithOverBitwise diagnostic (manual, not auto-discovered)
+add_executable(test_arith_over_bitwise_diagnostic
+               verify/test_arith_over_bitwise_diagnostic.cpp
+               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(test_arith_over_bitwise_diagnostic PRIVATE
+    cobra-core GTest::gtest_main)
+target_include_directories(test_arith_over_bitwise_diagnostic PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+target_compile_definitions(test_arith_over_bitwise_diagnostic PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
+# Semilinear self-check diagnostic (manual, not auto-discovered)
+add_executable(test_semilinear_selfcheck_diagnostic
+               verify/test_semilinear_selfcheck_diagnostic.cpp
+               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(test_semilinear_selfcheck_diagnostic PRIVATE
+    cobra-core GTest::gtest_main)
+target_include_directories(test_semilinear_selfcheck_diagnostic PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+target_compile_definitions(test_semilinear_selfcheck_diagnostic PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
 # QSynth trace dive (manual, not auto-discovered)
 add_executable(test_qsynth_trace_dive verify/test_qsynth_trace_dive.cpp
                ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)

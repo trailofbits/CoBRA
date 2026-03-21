@@ -185,7 +185,7 @@ ctest --test-dir build -R test_simplifier --output-on-failure
 ctest --test-dir build -V
 ```
 
-Dataset benchmarks validate against real-world obfuscated expressions from multiple independent sources. See [DATASETS.md](DATASETS.md) for the full benchmark report — 69,199 expressions simplified across 32 dataset files from 7 independent sources, with zero failures.
+Dataset benchmarks validate against real-world obfuscated expressions from multiple independent sources. See [DATASETS.md](DATASETS.md) for the full benchmark report — 69,199 expressions simplified across 32 dataset files from 7 independent sources.
 
 ## Known Limitations
 
