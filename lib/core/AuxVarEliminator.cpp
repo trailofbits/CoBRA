@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -224,17 +225,12 @@ namespace cobra {
 
         // Re-check each spurious variable at full width
         const auto kNumVars = static_cast< uint32_t >(vars.size());
+        std::unordered_map< std::string, uint32_t > var_idx;
+        for (uint32_t j = 0; j < kNumVars; ++j) { var_idx[vars[j]] = j; }
+
         std::vector< std::string > still_spurious;
         for (const auto &sv : result.spurious_vars) {
-            // Find the original index of this variable
-            uint32_t idx = 0;
-            for (uint32_t j = 0; j < kNumVars; ++j) {
-                if (vars[j] == sv) {
-                    idx = j;
-                    break;
-                }
-            }
-            if (IsSpuriousFullWidth(eval, idx, kNumVars, bitwidth)) {
+            if (IsSpuriousFullWidth(eval, var_idx.at(sv), kNumVars, bitwidth)) {
                 still_spurious.push_back(sv);
                 COBRA_TRACE("AuxVarEliminator", "FullWidth: {} is spurious (confirmed)", sv);
             } else {
@@ -246,24 +242,11 @@ namespace cobra {
 
         // Recompute live mask and reduced sig from the updated real_vars
         uint64_t live_mask = 0;
-        for (const auto &rv : result.real_vars) {
-            for (uint32_t j = 0; j < kNumVars; ++j) {
-                if (vars[j] == rv) {
-                    live_mask |= (1ULL << j);
-                    break;
-                }
-            }
-        }
+        for (const auto &rv : result.real_vars) { live_mask |= (1ULL << var_idx.at(rv)); }
 
         // Sort real_vars and spurious_vars by original index order
-        auto by_original_index = [&vars](const std::string &a, const std::string &b) {
-            uint32_t ia = 0;
-            uint32_t ib = 0;
-            for (uint32_t j = 0; j < vars.size(); ++j) {
-                if (vars[j] == a) { ia = j; }
-                if (vars[j] == b) { ib = j; }
-            }
-            return ia < ib;
+        auto by_original_index = [&var_idx](const std::string &a, const std::string &b) {
+            return var_idx.at(a) < var_idx.at(b);
         };
         std::sort(result.real_vars.begin(), result.real_vars.end(), by_original_index);
         std::sort(result.spurious_vars.begin(), result.spurious_vars.end(), by_original_index);

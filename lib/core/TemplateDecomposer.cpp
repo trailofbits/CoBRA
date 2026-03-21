@@ -348,8 +348,8 @@ namespace cobra {
                 for (size_t bi = 0; bi < pool.size(); ++bi) {
                     for (size_t ci = bi; ci < pool.size(); ++ci) {
                         auto v = GateApply(pool[bi].vals, pool[ci].vals, g_in, mask);
-                        if (vmap.contains(v) != 0u) { continue; }
-                        if (inner_idx.contains(v) != 0u) { continue; }
+                        if (vmap.contains(v)) { continue; }
+                        if (inner_idx.contains(v)) { continue; }
                         inner_idx[v] = inner.size();
                         inner.push_back({ .gate = g_in, .bi = bi, .ci = ci, .vals = v });
                     }
@@ -542,8 +542,8 @@ namespace cobra {
                 for (size_t bi = 0; bi < pool.size(); ++bi) {
                     for (size_t ci = bi; ci < pool.size(); ++ci) {
                         auto v = GateApply(pool[bi].vals, pool[ci].vals, g_in, kMask);
-                        if (vmap.contains(v) != 0u) { continue; }
-                        if (inner_idx.contains(v) != 0u) { continue; }
+                        if (vmap.contains(v)) { continue; }
+                        if (inner_idx.contains(v)) { continue; }
                         inner_idx[v] = inner.size();
                         inner.push_back({ .gate = g_in, .bi = bi, .ci = ci, .vals = v });
                     }
@@ -560,7 +560,7 @@ namespace cobra {
                 if (!GateInvertible(g1)) { continue; }
                 for (size_t ai = 0; ai < pool.size(); ++ai) {
                     auto r1 = GateResidual(target, pool[ai].vals, g1, kMask);
-                    if (vmap.contains(r1) != 0u) { continue; }
+                    if (vmap.contains(r1)) { continue; }
 
                     for (auto g2 : kAllGates) {
                         if (!GateInvertible(g2)) { continue; }

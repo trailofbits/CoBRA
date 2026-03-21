@@ -1,6 +1,7 @@
 #include "cobra/core/DecompositionEngine.h"
 #include "cobra/core/AuxVarEliminator.h"
 #include "cobra/core/BitWidth.h"
+#include "cobra/core/ExprUtils.h"
 #include "cobra/core/GhostResidualSolver.h"
 #include "cobra/core/MultivarPolyRecovery.h"
 #include "cobra/core/PolyExprBuilder.h"
@@ -11,6 +12,7 @@
 #include "cobra/core/Trace.h"
 #include <cstdint>
 #include <memory>
+#include <numeric>
 #include <random>
 
 namespace cobra {
@@ -62,14 +64,6 @@ namespace cobra {
             } else {
                 residual.push_back(CloneExpr(e));
             }
-        }
-
-        void RemapVarIndices(Expr &expr, const std::vector< uint32_t > &index_map) {
-            if (expr.kind == Expr::Kind::kVariable) {
-                expr.var_index = index_map[expr.var_index];
-                return;
-            }
-            for (auto &child : expr.children) { RemapVarIndices(*child, index_map); }
         }
 
     } // namespace
@@ -163,16 +157,7 @@ namespace cobra {
 
         if (kRealCount > 6) { return std::nullopt; }
 
-        std::vector< uint32_t > support;
-        support.reserve(kRealCount);
-        for (const auto &rv : fw_elim.real_vars) {
-            for (uint32_t j = 0; j < kNv; ++j) {
-                if (ctx.vars[j] == rv) {
-                    support.push_back(j);
-                    break;
-                }
-            }
-        }
+        auto support = BuildVarSupport(ctx.vars, fw_elim.real_vars);
 
         auto poly = RecoverMultivarPoly(ctx.opts.evaluator, support, kNv, kBw, degree);
         if (!poly.has_value()) { return std::nullopt; }
@@ -198,23 +183,14 @@ namespace cobra {
         const auto kRvCount = static_cast< uint32_t >(elim.real_vars.size());
 
         SignatureContext sig_ctx;
-        sig_ctx.vars = elim.real_vars;
-        sig_ctx.original_indices.reserve(elim.real_vars.size());
-        for (const auto &real_var : elim.real_vars) {
-            for (size_t j = 0; j < ctx.vars.size(); ++j) {
-                if (ctx.vars[j] == real_var) {
-                    sig_ctx.original_indices.push_back(static_cast< uint32_t >(j));
-                    break;
-                }
-            }
-        }
+        sig_ctx.vars             = elim.real_vars;
+        sig_ctx.original_indices = BuildVarSupport(ctx.vars, elim.real_vars);
         if (elim.real_vars.size() == ctx.vars.size()) {
             sig_ctx.eval = ctx.opts.evaluator;
         } else {
-            auto idx     = sig_ctx.original_indices;
-            sig_ctx.eval = [eval = ctx.opts.evaluator, idx, n = ctx.vars.size()](
-                               const std::vector< uint64_t > &rv
-                           ) -> uint64_t {
+            sig_ctx.eval =
+                [eval = ctx.opts.evaluator, idx = sig_ctx.original_indices,
+                 n = ctx.vars.size()](const std::vector< uint64_t > &rv) -> uint64_t {
                 std::vector< uint64_t > full(n, 0);
                 for (size_t i = 0; i < idx.size(); ++i) { full[idx[i]] = rv[i]; }
                 return eval(full);
@@ -243,9 +219,7 @@ namespace cobra {
             SignatureContext full_ctx;
             full_ctx.vars = ctx.vars;
             full_ctx.original_indices.resize(ctx.vars.size());
-            for (uint32_t vi = 0; vi < ctx.vars.size(); ++vi) {
-                full_ctx.original_indices[vi] = vi;
-            }
+            std::iota(full_ctx.original_indices.begin(), full_ctx.original_indices.end(), 0U);
             full_ctx.eval = ctx.opts.evaluator;
 
             auto td2 = TryTemplateDecomposition(full_ctx, ctx.opts, kNv, nullptr);
@@ -275,16 +249,7 @@ namespace cobra {
             auto fw_elim  = EliminateAuxVars(ctx.sig, ctx.vars, ctx.opts.evaluator, kBw);
             auto fw_count = static_cast< uint32_t >(fw_elim.real_vars.size());
 
-            std::vector< uint32_t > fw_support;
-            fw_support.reserve(fw_count);
-            for (const auto &rv : fw_elim.real_vars) {
-                for (uint32_t j = 0; j < kNv; ++j) {
-                    if (ctx.vars[j] == rv) {
-                        fw_support.push_back(j);
-                        break;
-                    }
-                }
-            }
+            auto fw_support = BuildVarSupport(ctx.vars, fw_elim.real_vars);
 
             bool is_bn =
                 IsBooleanNullResidual(ctx.opts.evaluator, fw_support, kNv, kBw, ctx.sig);
@@ -395,16 +360,7 @@ namespace cobra {
             auto res_fw_elim = EliminateAuxVars(residual_sig, ctx.vars, residual_eval, kBw);
             const auto kResRealCount = static_cast< uint32_t >(res_fw_elim.real_vars.size());
 
-            std::vector< uint32_t > res_support;
-            res_support.reserve(kResRealCount);
-            for (const auto &rv : res_fw_elim.real_vars) {
-                for (uint32_t j = 0; j < kNv; ++j) {
-                    if (ctx.vars[j] == rv) {
-                        res_support.push_back(j);
-                        break;
-                    }
-                }
-            }
+            auto res_support = BuildVarSupport(ctx.vars, res_fw_elim.real_vars);
 
             COBRA_TRACE(
                 "DecompEngine", "Residual: support={} degree_floor={}", kResRealCount,
@@ -512,8 +468,8 @@ namespace cobra {
                     if (res_fw_elim.real_vars.size() == ctx.vars.size()) {
                         res_sig_ctx.eval = residual_eval;
                     } else {
-                        auto idx         = res_support;
-                        res_sig_ctx.eval = [residual_eval, idx, n = ctx.vars.size()](
+                        res_sig_ctx.eval = [residual_eval, idx = res_support,
+                                            n = ctx.vars.size()](
                                                const std::vector< uint64_t > &rv
                                            ) -> uint64_t {
                             std::vector< uint64_t > full(n, 0);
@@ -571,16 +527,8 @@ namespace cobra {
                         if (!res_result.value().real_vars.empty()
                             && res_result.value().real_vars.size() < ctx.vars.size())
                         {
-                            std::vector< uint32_t > idx_map;
-                            idx_map.reserve(res_result.value().real_vars.size());
-                            for (const auto &rv : res_result.value().real_vars) {
-                                for (uint32_t j = 0; j < kNv; ++j) {
-                                    if (ctx.vars[j] == rv) {
-                                        idx_map.push_back(j);
-                                        break;
-                                    }
-                                }
-                            }
+                            auto idx_map =
+                                BuildVarSupport(ctx.vars, res_result.value().real_vars);
                             RemapVarIndices(*solved_expr, idx_map);
                         }
 
@@ -672,8 +620,8 @@ namespace cobra {
                     if (res_fw_elim.real_vars.size() == ctx.vars.size()) {
                         res_sig_ctx.eval = residual_eval;
                     } else {
-                        auto idx         = res_support;
-                        res_sig_ctx.eval = [residual_eval, idx, n = ctx.vars.size()](
+                        res_sig_ctx.eval = [residual_eval, idx = res_support,
+                                            n = ctx.vars.size()](
                                                const std::vector< uint64_t > &rv
                                            ) -> uint64_t {
                             std::vector< uint64_t > full(n, 0);

@@ -2,6 +2,8 @@
 
 #include "cobra/core/Expr.h"
 #include <cstdint>
+#include <string>
+#include <vector>
 
 namespace cobra {
 
@@ -12,6 +14,15 @@ namespace cobra {
     std::unique_ptr< Expr > ApplyCoefficient(
         std::unique_ptr< Expr > expr, uint64_t coeff, uint32_t bitwidth
     ); // NOLINT(readability-identifier-naming)
+
+    /// Rewrite every kVariable node's var_index through index_map.
+    void RemapVarIndices(Expr &expr, const std::vector< uint32_t > &index_map);
+
+    /// Map a subset of variable names to their indices in the full variable list.
+    std::vector< uint32_t > BuildVarSupport(
+        const std::vector< std::string > &all_vars,
+        const std::vector< std::string > &subset_vars
+    );
 
     /// Check if an Expr subtree contains only constants (no variables).
     bool IsConstantSubtree(const Expr &expr);

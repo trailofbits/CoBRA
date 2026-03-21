@@ -12,7 +12,7 @@ namespace cobra {
         std::string mismatch_detail;
     };
 
-    SelfCheckResult SelfChecSemilinear(
+    SelfCheckResult SelfCheckSemilinear(
         const SemilinearIR &original_ir, const Expr &reconstructed,
         const std::vector< std::string > &vars, uint32_t bitwidth
     );

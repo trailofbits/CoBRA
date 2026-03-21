@@ -4,6 +4,7 @@
 #include "cobra/core/Classifier.h"
 #include "cobra/core/DecompositionEngine.h"
 #include "cobra/core/Expr.h"
+#include "cobra/core/ExprUtils.h"
 #include "cobra/core/MixedProductRewriter.h"
 #include "cobra/core/OperandSimplifier.h"
 #include "cobra/core/PatternMatcher.h"
@@ -26,14 +27,6 @@
 namespace cobra {
 
     namespace {
-
-        void RemapVarIndices(Expr &expr, const std::vector< uint32_t > &index_map) {
-            if (expr.kind == Expr::Kind::kVariable) {
-                expr.var_index = index_map[expr.var_index];
-                return;
-            }
-            for (auto &child : expr.children) { RemapVarIndices(*child, index_map); }
-        }
 
         // Verify a reduced-variable result against the original evaluator
         // with random values for ALL original variables (including eliminated).
@@ -179,25 +172,16 @@ namespace cobra {
         SignatureContext ctx; // NOLINT(misc-const-correctness)
         ctx.vars = elim.real_vars;
 
-        ctx.original_indices.reserve(elim.real_vars.size());
-        for (const auto &real_var : elim.real_vars) {
-            for (size_t j = 0; j < vars.size(); ++j) {
-                if (vars[j] == real_var) {
-                    ctx.original_indices.push_back(static_cast< uint32_t >(j));
-                    break;
-                }
-            }
-        }
+        ctx.original_indices = BuildVarSupport(vars, elim.real_vars);
 
         if (opts.evaluator) {
             if (elim.real_vars.size() == vars.size()) {
                 ctx.eval = opts.evaluator;
             } else {
-                auto idx_map = ctx.original_indices;
-                ctx.eval     = [eval = opts.evaluator, idx_map = std::move(idx_map),
-                                orig_sz = vars.size()](
-                                   const std::vector< uint64_t > &reduced_vals
-                               ) -> uint64_t {
+                ctx.eval = [eval = opts.evaluator, idx_map = ctx.original_indices,
+                            orig_sz = vars.size()](
+                               const std::vector< uint64_t > &reduced_vals
+                           ) -> uint64_t {
                     std::vector< uint64_t > original_vals(orig_sz, 0);
                     for (size_t i = 0; i < idx_map.size(); ++i) {
                         original_vals[idx_map[i]] = reduced_vals[i];

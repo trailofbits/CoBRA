@@ -200,7 +200,7 @@ namespace cobra {
             );
 
             // Safety: reject if new unsupported flags appeared
-            if (static_cast< uint32_t >(new_flags & ~old_flags) != 0) {
+            if ((new_flags & ~old_flags) != StructuralFlag{ 0 }) {
                 COBRA_TRACE(
                     "MixedRewriter", "Round {}: ABORT — new unsupported flags appeared", round
                 );
@@ -208,9 +208,8 @@ namespace cobra {
             }
 
             // Progress check
-            const bool coarse_progress = (new_flags != old_flags)
-                && ((static_cast< uint32_t >(new_flags) & static_cast< uint32_t >(old_flags))
-                    == static_cast< uint32_t >(new_flags));
+            const bool coarse_progress =
+                (new_flags != old_flags) && ((new_flags & old_flags) == new_flags);
             const bool fine_progress = (new_sites < old_sites);
             COBRA_TRACE(
                 "MixedRewriter", "Round {}: coarse_progress={} fine_progress={}", round,

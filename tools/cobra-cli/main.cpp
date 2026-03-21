@@ -316,7 +316,7 @@ namespace {
         // Self-check uses plain reconstruction (no OR-rewrite)
         // to ensure structural round-trip fidelity.
         auto plain = cobra::ReconstructMaskedAtoms(ir, {});
-        auto check = cobra::SelfChecSemilinear(ir, *plain, vars, bitwidth);
+        auto check = cobra::SelfCheckSemilinear(ir, *plain, vars, bitwidth);
         COBRA_TRACE("CLI", "SelfCheck: passed={}", check.passed);
         if (!check.passed) {
             if (verbose) { std::cerr << "Running self-check... failed\n"; }

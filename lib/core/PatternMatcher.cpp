@@ -49,8 +49,8 @@ namespace cobra {
         // Key bit i is set when f(x,y)=1 for that (x,y) assignment.
         // Constants (0x0, 0xF) are handled earlier by all_equal.
         std::optional< std::unique_ptr< Expr > > Match2varBoolean(uint8_t key) {
-            auto x = [&]() { return Expr::Variable(0); };
-            auto y = [&]() { return Expr::Variable(1); };
+            auto x = []() { return Expr::Variable(0); };
+            auto y = []() { return Expr::Variable(1); };
 
             // key bits: [f(0,0), f(1,0), f(0,1), f(1,1)]
             switch (key) {
@@ -93,9 +93,9 @@ namespace cobra {
         // sig index i encodes x=bit0, y=bit1, z=bit2.
         // Generated programmatically and verified against truth tables.
         std::optional< std::unique_ptr< Expr > > Match3varBoolean(uint8_t key) {
-            auto x = [&]() { return Expr::Variable(0); };
-            auto y = [&]() { return Expr::Variable(1); };
-            auto z = [&]() { return Expr::Variable(2); };
+            auto x = []() { return Expr::Variable(0); };
+            auto y = []() { return Expr::Variable(1); };
+            auto z = []() { return Expr::Variable(2); };
 
             switch (key) {
                 case 0x01: // ~(x | y | z)
@@ -919,7 +919,7 @@ namespace cobra {
         // f0(x,y,z) = f(x,y,z,0) and f1(x,y,z) = f(x,y,z,1), each matched
         // by the 3-var table. Covers all 65536 non-constant functions.
         std::optional< std::unique_ptr< Expr > > Match4varBoolean(uint32_t key) {
-            auto w = [&]() { return Expr::Variable(3); };
+            auto w = []() { return Expr::Variable(3); };
 
             const auto f0 = static_cast< uint8_t >(key & 0xFF);
             const auto f1 = static_cast< uint8_t >((key >> 8) & 0xFF);
@@ -974,7 +974,7 @@ namespace cobra {
         // f0(x,y,z,w) = f(...,0) and f1(x,y,z,w) = f(...,1), each matched
         // by the 4-var decomposer. Covers all 2^32 non-constant functions.
         std::optional< std::unique_ptr< Expr > > Match5varBoolean(uint32_t key) {
-            auto v = [&]() { return Expr::Variable(4); };
+            auto v = []() { return Expr::Variable(4); };
 
             const auto f0 = static_cast< uint16_t >(key & 0xFFFF);
             const auto f1 = static_cast< uint16_t >((key >> 16) & 0xFFFF);

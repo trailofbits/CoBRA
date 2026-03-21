@@ -5,9 +5,32 @@
 #include <bit>
 #include <cstdint>
 #include <memory>
+#include <string>
+#include <unordered_map>
 #include <utility>
 
 namespace cobra {
+
+    std::vector< uint32_t > BuildVarSupport(
+        const std::vector< std::string > &all_vars,
+        const std::vector< std::string > &subset_vars
+    ) {
+        std::unordered_map< std::string, uint32_t > idx;
+        for (uint32_t j = 0; j < all_vars.size(); ++j) { idx[all_vars[j]] = j; }
+
+        std::vector< uint32_t > support;
+        support.reserve(subset_vars.size());
+        for (const auto &v : subset_vars) { support.push_back(idx.at(v)); }
+        return support;
+    }
+
+    void RemapVarIndices(Expr &expr, const std::vector< uint32_t > &index_map) {
+        if (expr.kind == Expr::Kind::kVariable) {
+            expr.var_index = index_map[expr.var_index];
+            return;
+        }
+        for (auto &child : expr.children) { RemapVarIndices(*child, index_map); }
+    }
 
     std::unique_ptr< Expr > BuildAndProduct(uint64_t mask) {
         std::unique_ptr< Expr > result;

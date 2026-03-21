@@ -24,6 +24,23 @@ namespace cobra {
 
         constexpr int kNumProbes = 8;
 
+        bool NextCombo(std::vector< uint32_t > &combo, uint8_t arity, uint32_t support_size) {
+            int i = static_cast< int >(arity) - 1;
+            while (i >= 0) {
+                combo[static_cast< size_t >(i)]++;
+                if (combo[static_cast< size_t >(i)]
+                    <= support_size - arity + static_cast< uint32_t >(i))
+                {
+                    for (uint32_t j = static_cast< uint32_t >(i) + 1; j < arity; ++j) {
+                        combo[j] = combo[j - 1] + 1;
+                    }
+                    return true;
+                }
+                --i;
+            }
+            return false;
+        }
+
         void GenerateProbeBank(
             std::array< ProbePoint, kNumProbes > &bank, uint32_t num_vars, uint32_t bitwidth
         ) {
@@ -104,29 +121,7 @@ namespace cobra {
             std::vector< uint32_t > combo(prim.arity);
             for (uint8_t i = 0; i < prim.arity; ++i) { combo[i] = i; }
 
-            auto next_combo = [&]() -> bool {
-                int i = static_cast< int >(prim.arity) - 1;
-                while (i >= 0) {
-                    combo[static_cast< size_t >(i)]++;
-                    if (combo[static_cast< size_t >(i)]
-                        <= kSupportSize - prim.arity + static_cast< uint32_t >(i))
-                    {
-                        for (uint32_t j = static_cast< uint32_t >(i) + 1; j < prim.arity; ++j) {
-                            combo[j] = combo[j - 1] + 1;
-                        }
-                        return true;
-                    }
-                    --i;
-                }
-                return false;
-            };
-
-            bool first_combo = true;
             do {
-                if (!first_combo) { /* combo already advanced */
-                }
-                first_combo = false;
-
                 // Evaluate ghost at each probe point
                 std::array< uint64_t, kNumProbes > g_vals{};
                 for (int p = 0; p < kNumProbes; ++p) {
@@ -201,7 +196,7 @@ namespace cobra {
                     res.num_terms = 1;
                     return res;
                 }
-            } while (next_combo());
+            } while (NextCombo(combo, prim.arity, kSupportSize));
         }
 
         return std::nullopt;
@@ -221,37 +216,14 @@ namespace cobra {
             std::vector< uint32_t > combo(prim.arity);
             for (uint8_t i = 0; i < prim.arity; ++i) { combo[i] = i; }
 
-            auto next_combo = [&]() -> bool {
-                int i = static_cast< int >(prim.arity) - 1;
-                while (i >= 0) {
-                    combo[static_cast< size_t >(i)]++;
-                    if (combo[static_cast< size_t >(i)]
-                        <= kSupportSize - prim.arity + static_cast< uint32_t >(i))
-                    {
-                        for (uint32_t j = static_cast< uint32_t >(i) + 1; j < prim.arity; ++j) {
-                            combo[j] = combo[j - 1] + 1;
-                        }
-                        return true;
-                    }
-                    --i;
-                }
-                return false;
-            };
-
-            bool first_combo = true;
             do {
-                if (!first_combo) { /* combo already advanced */
-                }
-                first_combo = false;
-
                 // Map support-local combo to original-space variable indices
                 std::vector< uint32_t > var_indices(prim.arity);
                 for (uint8_t a = 0; a < prim.arity; ++a) { var_indices[a] = support[combo[a]]; }
 
                 // Build weight function from ghost primitive + tuple
-                WeightFn weight = [&prim, combo, &support](
-                                      std::span< const uint64_t > args, uint32_t bw
-                                  ) -> uint64_t {
+                WeightFn weight =
+                    [&prim, combo](std::span< const uint64_t > args, uint32_t bw) -> uint64_t {
                     std::vector< uint64_t > ghost_args(prim.arity);
                     for (uint8_t a = 0; a < prim.arity; ++a) { ghost_args[a] = args[combo[a]]; }
                     return prim.eval(ghost_args, bw);
@@ -276,7 +248,7 @@ namespace cobra {
                     res.num_terms = 1;
                     return res;
                 }
-            } while (next_combo());
+            } while (NextCombo(combo, prim.arity, kSupportSize));
         }
 
         return std::nullopt;

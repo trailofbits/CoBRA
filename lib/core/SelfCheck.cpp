@@ -36,12 +36,12 @@ namespace cobra {
 
     } // namespace
 
-    SelfCheckResult SelfChecSemilinear(
+    SelfCheckResult SelfCheckSemilinear(
         const SemilinearIR &original_ir, const Expr &reconstructed,
         const std::vector< std::string > &vars, uint32_t bitwidth
     ) {
         COBRA_TRACE(
-            "SelfCheck", "SelfChecSemilinear: vars={} bitwidth={}", vars.size(), bitwidth
+            "SelfCheck", "SelfCheckSemilinear: vars={} bitwidth={}", vars.size(), bitwidth
         );
         auto re_result = NormalizeToSemilinear(reconstructed, vars, bitwidth);
         if (!re_result.has_value()) {
@@ -86,7 +86,7 @@ namespace cobra {
         }
 
         auto result = SelfCheckResult{ .passed = true, .mismatch_detail = "" };
-        COBRA_TRACE("SelfCheck", "SelfChecSemilinear: passed={}", result.passed);
+        COBRA_TRACE("SelfCheck", "SelfCheckSemilinear: passed={}", result.passed);
         return result;
     }
 

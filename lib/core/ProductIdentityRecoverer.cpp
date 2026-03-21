@@ -1,4 +1,5 @@
 #include "cobra/core/ProductIdentityRecoverer.h"
+#include "cobra/core/BitWidth.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/ExprCost.h"
 #include "cobra/core/SignatureChecker.h"
@@ -10,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <string>
 #include <utility>
@@ -17,10 +19,6 @@
 
 namespace cobra {
     namespace {
-
-        uint64_t Bitmask(uint32_t bitwidth) {
-            return (bitwidth >= 64) ? UINT64_MAX : ((1ULL << bitwidth) - 1);
-        }
 
         // Attempt to collapse Add(Mul(F0,F1), Mul(F2,F3)) into Mul(x,y)
         // using the MBA product identity:
@@ -137,7 +135,7 @@ namespace cobra {
                 SignatureContext ctx;
                 ctx.vars = vars;
                 ctx.original_indices.resize(num_vars);
-                for (uint32_t vi = 0; vi < num_vars; ++vi) { ctx.original_indices[vi] = vi; }
+                std::iota(ctx.original_indices.begin(), ctx.original_indices.end(), 0U);
 
                 Options sub_opts   = opts;
                 sub_opts.evaluator = Evaluator{};

@@ -1,4 +1,5 @@
 #include "cobra/core/OperandSimplifier.h"
+#include "cobra/core/BitWidth.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/ExprCost.h"
 #include "cobra/core/ExprUtils.h"
@@ -9,6 +10,7 @@
 #include "cobra/core/Trace.h"
 #include <cstdint>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <random>
 #include <string>
@@ -17,10 +19,6 @@
 
 namespace cobra {
     namespace {
-
-        uint64_t Bitmask(uint32_t bitwidth) {
-            return (bitwidth >= 64) ? UINT64_MAX : ((1ULL << bitwidth) - 1);
-        }
 
         bool IsConstant(const Expr &e, uint64_t val) {
             return e.kind == Expr::Kind::kConstant && e.constant_val == val;
@@ -144,7 +142,7 @@ namespace cobra {
             SignatureContext ctx;
             ctx.vars = vars;
             ctx.original_indices.resize(num_vars);
-            for (uint32_t i = 0; i < num_vars; ++i) { ctx.original_indices[i] = i; }
+            std::iota(ctx.original_indices.begin(), ctx.original_indices.end(), 0U);
             // No evaluator: ctx.eval stays nullopt
 
             auto operand_cost = ComputeCost(operand).cost;

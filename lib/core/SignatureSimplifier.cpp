@@ -24,6 +24,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -171,23 +172,20 @@ namespace cobra {
 
             std::vector< uint64_t > singleton_at_2;
             if (singleton_result.has_value()) {
+                const auto &sr = singleton_result.value();
                 singleton_at_2.resize(kNumVars, 0);
                 for (uint32_t i = 0; i < kNumVars; ++i) {
-                    singleton_at_2[i] =
-                        EvalUnivariateAt2(singleton_result.value().per_var[i], opts.bitwidth);
+                    singleton_at_2[i] = EvalUnivariateAt2(sr.per_var[i], opts.bitwidth);
                 }
             }
 
             auto split =
                 SplitCoefficients(coeffs, *ctx.eval, kNumVars, opts.bitwidth, singleton_at_2);
 
-            bool has_mul = false; // NOLINT(misc-const-correctness)
-            for (unsigned long long mul_coeff : split.mul_coeffs) {
-                if (mul_coeff != 0) {
-                    has_mul = true;
-                    break;
-                }
-            }
+            const bool has_mul =
+                std::any_of(split.mul_coeffs.begin(), split.mul_coeffs.end(), [](uint64_t c) {
+                    return c != 0;
+                });
 
             std::unique_ptr< Expr > poly_expr = nullptr;
             std::vector< uint64_t > residual  = split.and_coeffs;
@@ -247,7 +245,7 @@ namespace cobra {
             && HasFlag(opts.structural_flags, kSfHasMultivarHighPower) && kNumVars <= 6)
         {
             std::vector< uint32_t > support(kNumVars);
-            for (uint32_t i = 0; i < kNumVars; ++i) { support[i] = i; }
+            std::iota(support.begin(), support.end(), 0U);
             auto recovery = RecoverAndVerifyPoly(*ctx.eval, support, kNumVars, opts.bitwidth);
             if (recovery.has_value()) {
                 TryUpdateBest(

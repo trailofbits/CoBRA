@@ -29,7 +29,7 @@ static std::unique_ptr< Expr > run_semilinear(
     auto check_expr = ReconstructMaskedAtoms(ir, {});
     EXPECT_NE(check_expr, nullptr) << "Plain reconstruction failed unexpectedly";
     if (check_expr) {
-        auto check = SelfChecSemilinear(ir, *check_expr, vars, bitwidth);
+        auto check = SelfCheckSemilinear(ir, *check_expr, vars, bitwidth);
         EXPECT_TRUE(check.passed) << "Self-check failed: " << check.mismatch_detail;
     }
 

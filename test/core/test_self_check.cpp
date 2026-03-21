@@ -13,7 +13,7 @@ TEST(SelfCheckTest, IdenticalIRPasses) {
     ASSERT_TRUE(ir.has_value());
     auto reconstructed = ReconstructMaskedAtoms(ir.value(), {});
     ASSERT_NE(reconstructed, nullptr);
-    auto result = SelfChecSemilinear(ir.value(), *reconstructed, { "x" }, 64);
+    auto result = SelfCheckSemilinear(ir.value(), *reconstructed, { "x" }, 64);
     EXPECT_TRUE(result.passed);
 }
 
@@ -22,7 +22,7 @@ TEST(SelfCheckTest, DetectsMismatch) {
     auto ir    = NormalizeToSemilinear(*input, { "x" }, 64);
     ASSERT_TRUE(ir.has_value());
     auto wrong  = Expr::BitwiseOr(Expr::Variable(0), Expr::Constant(0xFF));
-    auto result = SelfChecSemilinear(ir.value(), *wrong, { "x" }, 64);
+    auto result = SelfCheckSemilinear(ir.value(), *wrong, { "x" }, 64);
     EXPECT_FALSE(result.passed);
 }
 
@@ -35,7 +35,7 @@ TEST(SelfCheckTest, TwoAtomRoundTrip) {
     ASSERT_TRUE(ir.has_value());
     auto reconstructed = ReconstructMaskedAtoms(ir.value(), {});
     ASSERT_NE(reconstructed, nullptr);
-    auto result = SelfChecSemilinear(ir.value(), *reconstructed, { "x", "y" }, 64);
+    auto result = SelfCheckSemilinear(ir.value(), *reconstructed, { "x", "y" }, 64);
     EXPECT_TRUE(result.passed);
 }
 
@@ -47,6 +47,6 @@ TEST(SelfCheckTest, WithConstant) {
     ASSERT_TRUE(ir.has_value());
     auto reconstructed = ReconstructMaskedAtoms(ir.value(), {});
     ASSERT_NE(reconstructed, nullptr);
-    auto result = SelfChecSemilinear(ir.value(), *reconstructed, { "x" }, 64);
+    auto result = SelfCheckSemilinear(ir.value(), *reconstructed, { "x" }, 64);
     EXPECT_TRUE(result.passed);
 }
