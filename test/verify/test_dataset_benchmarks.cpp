@@ -13,6 +13,8 @@ using namespace cobra;
 namespace {
 
     size_t find_separator(const std::string &line) {
+        // Prefer tab separator (unambiguous), fall back to last
+        // top-level comma for legacy datasets.
         int depth         = 0;
         size_t last_comma = std::string::npos;
         for (size_t i = 0; i < line.size(); ++i) {
@@ -20,6 +22,8 @@ namespace {
                 ++depth;
             } else if (line[i] == ')') {
                 --depth;
+            } else if (line[i] == '\t' && depth == 0) {
+                return i;
             } else if (line[i] == ',' && depth == 0) {
                 last_comma = i;
             }
@@ -337,11 +341,11 @@ TEST(GAMBADataset, LokiTiny) {
 
 TEST(OSESDataset, Fast) {
     auto stats = run_dataset(DATASET_DIR "/oses/oses_fast.txt");
-    EXPECT_EQ(stats.total, 466);
-    EXPECT_EQ(stats.skipped_parse, 7);
-    EXPECT_EQ(stats.parsed, 459);
-    EXPECT_EQ(stats.simplified, 383);
-    EXPECT_EQ(stats.unsupported, 76);
+    EXPECT_EQ(stats.total, 473);
+    EXPECT_EQ(stats.skipped_parse, 15);
+    EXPECT_EQ(stats.parsed, 458);
+    EXPECT_EQ(stats.simplified, 379);
+    EXPECT_EQ(stats.unsupported, 79);
     EXPECT_EQ(stats.failed_simplify, 0);
 }
 

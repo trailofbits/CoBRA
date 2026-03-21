@@ -38,6 +38,8 @@ namespace {
                 ++depth;
             } else if (line[i] == ')') {
                 --depth;
+            } else if (line[i] == '\t' && depth == 0) {
+                return i;
             } else if (line[i] == ',' && depth == 0) {
                 last_comma = i;
             }

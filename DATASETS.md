@@ -1,8 +1,8 @@
 # Dataset Benchmark Report
 
-CoBRA is validated against **73,119 expressions** drawn from **32 dataset files** spanning 7 independent sources. Every expression is parsed, simplified, and spot-checked at runtime. The numbers below are enforced by automated test assertions in [`test/verify/test_dataset_benchmarks.cpp`](test/verify/test_dataset_benchmarks.cpp) and verified on every CI run.
+CoBRA is validated against **73,126 expressions** drawn from **33 dataset files** spanning 7 independent sources. Every expression is parsed, simplified, and spot-checked at runtime. The numbers below are enforced by automated test assertions in [`test/verify/test_dataset_benchmarks.cpp`](test/verify/test_dataset_benchmarks.cpp) and verified on every CI run.
 
-**Overall: 69,199 / 70,060 parsed expressions simplified (98.77%), zero failures.**
+**Overall: 69,195 / 70,059 parsed expressions simplified (98.77%), zero failures.**
 
 ---
 
@@ -103,9 +103,11 @@ Source: [oracle-synthesis-meets-equality-saturation](https://github.com/fvrmatte
 
 | Dataset | Total Lines | Parsed | Simplified | Unsupported | Rate |
 |---------|:-----------:|:------:|:----------:|:-----------:|:----:|
-| `oses_all.txt` | 473 | 466 | **389** | 77 | **83.5%** |
+| `oses_fast.txt` | 473 | 458 | **379** | 79 | **82.8%** |
+| `oses_slow.txt` | 7 | 7 | **6** | 1 | **85.7%** |
+| **OSES Total** | **480** | **465** | **385** | **80** | **82.8%** |
 
-- **oses_all**: 472 MBA expressions extracted from the OSES `synth.py` evaluation script (plus 1 header comment). Expressions span linear (205), nonlinear/product (131), linear-with-constants (129), and constant (7) categories with 1-14 variables. The 77 unsupported expressions include product-inside-bitwise patterns, arithmetic-under-bitwise expressions that fail full-width verification, and complex multi-variable mixed products that fall outside current representation families.
+- **oses**: 479 MBA expressions extracted from the OSES `synth.py` evaluation script (plus 1 header comment). Expressions span linear, nonlinear/product, and constant categories with 1-14 variables. The dataset is split into fast (472 expressions under 50K characters) and slow (7 mega-expressions over 50K characters); only the fast subset runs in CI. The 80 unsupported expressions include product-inside-bitwise patterns, arithmetic-under-bitwise expressions that fail full-width verification, and complex multi-variable mixed products that fall outside current representation families.
 
 ---
 
@@ -113,12 +115,12 @@ Source: [oracle-synthesis-meets-equality-saturation](https://github.com/fvrmatte
 
 | Metric | Count |
 |--------|------:|
-| Total dataset lines | 73,119 |
+| Total dataset lines | 73,126 |
 | Comment/header lines skipped | 2,069 |
-| Non-expression lines (headers, no ground truth) | 990 |
-| **Parsed expressions** | **70,060** |
-| **Simplified** | **69,199** |
-| Unsupported (by design) | 861 |
+| Non-expression lines (headers, no ground truth) | 998 |
+| **Parsed expressions** | **70,059** |
+| **Simplified** | **69,195** |
+| Unsupported (by design) | 864 |
 | Errors / failures | **0** |
 
 | MBA Class | Expressions | Simplified | Rate |
