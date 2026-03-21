@@ -270,6 +270,25 @@ namespace cobra {
                 }
             }
 
+            // Lower (~a) & c  =  c - (a & c)  when a has variables
+            if (expr.kind == Expr::Kind::kAnd && IsPurelyBitwise(expr) && HasVariable(expr)) {
+                for (int side = 0; side < 2; ++side) {
+                    const auto &lhs = *expr.children[side];
+                    const auto &rhs = *expr.children[1 - side];
+                    if (lhs.kind != Expr::Kind::kNot) { continue; }
+                    if (!HasVariable(lhs) || HasVariable(rhs)) { continue; }
+                    // lhs = ~a, rhs = c (constant)
+                    const auto &inner  = *lhs.children[0];
+                    const uint64_t kC  = EvalConstantBitwise(rhs, ctx.mask);
+                    auto and_expr      = Expr::BitwiseAnd(CloneExpr(inner), Expr::Constant(kC));
+                    AtomId and_aid     = RegisterAtom(ctx, *and_expr);
+                    uint64_t and_coeff = ModNeg(coeff, ctx.bitwidth);
+                    uint64_t const_part = (coeff * kC) & ctx.mask;
+                    return { .constant = const_part,
+                             .terms    = { { .coeff = and_coeff, .atom_id = and_aid } } };
+                }
+            }
+
             // Purely bitwise with variables: treat as atom
             if (IsPurelyBitwise(expr) && HasVariable(expr)) {
                 AtomId aid = RegisterAtom(ctx, expr);

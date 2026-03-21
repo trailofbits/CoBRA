@@ -356,3 +356,32 @@ TEST(SemilinearIntegration, ShrIdentityFold) {
     EXPECT_EQ(text.find(">>"), std::string::npos)
         << "Did not expect >> in output, got: " << text;
 }
+
+// Issue #7: per-partition coefficient elision via NOT-AND lowering
+TEST(SemilinearIntegration, Issue7NotAndElision) {
+    // (x | 0x10) - (~x & 0x10) - (x & 0xEF) = (x & 0x10) in 8-bit
+    auto input = Expr::Add(
+        Expr::Add(
+            Expr::BitwiseOr(Expr::Variable(0), Expr::Constant(0x10)),
+            Expr::Negate(
+                Expr::BitwiseAnd(Expr::BitwiseNot(Expr::Variable(0)), Expr::Constant(0x10))
+            )
+        ),
+        Expr::Negate(Expr::BitwiseAnd(Expr::Variable(0), Expr::Constant(0xEF)))
+    );
+    EXPECT_EQ(ClassifyStructural(*input).semantic, SemanticClass::kSemilinear);
+
+    auto result = run_semilinear(*input, { "x" }, 8);
+    ASSERT_NE(result, nullptr);
+
+    auto rendered = Render(*result, { "x" }, 8);
+    EXPECT_EQ(rendered.find("~"), std::string::npos)
+        << "Expected no NOT in simplified output, got: " << rendered;
+    EXPECT_EQ(rendered.find("|"), std::string::npos)
+        << "Expected no OR in simplified output, got: " << rendered;
+
+#ifdef COBRA_HAS_Z3
+    auto verify = Z3VerifyExprs(*input, *result, { "x" }, 8);
+    EXPECT_TRUE(verify.equivalent) << "Counterexample: " << verify.counterexample;
+#endif
+}

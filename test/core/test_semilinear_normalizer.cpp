@@ -330,6 +330,39 @@ TEST(NormalizerTest, AndOrCancellation) {
     EXPECT_EQ(ir.value().terms[0].coeff, 1u);
 }
 
+TEST(NormalizerTest, NotAndConstantLowering) {
+    // (~x & 0x10) lowers to 0x10 - (x & 0x10)
+    auto e  = Expr::BitwiseAnd(Expr::BitwiseNot(Expr::Variable(0)), Expr::Constant(0x10));
+    auto ir = NormalizeToSemilinear(*e, { "x" }, 8);
+    ASSERT_TRUE(ir.has_value());
+    EXPECT_EQ(ir.value().constant, 0x10u);
+    EXPECT_EQ(ir.value().terms.size(), 1u);
+    // coeff should be -1 mod 256 = 0xFF
+    EXPECT_EQ(ir.value().terms[0].coeff, 0xFFu);
+}
+
+TEST(NormalizerTest, NotAndConstantCancellation) {
+    // (~x & 0x10) + (x & 0x10) = 0x10 (constant)
+    auto e = Expr::Add(
+        Expr::BitwiseAnd(Expr::BitwiseNot(Expr::Variable(0)), Expr::Constant(0x10)),
+        Expr::BitwiseAnd(Expr::Variable(0), Expr::Constant(0x10))
+    );
+    auto ir = NormalizeToSemilinear(*e, { "x" }, 8);
+    ASSERT_TRUE(ir.has_value());
+    EXPECT_EQ(ir.value().constant, 0x10u);
+    EXPECT_EQ(ir.value().terms.size(), 0u);
+}
+
+TEST(NormalizerTest, ConstAndNotLowering) {
+    // (0x10 & ~x) — constant on left side
+    auto e  = Expr::BitwiseAnd(Expr::Constant(0x10), Expr::BitwiseNot(Expr::Variable(0)));
+    auto ir = NormalizeToSemilinear(*e, { "x" }, 8);
+    ASSERT_TRUE(ir.has_value());
+    EXPECT_EQ(ir.value().constant, 0x10u);
+    EXPECT_EQ(ir.value().terms.size(), 1u);
+    EXPECT_EQ(ir.value().terms[0].coeff, 0xFFu);
+}
+
 TEST(SemilinearNormalizerTest, StructuralHashDedup) {
     // (x & 0xFF) + (x & 0xFF) should produce one atom with coeff 2
     auto input = Expr::Add(
