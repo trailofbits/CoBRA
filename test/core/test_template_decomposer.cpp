@@ -21,7 +21,7 @@ namespace {
     Options make_opts(uint32_t bw = 64) {
         Options opts;
         opts.bitwidth   = bw;
-        opts.max_vars   = 12;
+        opts.max_vars   = 16;
         opts.spot_check = true;
         return opts;
     }

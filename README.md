@@ -4,7 +4,7 @@
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)](https://en.cppreference.com/w/cpp/23)
-[![Tests](https://img.shields.io/badge/tests-1015-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-1017-brightgreen.svg)](#testing)
 
 CoBRA deobfuscates expressions that interleave arithmetic (`+`, `-`, `*`) with bitwise (`&`, `|`, `^`, `~`) and shift (`<<`, `>>`) operators — a technique commonly used in software obfuscation.
 
@@ -127,7 +127,7 @@ cobra-cli --mba "(x&y)+(x|y)" --verbose
 |------|---------|-------------|
 | `--mba <expr>` | | Expression to simplify |
 | `--bitwidth <n>` | 64 | Modular arithmetic width (1-64) |
-| `--max-vars <n>` | 12 | Maximum variable count |
+| `--max-vars <n>` | 16 | Maximum variable count |
 | `--verify` | off | Z3 equivalence check |
 | `--strict` | off | Require Z3 for semilinear results |
 | `--verbose` | off | Print pipeline internals |
@@ -167,12 +167,12 @@ lib/llvm/                LLVM pass plugin (CobraPass, MBADetector, IRReconstruct
 lib/verify/              Z3-based equivalence verification
 include/cobra/           Public headers
 tools/cobra-cli/         CLI frontend and expression parser
-test/                    1015 tests across 55 test files (unit + integration + dataset benchmarks)
+test/                    1017 tests across 55 test files (unit + integration + dataset benchmarks)
 ```
 
 ## Testing
 
-CoBRA has 1015 tests covering unit, integration, and dataset benchmarks:
+CoBRA has 1017 tests covering unit, integration, and dataset benchmarks:
 
 ```bash
 # Run all tests
@@ -185,7 +185,7 @@ ctest --test-dir build -R test_simplifier --output-on-failure
 ctest --test-dir build -V
 ```
 
-Dataset benchmarks validate against real-world obfuscated expressions from QSynth and PLDI datasets. See [DATASETS.md](DATASETS.md) for the full benchmark report — 69,501 expressions simplified across 31 dataset files from 6 independent sources, with zero failures.
+Dataset benchmarks validate against real-world obfuscated expressions from multiple independent sources. See [DATASETS.md](DATASETS.md) for the full benchmark report — 69,942 expressions simplified across 32 dataset files from 7 independent sources, with zero failures.
 
 ## Known Limitations
 

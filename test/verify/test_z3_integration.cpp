@@ -35,7 +35,7 @@ namespace {
 
         Options opts{
             .bitwidth   = tc.bitwidth,
-            .max_vars   = 12,
+            .max_vars   = 16,
             .spot_check = true,
         };
         auto result = Simplify(parsed.value().sig, parsed.value().vars, nullptr, opts);

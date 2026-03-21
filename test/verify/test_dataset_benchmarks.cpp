@@ -84,7 +84,7 @@ namespace {
                 input_expr = folded.get();
             }
 
-            Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+            Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
             if (input_expr) {
                 opts.evaluator = [&folded](const std::vector< uint64_t > &v) -> uint64_t {
                     return EvalExpr(*folded, v, 64);
@@ -330,5 +330,17 @@ TEST(GAMBADataset, LokiTiny) {
     // All are linear 2-var (x+y, x&y, x|y, x-y, x^y)
     EXPECT_EQ(stats.simplified, 25000);
     EXPECT_EQ(stats.unsupported, 0);
+    EXPECT_EQ(stats.failed_simplify, 0);
+}
+
+// -- OSES dataset (oracle-synthesis-meets-equality-saturation) ----
+
+TEST(OSESDataset, All) {
+    auto stats = run_dataset(DATASET_DIR "/oses/oses_all.txt");
+    EXPECT_EQ(stats.total, 473);
+    EXPECT_EQ(stats.skipped_parse, 7);
+    EXPECT_EQ(stats.parsed, 466);
+    EXPECT_EQ(stats.simplified, 441);
+    EXPECT_EQ(stats.unsupported, 25);
     EXPECT_EQ(stats.failed_simplify, 0);
 }

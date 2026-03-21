@@ -17,7 +17,7 @@ namespace cobra {
     struct Options
     {
         uint32_t bitwidth                 = 64;
-        uint32_t max_vars                 = 12;
+        uint32_t max_vars                 = 16;
         bool spot_check                   = true;
         bool enable_bitwise_decomposition = true;
         Evaluator evaluator;

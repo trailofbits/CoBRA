@@ -147,7 +147,7 @@ TEST(PLDIPolyDiagnostic, AnalyzeUnsolved) {
             FoldConstantBitwise(std::move(ast_result.value().expr), 64)
         );
 
-        Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+        Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
         opts.evaluator = [folded_ptr](const std::vector< uint64_t > &v) -> uint64_t {
             return EvalExpr(**folded_ptr, v, 64);
         };

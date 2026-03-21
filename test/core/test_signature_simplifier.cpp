@@ -12,7 +12,7 @@ TEST(SignatureSimplifierTest, ConstantSig) {
     SignatureContext ctx;
     ctx.vars             = { "x", "y" };
     ctx.original_indices = { 0, 1 };
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = SimplifyFromSignature(sig, ctx, opts, 0);
     ASSERT_TRUE(result.has_value());
@@ -26,7 +26,7 @@ TEST(SignatureSimplifierTest, XorSig) {
     SignatureContext ctx;
     ctx.vars             = { "x", "y" };
     ctx.original_indices = { 0, 1 };
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = SimplifyFromSignature(sig, ctx, opts, 0);
     ASSERT_TRUE(result.has_value());
@@ -39,7 +39,7 @@ TEST(SignatureSimplifierTest, XPlusYSig) {
     SignatureContext ctx;
     ctx.vars             = { "x", "y" };
     ctx.original_indices = { 0, 1 };
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = SimplifyFromSignature(sig, ctx, opts, 0);
     ASSERT_TRUE(result.has_value());
@@ -65,7 +65,7 @@ TEST(SignatureSimplifierTest, FeatureFlagDisablesDecomposition) {
 
     // With decomposition enabled — should find And
     Options opts_on{
-        .bitwidth = 64, .max_vars = 12, .spot_check = true, .enable_bitwise_decomposition = true
+        .bitwidth = 64, .max_vars = 16, .spot_check = true, .enable_bitwise_decomposition = true
     };
     opts_on.evaluator = eval;
     auto r1           = SimplifyFromSignature(sig, ctx, opts_on, 0);
@@ -75,7 +75,7 @@ TEST(SignatureSimplifierTest, FeatureFlagDisablesDecomposition) {
     // (pattern matcher handles pure bitwise), but the path through
     // the decomposer is not taken
     Options opts_off{ .bitwidth                     = 64,
-                      .max_vars                     = 12,
+                      .max_vars                     = 16,
                       .spot_check                   = true,
                       .enable_bitwise_decomposition = false };
     opts_off.evaluator = eval;
@@ -100,7 +100,7 @@ TEST(SignatureSimplifierTest, CrossTermRecoveredWithSingleton) {
     ctx.original_indices = { 0, 1 };
     ctx.eval             = eval;
 
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = eval;
 
     auto result = SimplifyFromSignature(sig, ctx, opts, 0);
@@ -121,7 +121,7 @@ TEST(SignatureSimplifierTest, LinearPlusCrossTermRecovered) {
     ctx.original_indices = { 0, 1 };
     ctx.eval             = eval;
 
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = eval;
 
     auto result = SimplifyFromSignature(sig, ctx, opts, 0);
@@ -142,7 +142,7 @@ TEST(SignatureSimplifierTest, PureMulStillWorks) {
     ctx.original_indices = { 0, 1 };
     ctx.eval             = eval;
 
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = eval;
 
     auto result = SimplifyFromSignature(sig, ctx, opts, 0);
@@ -171,7 +171,7 @@ TEST(SignatureSimplifierTest, WordValuedOrFullPipeline) {
     ctx.eval             = eval;
 
     Options opts{
-        .bitwidth = 64, .max_vars = 12, .spot_check = true, .enable_bitwise_decomposition = true
+        .bitwidth = 64, .max_vars = 16, .spot_check = true, .enable_bitwise_decomposition = true
     };
     opts.evaluator = eval;
 
@@ -196,7 +196,7 @@ TEST(SignatureSimplifierTest, WordValuedXorFullPipeline) {
     ctx.eval             = eval;
 
     Options opts{
-        .bitwidth = 64, .max_vars = 12, .spot_check = true, .enable_bitwise_decomposition = true
+        .bitwidth = 64, .max_vars = 16, .spot_check = true, .enable_bitwise_decomposition = true
     };
     opts.evaluator = eval;
 
@@ -219,7 +219,7 @@ TEST(SignatureSimplifierTest, QuadraticOnlyNoSpuriousMul) {
     ctx.original_indices = { 0 };
     ctx.eval             = eval;
 
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = eval;
 
     auto result = SimplifyFromSignature(sig, ctx, opts, 0);

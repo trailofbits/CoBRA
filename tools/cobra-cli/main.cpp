@@ -33,7 +33,7 @@ namespace {
                   << "\nOptions:\n"
                   << "  --mba <expr>    Simplify an MBA expression\n"
                   << "  --bitwidth <n>  Bit width (default: 64)\n"
-                  << "  --max-vars <n>  Max variable count (default: 12)\n"
+                  << "  --max-vars <n>  Max variable count (default: 16)\n"
                   << "  --verify        Enable Z3 verification\n"
                   << "  --strict        Require Z3 for semilinear results\n"
                   << "  --verbose       Print intermediate steps\n"
@@ -404,7 +404,7 @@ namespace {
 int main(int argc, char *argv[]) {
     std::string mba_expr;
     uint32_t bitwidth = 64;
-    uint32_t max_vars = 12;
+    uint32_t max_vars = 16;
     bool verbose      = false;
     bool verify       = false;
     bool strict       = false;

@@ -34,7 +34,7 @@ namespace {
     Options default_opts() {
         Options opts{};
         opts.bitwidth                     = 64;
-        opts.max_vars                     = 12;
+        opts.max_vars                     = 16;
         opts.spot_check                   = true;
         opts.enable_bitwise_decomposition = true;
         return opts;

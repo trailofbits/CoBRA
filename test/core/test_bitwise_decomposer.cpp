@@ -39,7 +39,7 @@ TEST(BitwiseDecomposerTest, DOrCA) {
     auto f = [](const std::vector< uint64_t > &v) -> uint64_t { return v[0] | (v[1] * v[2]); };
     auto sig = make_sig(3, f);
     auto ctx = make_ctx({ "d", "c", "a" }, f);
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, nullptr);
     ASSERT_TRUE(result.has_value());
@@ -52,7 +52,7 @@ TEST(BitwiseDecomposerTest, ESquaredAndD) {
     auto f = [](const std::vector< uint64_t > &v) -> uint64_t { return (v[0] * v[0]) & v[1]; };
     auto sig = make_sig(2, f);
     auto ctx = make_ctx({ "e", "d" }, f);
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, nullptr);
     ASSERT_TRUE(result.has_value());
@@ -65,7 +65,7 @@ TEST(BitwiseDecomposerTest, DSquaredXorA) {
     auto f = [](const std::vector< uint64_t > &v) -> uint64_t { return (v[0] * v[0]) ^ v[1]; };
     auto sig = make_sig(2, f);
     auto ctx = make_ctx({ "d", "a" }, f);
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, nullptr);
     ASSERT_TRUE(result.has_value());
@@ -78,7 +78,7 @@ TEST(BitwiseDecomposerTest, AddDecompXPlusY) {
     auto f   = [](const std::vector< uint64_t > &v) -> uint64_t { return v[0] + v[1]; };
     auto sig = make_sig(2, f);
     auto ctx = make_ctx({ "x", "y" }, f);
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, nullptr);
     ASSERT_TRUE(result.has_value());
@@ -90,7 +90,7 @@ TEST(BitwiseDecomposerTest, DepthCapReturnsNullopt) {
     auto f = [](const std::vector< uint64_t > &v) -> uint64_t { return v[0] | (v[1] * v[2]); };
     auto sig = make_sig(3, f);
     auto ctx = make_ctx({ "d", "c", "a" }, f);
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 2, nullptr);
     EXPECT_FALSE(result.has_value());
@@ -100,7 +100,7 @@ TEST(BitwiseDecomposerTest, BaselineGateRejectsWorse) {
     auto f   = [](const std::vector< uint64_t > &v) -> uint64_t { return v[0] & v[1]; };
     auto sig = make_sig(2, f);
     auto ctx = make_ctx({ "x", "y" }, f);
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     ExprCost baseline{ 1, 0, 1 };
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, &baseline);
@@ -113,7 +113,7 @@ TEST(BitwiseDecomposerTest, NoEvaluatorReturnsNullopt) {
     SignatureContext ctx;
     ctx.vars             = { "d", "c", "a" };
     ctx.original_indices = { 0, 1, 2 };
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, nullptr);
     EXPECT_FALSE(result.has_value());
@@ -136,7 +136,7 @@ TEST(BitwiseDecomposerTest, WordValuedOrAccepted) {
     auto f = [](const std::vector< uint64_t > &v) -> uint64_t { return v[0] | (v[1] + v[2]); };
     auto sig = make_sig(3, f);
     auto ctx = make_ctx({ "v", "a", "b" }, f);
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = f;
 
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, nullptr);
@@ -155,7 +155,7 @@ TEST(BitwiseDecomposerTest, MultiLevelPureBitwise) {
     };
     auto sig = make_sig(4, f);
     auto ctx = make_ctx({ "a", "b", "c", "d" }, f);
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, nullptr);
     ASSERT_TRUE(result.has_value());
@@ -167,7 +167,7 @@ TEST(BitwiseDecomposerTest, VerifiedButNotBetterRejected) {
     auto f   = [](const std::vector< uint64_t > &v) -> uint64_t { return v[0] & v[1]; };
     auto sig = make_sig(2, f);
     auto ctx = make_ctx({ "x", "y" }, f);
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     ExprCost baseline{ 3, 0, 2 }; // cost of x & y itself
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, &baseline);
@@ -181,7 +181,7 @@ TEST(BitwiseDecomposerTest, MulDecompBTimesAplusA) {
     auto f = [](const std::vector< uint64_t > &v) -> uint64_t { return v[0] * (v[1] + v[1]); };
     auto sig = make_sig(2, f);
     auto ctx = make_ctx({ "b", "a" }, f);
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, nullptr);
     ASSERT_TRUE(result.has_value());
@@ -194,7 +194,7 @@ TEST(BitwiseDecomposerTest, MulDecompBTimesAplusOne) {
     auto f   = [](const std::vector< uint64_t > &v) -> uint64_t { return v[0] * (v[1] + 1); };
     auto sig = make_sig(2, f);
     auto ctx = make_ctx({ "b", "a" }, f);
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, nullptr);
     ASSERT_TRUE(result.has_value());
@@ -207,7 +207,7 @@ TEST(BitwiseDecomposerTest, MulDecompThreeVars) {
     auto f = [](const std::vector< uint64_t > &v) -> uint64_t { return v[0] * (v[1] + v[2]); };
     auto sig = make_sig(3, f);
     auto ctx = make_ctx({ "a", "b", "c" }, f);
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, nullptr);
     ASSERT_TRUE(result.has_value());
@@ -221,7 +221,7 @@ TEST(BitwiseDecomposerTest, MulRejectsNonZeroCof0ButAddMatches) {
     auto f   = [](const std::vector< uint64_t > &v) -> uint64_t { return v[0] + v[1]; };
     auto sig = make_sig(2, f);
     auto ctx = make_ctx({ "a", "b" }, f);
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, nullptr);
     ASSERT_TRUE(result.has_value());
@@ -233,7 +233,7 @@ TEST(BitwiseDecomposerTest, ShapeMatchesButGFailsToImprove) {
     auto f = [](const std::vector< uint64_t > &v) -> uint64_t { return v[0] & (v[1] | v[2]); };
     auto sig = make_sig(3, f);
     auto ctx = make_ctx({ "a", "b", "c" }, f);
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     ExprCost baseline{ 1, 0, 1 }; // impossible to beat
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, &baseline);
@@ -249,7 +249,7 @@ TEST(BitwiseDecomposerTest, WordValuedXorDecomp) {
     auto f = [](const std::vector< uint64_t > &v) -> uint64_t { return v[0] ^ (v[1] + v[2]); };
     auto sig = make_sig(3, f);
     auto ctx = make_ctx({ "d", "a", "b" }, f);
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = f;
 
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, nullptr);
@@ -271,7 +271,7 @@ TEST(BitwiseDecomposerTest, WordValuedOrTwoVars) {
     auto f   = [](const std::vector< uint64_t > &v) -> uint64_t { return v[0] | (v[1] + 1); };
     auto sig = make_sig(2, f);
     auto ctx = make_ctx({ "a", "b" }, f);
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = f;
 
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, nullptr);

@@ -128,3 +128,4 @@ The full list of academic references that influenced CoBRA's design:
 | Syntia | Blazytko, Contag, Aschermann, Holz | USENIX Security 2017 | [USENIX](https://www.usenix.org/conference/usenixsecurity17/technical-sessions/presentation/blazytko) |
 | QSynth | David, Coniglio, Ceccato | BAR 2020 | [PDF](https://archive.bar/pdfs/bar2020-preprint9.pdf) |
 | LOKI | Schloegel, Blazytko, Contag, Aschermann, Basler, Holz, Abbasi | USENIX Security 2022 | [USENIX](https://www.usenix.org/conference/usenixsecurity22/presentation/schloegel) |
+| OSES | Matteo | 2024 | [GitHub](https://github.com/fvrmatteo/oracle-synthesis-meets-equality-saturation) |

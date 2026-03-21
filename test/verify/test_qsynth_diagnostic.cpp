@@ -161,7 +161,7 @@ TEST(QSynthDiagnostic, AnalyzeUnsolved) {
         const auto &sig  = parse_result.value().sig;
         const auto &vars = parse_result.value().vars;
 
-        Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+        Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
         opts.evaluator = [folded_ptr](const std::vector< uint64_t > &v) -> uint64_t {
             return EvalExpr(**folded_ptr, v, 64);
         };
@@ -273,7 +273,7 @@ TEST(QSynthDiagnostic, DecompEngineTelemetry) {
         const auto &sig  = parse_result.value().sig;
         const auto &vars = parse_result.value().vars;
 
-        Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+        Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
         opts.evaluator = [folded_ptr](const std::vector< uint64_t > &v) -> uint64_t {
             return EvalExpr(**folded_ptr, v, 64);
         };
@@ -733,7 +733,7 @@ TEST(QSynthDiagnostic, DirectSuccessProductCoreInvestigation) {
         const auto kNv   = static_cast< uint32_t >(vars.size());
 
         auto folded_ptr = std::make_shared< std::unique_ptr< Expr > >(CloneExpr(*folded));
-        Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+        Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
         opts.evaluator = [folded_ptr](const std::vector< uint64_t > &v) -> uint64_t {
             return EvalExpr(**folded_ptr, v, 64);
         };
@@ -857,7 +857,7 @@ TEST(QSynthDiagnostic, FactoredGhostTelemetry) {
         const auto &sig  = parse_result.value().sig;
         const auto &vars = parse_result.value().vars;
 
-        Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+        Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
         opts.evaluator = [folded_ptr](const std::vector< uint64_t > &v) -> uint64_t {
             return EvalExpr(**folded_ptr, v, 64);
         };
@@ -1106,7 +1106,7 @@ TEST(QSynthDiagnostic, BooleanNullResidualCharacterization) {
         const auto kNv   = static_cast< uint32_t >(vars.size());
 
         auto folded_ptr = std::make_shared< std::unique_ptr< Expr > >(CloneExpr(*folded));
-        Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+        Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
         opts.evaluator = [folded_ptr](const std::vector< uint64_t > &v) -> uint64_t {
             return EvalExpr(**folded_ptr, v, 64);
         };
@@ -1297,7 +1297,7 @@ TEST(QSynthDiagnostic, NullFactorTelemetry) {
         const auto &vars = parse_result.value().vars;
         const auto kNv   = static_cast< uint32_t >(vars.size());
 
-        Options opts{ .bitwidth = kBw, .max_vars = 12, .spot_check = true };
+        Options opts{ .bitwidth = kBw, .max_vars = 16, .spot_check = true };
         opts.evaluator = [folded_ptr](const std::vector< uint64_t > &v) -> uint64_t {
             return EvalExpr(**folded_ptr, v, 64);
         };
@@ -1604,7 +1604,7 @@ TEST(QSynthDiagnostic, MultiWeightNullBasisTelemetry) {
         const auto &vars = parse_result.value().vars;
         const auto kNv   = static_cast< uint32_t >(vars.size());
 
-        Options opts{ .bitwidth = kBw, .max_vars = 12, .spot_check = true };
+        Options opts{ .bitwidth = kBw, .max_vars = 16, .spot_check = true };
         opts.evaluator = [folded_ptr](const std::vector< uint64_t > &v) -> uint64_t {
             return EvalExpr(**folded_ptr, v, 64);
         };
@@ -1929,7 +1929,7 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
         const auto &vars = parse_result.value().vars;
         const auto kNv   = static_cast< uint32_t >(vars.size());
 
-        Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+        Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
         opts.evaluator = [folded_ptr](const std::vector< uint64_t > &v) -> uint64_t {
             return EvalExpr(**folded_ptr, v, 64);
         };
@@ -2463,7 +2463,7 @@ TEST(QSynthDiagnostic, NonBnResidualCharacterization) {
         const auto kNv   = static_cast< uint32_t >(vars.size());
 
         auto folded_ptr = std::make_shared< std::unique_ptr< Expr > >(CloneExpr(*folded));
-        Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+        Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
         opts.evaluator = [folded_ptr](const std::vector< uint64_t > &v) -> uint64_t {
             return EvalExpr(**folded_ptr, v, 64);
         };
@@ -2760,7 +2760,7 @@ TEST(QSynthDiagnostic, NoCoreCharacterization) {
         const auto &vars = parse_result.value().vars;
         const auto kNv   = static_cast< uint32_t >(vars.size());
 
-        Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+        Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
         auto folded_shared = std::make_shared< std::unique_ptr< Expr > >(std::move(folded));
         opts.evaluator     = [folded_shared](const std::vector< uint64_t > &v) -> uint64_t {
             return EvalExpr(**folded_shared, v, 64);
@@ -2924,7 +2924,7 @@ TEST(QSynthDiagnostic, NoCoreCharacterization) {
                     truth_parse->sig, truth_parse->vars, truth_folded.get(),
                     Options{
                         .bitwidth   = 64,
-                        .max_vars   = 12,
+                        .max_vars   = 16,
                         .spot_check = true,
                         .evaluator  = truth_eval,
                     }
@@ -2980,7 +2980,7 @@ TEST(QSynthDiagnostic, RecoverableCaseTrace) {
         auto folded_shared = std::make_shared< std::unique_ptr< Expr > >(std::move(folded));
         Options opts{
             .bitwidth   = 64,
-            .max_vars   = 12,
+            .max_vars   = 16,
             .spot_check = true,
         };
         opts.evaluator = [folded_shared](const std::vector< uint64_t > &v) -> uint64_t {
@@ -3056,7 +3056,7 @@ TEST(QSynthDiagnostic, RecoverableCaseTrace) {
         auto t_shared = std::make_shared< std::unique_ptr< Expr > >(std::move(t_folded));
         Options t_opts{
             .bitwidth   = 64,
-            .max_vars   = 12,
+            .max_vars   = 16,
             .spot_check = true,
         };
         t_opts.evaluator = [t_shared](const std::vector< uint64_t > &v) -> uint64_t {

@@ -215,7 +215,7 @@ namespace {
         std::print(stderr, "  Reduced sig: {}\n", sig_to_hex(elim.reduced_sig));
 
         auto folded_ptr = std::make_shared< std::unique_ptr< Expr > >(CloneExpr(folded_expr));
-        Options opts{ .bitwidth = bitwidth, .max_vars = 12, .spot_check = true };
+        Options opts{ .bitwidth = bitwidth, .max_vars = 16, .spot_check = true };
         opts.evaluator = [folded_ptr, bitwidth](const std::vector< uint64_t > &v) -> uint64_t {
             return EvalExpr(**folded_ptr, v, bitwidth);
         };

@@ -12,7 +12,7 @@ using namespace cobra;
 TEST(SimplifierTest, ConstantMBA) {
     std::vector< uint64_t > sig     = { 42, 42, 42, 42 };
     std::vector< std::string > vars = { "x", "y" };
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
@@ -23,7 +23,7 @@ TEST(SimplifierTest, ConstantMBA) {
 TEST(SimplifierTest, XPlusY) {
     std::vector< uint64_t > sig     = { 0, 1, 1, 2 };
     std::vector< std::string > vars = { "x", "y" };
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
@@ -34,7 +34,7 @@ TEST(SimplifierTest, XPlusY) {
 TEST(SimplifierTest, XorY) {
     std::vector< uint64_t > sig     = { 0, 1, 1, 0 };
     std::vector< std::string > vars = { "x", "y" };
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
@@ -50,7 +50,7 @@ TEST(SimplifierTest, WithAuxVars) {
         sig[i]     = x + y;
     }
     std::vector< std::string > vars = { "a0", "a1", "x", "y" };
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
@@ -68,7 +68,7 @@ TEST(SimplifierTest, ThreeVarAffine) {
         sig[i]     = 3 * x + 5 * y + 7 * z;
     }
     std::vector< std::string > vars = { "x", "y", "z" };
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
@@ -97,7 +97,7 @@ TEST(SimplifierTest, NonAffineBitwisePlusLinear) {
         sig[i]     = (x & y) + z;
     }
     std::vector< std::string > vars = { "x", "y", "z" };
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
@@ -111,7 +111,7 @@ TEST(SimplifierTest, Bitwidth1XPlusY) {
     // At 1-bit: x + y mod 2 = XOR. sig = [0, 1, 1, 0]
     std::vector< uint64_t > sig     = { 0, 1, 1, 0 };
     std::vector< std::string > vars = { "x", "y" };
-    Options opts{ .bitwidth = 1, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 1, .max_vars = 16, .spot_check = true };
 
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
@@ -131,7 +131,7 @@ TEST(SimplifierTest, FourVarAffine) {
         sig[i]     = x + 2 * y + 3 * z + 4 * w;
     }
     std::vector< std::string > vars = { "x", "y", "z", "w" };
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
@@ -161,7 +161,7 @@ TEST(SimplifierTest, SigVectorIsReducedAfterElimination) {
         sig[i]     = x + y;
     }
     std::vector< std::string > vars = { "a0", "a1", "x", "y" };
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
@@ -178,7 +178,7 @@ TEST(SimplifierTest, SigVectorIsReducedAfterElimination) {
 TEST(SimplifierTest, SpotCheckFalse) {
     std::vector< uint64_t > sig     = { 0, 1, 1, 2 };
     std::vector< std::string > vars = { "x", "y" };
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = false };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = false };
 
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
@@ -191,7 +191,7 @@ TEST(SimplifierTest, SpotCheckFalse) {
 TEST(SimplifierTest, AllZeroSig) {
     std::vector< uint64_t > sig     = { 0, 0, 0, 0 };
     std::vector< std::string > vars = { "x", "y" };
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
@@ -204,7 +204,7 @@ TEST(SimplifierTest, Bitwidth8Wrapping) {
     // 200*x + 100*y at 8-bit: wraps on addition
     std::vector< uint64_t > sig     = { 0, 200, 100, 44 }; // (200+100) mod 256 = 44
     std::vector< std::string > vars = { "x", "y" };
-    Options opts{ .bitwidth = 8, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 8, .max_vars = 16, .spot_check = true };
 
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
@@ -215,7 +215,7 @@ TEST(SimplifierTest, Bitwidth8Wrapping) {
 TEST(SimplifierTest, Bitwidth16) {
     std::vector< uint64_t > sig     = { 0, 1, 1, 2 };
     std::vector< std::string > vars = { "x", "y" };
-    Options opts{ .bitwidth = 16, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 16, .max_vars = 16, .spot_check = true };
 
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
@@ -228,7 +228,7 @@ TEST(SimplifierTest, Bitwidth16) {
 TEST(SimplifierTest, Bitwidth32) {
     std::vector< uint64_t > sig     = { 0, 1, 1, 2 };
     std::vector< std::string > vars = { "x", "y" };
-    Options opts{ .bitwidth = 32, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 32, .max_vars = 16, .spot_check = true };
 
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
@@ -248,7 +248,7 @@ TEST(SimplifierTest, Bitwidth1ThreeVar) {
         sig[i]     = (x + y + z) & 1;
     }
     std::vector< std::string > vars = { "x", "y", "z" };
-    Options opts{ .bitwidth = 1, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 1, .max_vars = 16, .spot_check = true };
 
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
@@ -259,7 +259,7 @@ TEST(SimplifierTest, Bitwidth1ThreeVar) {
 TEST(SimplifierTest, LeftShiftSimplifies) {
     std::vector< uint64_t > sig     = { 0, 2 };
     std::vector< std::string > vars = { "x" };
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
@@ -272,7 +272,7 @@ TEST(SimplifierTest, LeftShiftSimplifies) {
 TEST(SimplifierTest, ShiftedBitwiseSimplifies) {
     std::vector< uint64_t > sig     = { 0, 0, 0, 8 };
     std::vector< std::string > vars = { "x", "y" };
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
@@ -286,7 +286,7 @@ TEST(SimplifierTest, LargeConstant) {
     uint64_t big                    = UINT64_MAX - 42;
     std::vector< uint64_t > sig     = { big, big, big, big };
     std::vector< std::string > vars = { "x", "y" };
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
@@ -300,7 +300,7 @@ TEST(SimplifierTest, PolynomialCancelledToLinear) {
     // sig on {0,1}: [0, 1, 1, 2]
     std::vector< uint64_t > sig     = { 0, 1, 1, 2 };
     std::vector< std::string > vars = { "x", "y" };
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
@@ -318,7 +318,7 @@ TEST(SimplifierTest, PolynomialTargetFailsFullWidth) {
     // f(x,y) = x*y, sig on {0,1}: [0, 0, 0, 1] (same as x&y)
     std::vector< uint64_t > sig     = { 0, 0, 0, 1 };
     std::vector< std::string > vars = { "x", "y" };
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
@@ -341,7 +341,7 @@ TEST(SimplifierTest, PolynomialTargetRecoveredViaSplit) {
 
     auto evaluator = [](const std::vector< uint64_t > &v) -> uint64_t { return v[0] * v[1]; };
 
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = evaluator;
 
     auto result = Simplify(sig, vars, nullptr, opts);
@@ -362,7 +362,7 @@ TEST(SimplifierTest, PolynomialXSquaredRecovered) {
 
     auto evaluator = [](const std::vector< uint64_t > &v) -> uint64_t { return v[0] * v[0]; };
 
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = evaluator;
 
     auto result = Simplify(sig, vars, nullptr, opts);
@@ -383,7 +383,7 @@ TEST(SimplifierTest, PolynomialMixedXYPlusLinear) {
         return v[0] * v[1] + 2 * v[0] + 3 * v[1] + 1;
     };
 
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = evaluator;
 
     auto result = Simplify(sig, vars, nullptr, opts);
@@ -407,7 +407,7 @@ TEST(SimplifierTest, NoEvaluatorSkipsSplitting) {
     // Without evaluator, polynomial target returns CoB result (x&y)
     std::vector< uint64_t > sig     = { 0, 0, 0, 1 };
     std::vector< std::string > vars = { "x", "y" };
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
@@ -430,7 +430,7 @@ TEST(SimplifierTest, NullPolyCollapse) {
         return (5 * v[0] * v[0] + 4 * v[0]) & 0x7;
     };
 
-    Options opts{ .bitwidth = 3, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 3, .max_vars = 16, .spot_check = true };
     opts.evaluator = evaluator;
 
     auto result = Simplify(sig, vars, nullptr, opts);
@@ -457,7 +457,7 @@ TEST(SimplifierTest, MixedBitwisePlusPoly) {
         return (v[0] & v[1]) + v[0] * v[1];
     };
 
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = evaluator;
 
     auto result = Simplify(sig, vars, nullptr, opts);
@@ -483,7 +483,7 @@ TEST(SimplifierTest, AllZeroMulFragment) {
         return (4 * v[0] * v[0] + 4 * v[0]) & 0x7;
     };
 
-    Options opts{ .bitwidth = 3, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 3, .max_vars = 16, .spot_check = true };
     opts.evaluator = evaluator;
 
     auto result = Simplify(sig, vars, nullptr, opts);
@@ -521,7 +521,7 @@ TEST(SimplifierTest, MixedRewrite_BooleanConstantSignatureRemainsFullWidthLive) 
     EXPECT_EQ(fw_elim.real_vars, vars);
     EXPECT_TRUE(fw_elim.spurious_vars.empty());
 
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = evaluator;
 
     auto result = Simplify(sig, vars, input.get(), opts);
@@ -572,7 +572,7 @@ TEST(SimplifierTest, EarlyDecomposition_ProductCoreSurvivesPreconditioning) {
         )
     );
 
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = evaluator;
 
     auto result = Simplify(sig, vars, obf.get(), opts);
@@ -595,7 +595,7 @@ TEST(SimplifierTest, SingletonPower_XCubed) {
         return v[0] * v[0] * v[0];
     };
 
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = evaluator;
 
     auto result = Simplify(sig, vars, nullptr, opts);
@@ -616,7 +616,7 @@ TEST(SimplifierTest, SingletonPower_XCubedPlusXY) {
         return v[0] * v[0] * v[0] + v[0] * v[1];
     };
 
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = evaluator;
 
     auto result = Simplify(sig, vars, nullptr, opts);
@@ -635,7 +635,7 @@ TEST(SimplifierTest, SingletonPower_TwoSquaredVars) {
         return v[0] * v[0] + v[1] * v[1];
     };
 
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = evaluator;
 
     auto result = Simplify(sig, vars, nullptr, opts);
@@ -654,7 +654,7 @@ TEST(SimplifierTest, SingletonPower_ContributesNothing) {
 
     auto evaluator = [](const std::vector< uint64_t > &v) -> uint64_t { return v[0] + v[1]; };
 
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = evaluator;
 
     auto result = Simplify(sig, vars, nullptr, opts);
@@ -673,7 +673,7 @@ TEST(SimplifierTest, SingletonPower_QuadraticWithConstant) {
         return 3 * v[0] * v[0] + 5 * v[0] + 7;
     };
 
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = evaluator;
 
     auto result = Simplify(sig, vars, nullptr, opts);
@@ -703,7 +703,7 @@ TEST(SimplifierTest, MixedRewrite_XorTimesZ_Simplified) {
         return (v[0] ^ v[1]) * v[2];
     };
 
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = evaluator;
 
     auto result = Simplify(sig, vars, input.get(), opts);
@@ -730,7 +730,7 @@ TEST(SimplifierTest, MixedRewrite_AndTimesZ_Simplified) {
         return (v[0] & v[1]) * v[2];
     };
 
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = evaluator;
 
     auto result = Simplify(sig, vars, input.get(), opts);
@@ -758,7 +758,7 @@ TEST(SimplifierTest, BitwiseOverArith_NoMul_Simplified) {
         return (v[0] + v[1]) & v[2];
     };
 
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = evaluator;
 
     auto result = Simplify(sig, vars, input.get(), opts);
@@ -783,7 +783,7 @@ TEST(SimplifierTest, MultivarHighPower_PurePolynomial_Simplifies) {
         return v[0] * v[0] * v[1];
     };
 
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = evaluator;
 
     auto result = Simplify(sig, vars, input.get(), opts);
@@ -809,7 +809,7 @@ TEST(SimplifierTest, MultivarHighPower_ASquaredD_Verified) {
 
     Options opts;
     opts.bitwidth   = 64;
-    opts.max_vars   = 12;
+    opts.max_vars   = 16;
     opts.spot_check = true;
     opts.evaluator  = evaluator;
 
@@ -844,7 +844,7 @@ TEST(SimplifierTest, MultivarHighPower_ASquaredDSquared_Verified) {
 
     Options opts;
     opts.bitwidth   = 64;
-    opts.max_vars   = 12;
+    opts.max_vars   = 16;
     opts.spot_check = true;
     opts.evaluator  = evaluator;
 
@@ -864,7 +864,7 @@ TEST(SimplifierTest, MixedRewrite_TopLevelXorSucceeds) {
 
     auto input = Expr::BitwiseXor(Expr::Variable(0), Expr::Variable(1));
 
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = Simplify(sig, vars, input.get(), opts);
     ASSERT_TRUE(result.has_value());
@@ -886,7 +886,7 @@ TEST(SimplifierTest, MixedRewrite_NoEvaluatorShortCircuit) {
     auto input =
         Expr::Mul(Expr::BitwiseXor(Expr::Variable(0), Expr::Variable(1)), Expr::Variable(2));
 
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     // No evaluator
 
     auto result = Simplify(sig, vars, input.get(), opts);
@@ -913,7 +913,7 @@ TEST(SimplifierTest, MixedRewrite_DiagnosticPayload) {
         return (v[0] ^ v[1]) * v[2];
     };
 
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = evaluator;
 
     auto result = Simplify(sig, vars, input.get(), opts);
@@ -936,7 +936,7 @@ TEST(SimplifierTest, MixedRewrite_BugOrGap) {
 
     auto evaluator = [](const std::vector< uint64_t > &v) -> uint64_t { return v[0] * v[1]; };
 
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = evaluator;
 
     auto result = Simplify(sig, vars, input.get(), opts);
@@ -960,7 +960,7 @@ TEST(SimplifierTest, MixedRewrite_SupportedRouteStillSimplifies) {
 
     auto evaluator = [](const std::vector< uint64_t > &v) -> uint64_t { return v[0] * v[1]; };
 
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = evaluator;
 
     auto result = Simplify(sig, vars, input.get(), opts);
@@ -974,7 +974,7 @@ TEST(SimplifierTest, AnfThreeVarOr) {
     // a | b | c should emit ANF form instead of verbose CoB
     std::vector< uint64_t > sig     = { 0, 1, 1, 1, 1, 1, 1, 1 };
     std::vector< std::string > vars = { "a", "b", "c" };
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
@@ -986,7 +986,7 @@ TEST(SimplifierTest, AnfThreeVarOr) {
 TEST(SimplifierTest, AnfThreeVarAnd) {
     std::vector< uint64_t > sig     = { 0, 0, 0, 0, 0, 0, 0, 1 };
     std::vector< std::string > vars = { "a", "b", "c" };
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
@@ -997,7 +997,7 @@ TEST(SimplifierTest, AnfThreeVarAnd) {
 TEST(SimplifierTest, AnfThreeVarXor) {
     std::vector< uint64_t > sig     = { 0, 1, 1, 0, 1, 0, 0, 1 };
     std::vector< std::string > vars = { "a", "b", "c" };
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
@@ -1009,7 +1009,7 @@ TEST(SimplifierTest, AnfNotUsedForNonBoolean) {
     // Non-boolean signature (values > 1) should NOT use ANF
     std::vector< uint64_t > sig     = { 0, 3, 5, 8 };
     std::vector< std::string > vars = { "x", "y" };
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
@@ -1031,7 +1031,7 @@ TEST(SimplifierTest, BitwiseOverPolyDOrCA) {
         sig[i]                       = eval(vals);
     }
     std::vector< std::string > vars = { "d", "c", "a" };
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = eval;
 
     auto result = Simplify(sig, vars, nullptr, opts);
@@ -1054,7 +1054,7 @@ TEST(SimplifierTest, BitwiseOverPolyEEAndD) {
         sig[i]                       = eval(vals);
     }
     std::vector< std::string > vars = { "e", "d" };
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = eval;
 
     auto result = Simplify(sig, vars, nullptr, opts);
@@ -1076,7 +1076,7 @@ TEST(SimplifierTest, BitwiseOverPolyDSquaredXorA) {
         sig[i]                       = eval(vals);
     }
     std::vector< std::string > vars = { "d", "a" };
-    Options opts{ .bitwidth = 64, .max_vars = 12, .spot_check = true };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = eval;
 
     auto result = Simplify(sig, vars, nullptr, opts);
@@ -1099,7 +1099,7 @@ TEST(SimplifierTest, BitwiseDecompDisabledPreservesBaseline) {
     }
     std::vector< std::string > vars = { "d", "c", "a" };
     Options opts{ .bitwidth                     = 64,
-                  .max_vars                     = 12,
+                  .max_vars                     = 16,
                   .spot_check                   = true,
                   .enable_bitwise_decomposition = false };
     opts.evaluator = eval;

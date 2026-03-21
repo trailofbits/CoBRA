@@ -1,8 +1,8 @@
 # Dataset Benchmark Report
 
-CoBRA is validated against **72,646 expressions** drawn from **31 dataset files** spanning 6 independent sources. Every expression is parsed, simplified, and spot-checked at runtime. The numbers below are enforced by automated test assertions in [`test/verify/test_dataset_benchmarks.cpp`](test/verify/test_dataset_benchmarks.cpp) and verified on every CI run.
+CoBRA is validated against **73,119 expressions** drawn from **32 dataset files** spanning 7 independent sources. Every expression is parsed, simplified, and spot-checked at runtime. The numbers below are enforced by automated test assertions in [`test/verify/test_dataset_benchmarks.cpp`](test/verify/test_dataset_benchmarks.cpp) and verified on every CI run.
 
-**Overall: 69,501 / 69,594 parsed expressions simplified (99.87%), zero failures.**
+**Overall: 69,942 / 70,060 parsed expressions simplified (99.83%), zero failures.**
 
 ---
 
@@ -97,18 +97,28 @@ Source: [GAMBA](https://github.com/DenuvoSoftwareSolutions/GAMBA)
 - **mba_obf_nonlinear**: 500 polynomial + 500 linear expressions, all with linear ground-truth targets. All 1,000 pass full-width verification.
 - **qsynth_ea**: The most challenging dataset. 407 of 500 expressions simplify via the multi-step MixedRewrite pipeline and decomposition engine. The 93 unsupported expressions are dominated by product-inside-bitwise patterns (products nested inside `&`, `|`, `^`) and boolean-null residuals that fall outside current representation families.
 
+### OSES Dataset
+
+Source: [oracle-synthesis-meets-equality-saturation](https://github.com/fvrmatteo/oracle-synthesis-meets-equality-saturation)
+
+| Dataset | Total Lines | Parsed | Simplified | Unsupported | Rate |
+|---------|:-----------:|:------:|:----------:|:-----------:|:----:|
+| `oses_all.txt` | 473 | 466 | **441** | 25 | **94.6%** |
+
+- **oses_all**: 472 MBA expressions extracted from the OSES `synth.py` evaluation script (plus 1 header comment). Expressions span linear (205), nonlinear/product (131), linear-with-constants (129), and constant (7) categories with 1-14 variables. The 25 unsupported expressions are dominated by product-inside-bitwise patterns and complex multi-variable mixed products that fall outside current representation families.
+
 ---
 
 ## Aggregate Summary
 
 | Metric | Count |
 |--------|------:|
-| Total dataset lines | 72,646 |
-| Comment/header lines skipped | 2,062 |
+| Total dataset lines | 73,119 |
+| Comment/header lines skipped | 2,069 |
 | Non-expression lines (headers, no ground truth) | 990 |
-| **Parsed expressions** | **69,594** |
-| **Simplified** | **69,501** |
-| Unsupported (by design) | 93 |
+| **Parsed expressions** | **70,060** |
+| **Simplified** | **69,942** |
+| Unsupported (by design) | 118 |
 | Errors / failures | **0** |
 
 | MBA Class | Expressions | Simplified | Rate |
@@ -132,3 +142,4 @@ All simplified results are validated via spot-check (random-input evaluation) at
 | NeuReduce | (via GAMBA) | neureduce |
 | Syntia | (via GAMBA) | syntia |
 | LOKI | (via GAMBA) | loki_tiny |
+| OSES | https://github.com/fvrmatteo/oracle-synthesis-meets-equality-saturation | oses_all |
