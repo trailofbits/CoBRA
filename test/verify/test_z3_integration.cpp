@@ -272,3 +272,19 @@ TEST(Z3Integration, MSiMBA_E5_4Var_NotX) {
     // 3735936685*~x = 3735936685*(-1-x) = -3735936685 - 3735936685*x mod 2^64
     EXPECT_EQ(text, "-3735936685 + -3735936685 * x");
 }
+
+// ---------------------------------------------------------------------------
+// Regression: bitwise-over-arithmetic constant expression
+//   Deep nesting of bitwise ops (XOR, OR, AND, NOT) around arithmetic
+//   sub-expressions like (c | ~x) + -~x.  The semilinear normalizer cannot
+//   decompose bitwise-over-arithmetic structures, so the linear fallback
+//   must produce the correct constant.
+// ---------------------------------------------------------------------------
+
+TEST(Z3Integration, Regression_BitwiseOverArith_Constant) {
+    auto text = run_and_verify(
+        { R"MBA(((((((((0x431e33362537db49 | (~((~(0xbac03a4c7e26a10c ^ ((0xbac03a4c7e26a10c & (~(x) & 0xffffffffffffffff)) | (x & (~(0xbac03a4c7e26a10c) & 0xffffffffffffffff)))) & 0xffffffffffffffff)) & 0xffffffffffffffff)) & 0xc92460b4173d8ad1) | ((~((0x431e33362537db49 | (~((~(0xbac03a4c7e26a10c ^ ((0xbac03a4c7e26a10c & (~(x) & 0xffffffffffffffff)) | (x & (~(0xbac03a4c7e26a10c) & 0xffffffffffffffff)))) & 0xffffffffffffffff)) & 0xffffffffffffffff))) & 0xffffffffffffffff) & (~(0xc92460b4173d8ad1) & 0xffffffffffffffff))) ^ ((0xc92460b4173d8ad1 & (~((((0x431e33362537db4a | (~(x) & 0xffffffffffffffff)) - (~(x) & 0xffffffffffffffff)) & 0xffffffffffffffff)) & 0xffffffffffffffff)) | ((((0x431e33362537db4a | (~(x) & 0xffffffffffffffff)) - (~(x) & 0xffffffffffffffff)) & 0xffffffffffffffff) & (~(0xc92460b4173d8ad1) & 0xffffffffffffffff)))) | (~(((0x431e33362537db49 | (~((~(0xbac03a4c7e26a10c ^ ((0xbac03a4c7e26a10c & (~(x) & 0xffffffffffffffff)) | (x & (~(0xbac03a4c7e26a10c) & 0xffffffffffffffff)))) & 0xffffffffffffffff)) & 0xffffffffffffffff)) | (~((((0x431e33362537db4a | (~(x) & 0xffffffffffffffff)) - (~(x) & 0xffffffffffffffff)) & 0xffffffffffffffff)) & 0xffffffffffffffff))) & 0xffffffffffffffff)) | 0x253a41858a5c76d6) - ((((((0x431e33362537db49 | (~((~(0xbac03a4c7e26a10c ^ ((0xbac03a4c7e26a10c & (~(x) & 0xffffffffffffffff)) | (x & (~(0xbac03a4c7e26a10c) & 0xffffffffffffffff)))) & 0xffffffffffffffff)) & 0xffffffffffffffff)) & 0xc92460b4173d8ad1) | ((~((0x431e33362537db49 | (~((~(0xbac03a4c7e26a10c ^ ((0xbac03a4c7e26a10c & (~(x) & 0xffffffffffffffff)) | (x & (~(0xbac03a4c7e26a10c) & 0xffffffffffffffff)))) & 0xffffffffffffffff)) & 0xffffffffffffffff))) & 0xffffffffffffffff) & (~(0xc92460b4173d8ad1) & 0xffffffffffffffff))) ^ ((0xc92460b4173d8ad1 & (~((((0x431e33362537db4a | (~(x) & 0xffffffffffffffff)) - (~(x) & 0xffffffffffffffff)) & 0xffffffffffffffff)) & 0xffffffffffffffff)) | ((((0x431e33362537db4a | (~(x) & 0xffffffffffffffff)) - (~(x) & 0xffffffffffffffff)) & 0xffffffffffffffff) & (~(0xc92460b4173d8ad1) & 0xffffffffffffffff)))) | (~(((0x431e33362537db49 | (~((~(0xbac03a4c7e26a10c ^ ((0xbac03a4c7e26a10c & (~(x) & 0xffffffffffffffff)) | (x & (~(0xbac03a4c7e26a10c) & 0xffffffffffffffff)))) & 0xffffffffffffffff)) & 0xffffffffffffffff)) | (~((((0x431e33362537db4a | (~(x) & 0xffffffffffffffff)) - (~(x) & 0xffffffffffffffff)) & 0xffffffffffffffff)) & 0xffffffffffffffff))) & 0xffffffffffffffff)) & 0x253a41858a5c76d6)) & 0xffffffffffffffff))MBA",
+          "-7360133807098015136", 64 }
+    );
+    EXPECT_EQ(text, "-7360133807098015136");
+}
