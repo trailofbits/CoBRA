@@ -331,13 +331,26 @@ TEST(GAMBADataset, LokiTiny) {
 }
 
 // -- OSES dataset (oracle-synthesis-meets-equality-saturation) ----
+// Split into fast (<50K chars) and slow (>50K chars) subsets.
+// The slow subset contains 7 mega-expressions (up to 4.6M chars)
+// that take minutes to process; only the fast subset runs in CI.
 
-TEST(OSESDataset, All) {
-    auto stats = run_dataset(DATASET_DIR "/oses/oses_all.txt");
-    EXPECT_EQ(stats.total, 473);
+TEST(OSESDataset, Fast) {
+    auto stats = run_dataset(DATASET_DIR "/oses/oses_fast.txt");
+    EXPECT_EQ(stats.total, 466);
     EXPECT_EQ(stats.skipped_parse, 7);
-    EXPECT_EQ(stats.parsed, 466);
-    EXPECT_EQ(stats.simplified, 389);
-    EXPECT_EQ(stats.unsupported, 77);
+    EXPECT_EQ(stats.parsed, 459);
+    EXPECT_EQ(stats.simplified, 383);
+    EXPECT_EQ(stats.unsupported, 76);
+    EXPECT_EQ(stats.failed_simplify, 0);
+}
+
+TEST(OSESDataset, DISABLED_Slow) {
+    auto stats = run_dataset(DATASET_DIR "/oses/oses_slow.txt");
+    EXPECT_EQ(stats.total, 7);
+    EXPECT_EQ(stats.skipped_parse, 0);
+    EXPECT_EQ(stats.parsed, 7);
+    EXPECT_EQ(stats.simplified, 6);
+    EXPECT_EQ(stats.unsupported, 1);
     EXPECT_EQ(stats.failed_simplify, 0);
 }

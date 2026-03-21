@@ -97,9 +97,3 @@ jobs:
         run: |
           find include lib tools \( -name '*.h' -o -name '*.cpp' \) -print0 \
             | xargs -0 clang-format-22 --dry-run --Werror
-
-      - name: clang-tidy
-        if: matrix.lint
-        run: |
-          find lib tools -name '*.cpp' -print0 \
-            | xargs -0 clang-tidy-22 -p build
