@@ -4,6 +4,7 @@
 #include "cobra/core/Classifier.h"
 #include "cobra/core/DecompositionEngine.h"
 #include "cobra/core/Expr.h"
+#include "cobra/core/ExprUtils.h"
 #include "cobra/core/GhostBasis.h"
 #include "cobra/core/GhostResidualSolver.h"
 #include "cobra/core/MathUtils.h"
@@ -3089,4 +3090,362 @@ TEST(QSynthDiagnostic, RecoverableCaseTrace) {
             std::cerr << "truth result: " << Render(*t_decomp->expr, t_parse->vars, 64) << "\n";
         }
     }
+}
+
+// ===================================================================
+// Atom Lifting Telemetry
+// ===================================================================
+// Prototype test for bitwise-over-arithmetic-atoms approach.
+// For each no_core case:
+//   1. Identify maximal arithmetic subtrees inside bitwise context
+//   2. Lift to virtual variables
+//   3. Run supported pipeline on lifted skeleton
+//   4. Substitute atoms back, full-width verify
+
+namespace {
+
+    bool IsArithKind(Expr::Kind k) {
+        return k == Expr::Kind::kAdd || k == Expr::Kind::kMul || k == Expr::Kind::kNeg;
+    }
+
+    bool IsBitwiseKind(Expr::Kind k) {
+        return k == Expr::Kind::kAnd || k == Expr::Kind::kOr || k == Expr::Kind::kXor
+            || k == Expr::Kind::kNot;
+    }
+
+    // Check if subtree is purely arithmetic (no bitwise descendants).
+    bool IsPureArith(const Expr &e) {
+        if (e.kind == Expr::Kind::kConstant || e.kind == Expr::Kind::kVariable) { return true; }
+        if (IsBitwiseKind(e.kind) || e.kind == Expr::Kind::kShr) { return false; }
+        for (const auto &c : e.children) {
+            if (!IsPureArith(*c)) { return false; }
+        }
+        return true;
+    }
+
+    struct AtomInfo
+    {
+        const Expr *subtree;
+        std::string rendered;
+    };
+
+    // Walk the AST and collect maximal arithmetic subtrees in bitwise context.
+    // parent_is_bitwise: true if the immediate parent is a bitwise node.
+    void CollectAtoms(
+        const Expr &e, bool parent_is_bitwise, const std::vector< std::string > &vars,
+        std::vector< AtomInfo > &atoms
+    ) {
+        // If we're in a bitwise context and this subtree is pure arithmetic
+        // with variable dependence, it's an atom candidate.
+        if (parent_is_bitwise && IsPureArith(e) && HasVarDep(e)
+            && e.kind != Expr::Kind::kVariable)
+        {
+            std::string r = Render(e, vars, 64);
+            atoms.push_back({ &e, r });
+            return; // Don't descend — this is maximal
+        }
+
+        bool this_is_bitwise = IsBitwiseKind(e.kind);
+        for (const auto &c : e.children) { CollectAtoms(*c, this_is_bitwise, vars, atoms); }
+    }
+
+    // Normalize -(expr) + (-1) → ~expr and Neg(expr) → Add(-(expr), -1) patterns.
+    // This folds arithmetic-encoded NOT back to bitwise NOT so that atom lifting
+    // sees the real bitwise skeleton.
+    std::unique_ptr< Expr > NormalizeArithNot(std::unique_ptr< Expr > e, uint32_t bw) {
+        // Recurse into children first (post-order)
+        for (auto &c : e->children) { c = NormalizeArithNot(std::move(c), bw); }
+
+        // Pattern: Add(Neg(X), Constant(-1)) = ~X
+        // In 64-bit, -1 is 0xFFFFFFFFFFFFFFFF
+        const uint64_t kMask   = (bw < 64) ? ((uint64_t{ 1 } << bw) - 1) : ~uint64_t{ 0 };
+        const uint64_t kNegOne = kMask; // -1 mod 2^bw
+
+        // Helper: check if node represents -1 (either Constant(mask) or Neg(Constant(1)))
+        auto isNegOne = [&](const Expr *n) -> bool {
+            if (n->kind == Expr::Kind::kConstant && n->constant_val == kNegOne) { return true; }
+            if (n->kind == Expr::Kind::kNeg && n->children.size() == 1
+                && n->children[0]->kind == Expr::Kind::kConstant
+                && n->children[0]->constant_val == 1)
+            {
+                return true;
+            }
+            return false;
+        };
+
+        if (e->kind == Expr::Kind::kAdd && e->children.size() == 2) {
+            auto *lhs = e->children[0].get();
+            auto *rhs = e->children[1].get();
+
+            // Add(Neg(X), -1) → Not(X)
+            if (lhs->kind == Expr::Kind::kNeg && lhs->children.size() == 1 && isNegOne(rhs)) {
+                return Expr::BitwiseNot(std::move(lhs->children[0]));
+            }
+            // Add(-1, Neg(X)) → Not(X)
+            if (rhs->kind == Expr::Kind::kNeg && rhs->children.size() == 1 && isNegOne(lhs)) {
+                return Expr::BitwiseNot(std::move(rhs->children[0]));
+            }
+        }
+
+        return e;
+    }
+
+    // Deduplicate atoms by rendered string, return unique list.
+    std::vector< AtomInfo > DeduplicateAtoms(const std::vector< AtomInfo > &atoms) {
+        std::vector< AtomInfo > unique;
+        std::set< std::string > seen;
+        for (const auto &a : atoms) {
+            if (seen.insert(a.rendered).second) { unique.push_back(a); }
+        }
+        return unique;
+    }
+
+    // Build a lifted expression by replacing atom subtrees with virtual variables.
+    // atom_map: rendered string → virtual var index
+    std::unique_ptr< Expr > LiftExpr(
+        const Expr &e, bool parent_is_bitwise, const std::vector< std::string > &vars,
+        const std::map< std::string, uint32_t > &atom_map
+    ) {
+        // Check if this node should be replaced with a virtual variable
+        if (parent_is_bitwise && IsPureArith(e) && HasVarDep(e)
+            && e.kind != Expr::Kind::kVariable)
+        {
+            std::string r = Render(e, vars, 64);
+            auto it       = atom_map.find(r);
+            if (it != atom_map.end()) { return Expr::Variable(it->second); }
+        }
+
+        // Leaf nodes: clone as-is
+        if (e.kind == Expr::Kind::kConstant) { return Expr::Constant(e.constant_val); }
+        if (e.kind == Expr::Kind::kVariable) { return Expr::Variable(e.var_index); }
+
+        bool this_is_bitwise = IsBitwiseKind(e.kind);
+
+        // Rebuild node with lifted children
+        std::vector< std::unique_ptr< Expr > > lifted_children;
+        for (const auto &c : e.children) {
+            lifted_children.push_back(LiftExpr(*c, this_is_bitwise, vars, atom_map));
+        }
+
+        auto node          = std::make_unique< Expr >();
+        node->kind         = e.kind;
+        node->constant_val = e.constant_val;
+        node->var_index    = e.var_index;
+        node->children     = std::move(lifted_children);
+        return node;
+    }
+
+    // Replace virtual variables with their atom subtrees in the simplified expr.
+    std::unique_ptr< Expr > SubstituteBack(
+        const Expr &e, const std::vector< const Expr * > &idx_to_atom, uint32_t n_orig
+    ) {
+        if (e.kind == Expr::Kind::kVariable && e.var_index >= n_orig) {
+            uint32_t atom_idx = e.var_index - n_orig;
+            if (atom_idx < idx_to_atom.size()) { return CloneExpr(*idx_to_atom[atom_idx]); }
+        }
+
+        if (e.kind == Expr::Kind::kConstant) { return Expr::Constant(e.constant_val); }
+        if (e.kind == Expr::Kind::kVariable) { return Expr::Variable(e.var_index); }
+
+        std::vector< std::unique_ptr< Expr > > new_children;
+        for (const auto &c : e.children) {
+            new_children.push_back(SubstituteBack(*c, idx_to_atom, n_orig));
+        }
+
+        auto node          = std::make_unique< Expr >();
+        node->kind         = e.kind;
+        node->constant_val = e.constant_val;
+        node->var_index    = e.var_index;
+        node->children     = std::move(new_children);
+        return node;
+    }
+
+} // namespace
+
+TEST(QSynthDiagnostic, AtomLiftingTelemetry) {
+    std::ifstream file(DATASET_DIR "/gamba/qsynth_ea.txt");
+    ASSERT_TRUE(file.is_open());
+
+    // 44 no_core lines from NoCoreCharacterization
+    const std::set< int > target_lines = { 17,  41,  42,  48,  57,  66,  67,  78,  95,
+                                           106, 125, 126, 135, 149, 155, 175, 181, 184,
+                                           186, 189, 190, 196, 202, 211, 212, 214, 216,
+                                           242, 271, 272, 331, 347, 350, 355, 380, 400,
+                                           405, 428, 431, 446, 448, 478, 482, 487 };
+
+    constexpr uint32_t kBw     = 64;
+    constexpr uint32_t kMaxVar = 12;
+
+    std::string line;
+    int line_num = 0;
+
+    // Aggregate counters
+    int total           = 0;
+    int has_atoms       = 0;
+    int liftable        = 0; // n+k <= max_vars
+    int skeleton_solved = 0;
+    int fw_verified     = 0;
+    int too_many_vars   = 0;
+    int no_atoms_found  = 0;
+
+    // Per-case detail
+    struct LiftDetail
+    {
+        int line_num;
+        uint32_t n_orig;
+        uint32_t n_atoms;
+        uint32_t n_unique_atoms;
+        uint32_t n_total_vars; // n_orig + n_unique_atoms
+        bool skeleton_ok;
+        bool fw_ok;
+        std::vector< std::string > atom_strs;
+    };
+
+    std::vector< LiftDetail > details;
+
+    while (std::getline(file, line)) {
+        ++line_num;
+        if (target_lines.find(line_num) == target_lines.end()) { continue; }
+
+        size_t sep = find_separator(line);
+        if (sep == std::string::npos) { continue; }
+
+        std::string obfuscated = trim(line.substr(0, sep));
+        if (obfuscated.empty()) { continue; }
+
+        auto parse_result = ParseAndEvaluate(obfuscated, kBw);
+        if (!parse_result.has_value()) { continue; }
+
+        auto ast_result = ParseToAst(obfuscated, kBw);
+        if (!ast_result.has_value()) { continue; }
+
+        auto folded = FoldConstantBitwise(std::move(ast_result.value().expr), kBw);
+
+        const auto &vars = parse_result.value().vars;
+        const auto kNv   = static_cast< uint32_t >(vars.size());
+
+        auto folded_clone = CloneExpr(*folded);
+        Evaluator orig_eval =
+            [fc = std::make_shared< std::unique_ptr< Expr > >(std::move(folded_clone))](
+                const std::vector< uint64_t > &v
+            ) -> uint64_t { return EvalExpr(**fc, v, kBw); };
+
+        total++;
+
+        // Pre-step: Normalize arithmetic-encoded NOT back to bitwise NOT
+        auto normalized = NormalizeArithNot(CloneExpr(*folded), kBw);
+
+        // Step 1: Identify atoms on normalized AST
+        std::vector< AtomInfo > all_atoms;
+        CollectAtoms(*normalized, false, vars, all_atoms);
+
+        auto unique_atoms = DeduplicateAtoms(all_atoms);
+
+        LiftDetail detail{};
+        detail.line_num       = line_num;
+        detail.n_orig         = kNv;
+        detail.n_atoms        = static_cast< uint32_t >(all_atoms.size());
+        detail.n_unique_atoms = static_cast< uint32_t >(unique_atoms.size());
+        detail.n_total_vars   = kNv + detail.n_unique_atoms;
+        detail.skeleton_ok    = false;
+        detail.fw_ok          = false;
+        for (const auto &a : unique_atoms) { detail.atom_strs.push_back(a.rendered); }
+
+        if (unique_atoms.empty()) {
+            no_atoms_found++;
+            details.push_back(std::move(detail));
+            continue;
+        }
+        has_atoms++;
+
+        if (detail.n_total_vars > kMaxVar) {
+            too_many_vars++;
+            details.push_back(std::move(detail));
+            continue;
+        }
+        liftable++;
+
+        // Step 2: Build atom map and lift
+        std::map< std::string, uint32_t > atom_map;
+        std::vector< const Expr * > idx_to_atom;
+        for (uint32_t i = 0; i < unique_atoms.size(); ++i) {
+            atom_map[unique_atoms[i].rendered] = kNv + i;
+            idx_to_atom.push_back(unique_atoms[i].subtree);
+        }
+
+        auto lifted = LiftExpr(*normalized, false, vars, atom_map);
+
+        // Step 3: Compute lifted signature and try supported pipeline
+        // Build extended variable names
+        std::vector< std::string > ext_vars = vars;
+        for (uint32_t i = 0; i < unique_atoms.size(); ++i) {
+            ext_vars.push_back("_atom" + std::to_string(i));
+        }
+
+        // The lifted expression is purely bitwise over n_total vars.
+        // Bitwise functions are per-bit: f(a,b,...) at bit k depends
+        // only on a_k, b_k, ... So the boolean signature (all vars
+        // in {0,1}) captures the per-bit function correctly.
+        //
+        // After simplification, substituting atoms back gives an
+        // expression that is correct at all bit positions because the
+        // outer structure remains purely bitwise.
+        auto lifted_sig = EvaluateBooleanSignature(*lifted, detail.n_total_vars, kBw);
+
+        // Evaluator for FW checks: evaluate the original expression
+        // (not the lifted one) to avoid false passes from the lifted
+        // representation.
+        Options lift_opts{ .bitwidth = kBw, .max_vars = kMaxVar, .spot_check = true };
+        // No evaluator — we'll do FW check manually after substitution
+        // against the original evaluator.
+
+        auto sup_result = RunSupportedPipeline(lifted_sig, ext_vars, lift_opts);
+        if (sup_result.has_value()
+            && sup_result.value().kind == SimplifyOutcome::Kind::kSimplified)
+        {
+            detail.skeleton_ok = true;
+            skeleton_solved++;
+
+            // Step 4: Substitute atoms back
+            auto reconstructed = SubstituteBack(*sup_result.value().expr, idx_to_atom, kNv);
+
+            // Step 5: Full-width verify against original evaluator
+            auto check = FullWidthCheckEval(orig_eval, kNv, *reconstructed, kBw, 64);
+            if (check.passed) {
+                detail.fw_ok = true;
+                fw_verified++;
+            }
+        }
+
+        details.push_back(std::move(detail));
+    }
+
+    // Report
+    std::cerr << "\n=== Atom Lifting Telemetry (no_core cases) ===\n";
+    std::cerr << "Total cases:          " << total << "\n";
+    std::cerr << "Has atoms:            " << has_atoms << "\n";
+    std::cerr << "No atoms found:       " << no_atoms_found << "\n";
+    std::cerr << "Too many vars (>12):  " << too_many_vars << "\n";
+    std::cerr << "Liftable (n+k<=12):   " << liftable << "\n";
+    std::cerr << "Skeleton solved:      " << skeleton_solved << "\n";
+    std::cerr << "FW verified:          " << fw_verified << "\n";
+    std::cerr << "\n--- Per-case details ---\n";
+    for (const auto &d : details) {
+        std::cerr << "L" << d.line_num << ": vars=" << d.n_orig << " atoms=" << d.n_atoms
+                  << " unique=" << d.n_unique_atoms << " total_vars=" << d.n_total_vars;
+        if (d.n_unique_atoms == 0) {
+            std::cerr << " [NO ATOMS]";
+        } else if (d.n_total_vars > kMaxVar) {
+            std::cerr << " [TOO MANY VARS]";
+        } else {
+            std::cerr << (d.skeleton_ok ? " skel=OK" : " skel=FAIL")
+                      << (d.fw_ok ? " fw=OK" : " fw=FAIL");
+        }
+        std::cerr << "\n";
+        for (const auto &a : d.atom_strs) { std::cerr << "  atom: " << a << "\n"; }
+    }
+    std::cerr << "\n";
+
+    // Soft assertions — don't fail the build, this is telemetry
+    EXPECT_EQ(total, 44);
 }
