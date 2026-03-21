@@ -4,7 +4,7 @@
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)](https://en.cppreference.com/w/cpp/23)
-[![Tests](https://img.shields.io/badge/tests-962-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-965-brightgreen.svg)](#testing)
 
 CoBRA deobfuscates expressions that interleave arithmetic (`+`, `-`, `*`) with bitwise (`&`, `|`, `^`, `~`) and shift (`<<`, `>>`) operators — a technique commonly used in software obfuscation.
 
@@ -64,7 +64,7 @@ The core insight is the **Change of Basis (CoB) transform**: evaluate the expres
 - **Semilinear support** — constant-masked atoms like `x & 0xFF`, `y | 0xF0` via bit-partitioned reconstruction
 - **Polynomial recovery** — multilinear terms (`x*y`) and singleton powers (`x^2`) via coefficient splitting
 - **Mixed product handling** — multi-step rewriting pipeline with operand simplification, product identity collapse, and XOR lowering
-- **Decomposition engine** — extract-solve architecture that splits mixed expressions into polynomial cores and residuals, with ghost residual solving for boolean-null components
+- **Decomposition engine** — extract-solve architecture that splits mixed expressions into polynomial cores and residuals, with hardened full-width verification and ghost residual solving for boolean-null components
 - **Constant shifts** — `<<` desugars to multiplication, `>>` on bitwise subtrees simplifies via the semilinear pipeline
 - **ANF cleanup** — absorption, common-cube factoring, and OR recognition for compact Boolean output
 - **Configurable bitwidth** — 1-bit to 64-bit modular arithmetic
@@ -160,12 +160,12 @@ lib/llvm/                LLVM pass plugin (CobraPass, MBADetector, IRReconstruct
 lib/verify/              Z3-based equivalence verification
 include/cobra/           Public headers
 tools/cobra-cli/         CLI frontend and expression parser
-test/                    962 tests across 54 test files (unit + integration + dataset benchmarks)
+test/                    965 tests across 54 test files (unit + integration + dataset benchmarks)
 ```
 
 ## Testing
 
-CoBRA has 962 tests covering unit, integration, and dataset benchmarks:
+CoBRA has 965 tests covering unit, integration, and dataset benchmarks:
 
 ```bash
 # Run all tests
@@ -178,10 +178,11 @@ ctest --test-dir build -R test_simplifier --output-on-failure
 ctest --test-dir build -V
 ```
 
-Dataset benchmarks validate against real-world obfuscated expressions from QSynth and PLDI datasets. See [DATASETS.md](DATASETS.md) for the full benchmark report — 69,477 expressions simplified across 31 dataset files from 6 independent sources, with zero failures.
+Dataset benchmarks validate against real-world obfuscated expressions from QSynth and PLDI datasets. See [DATASETS.md](DATASETS.md) for the full benchmark report — 69,501 expressions simplified across 31 dataset files from 6 independent sources, with zero failures.
 
 ## Known Limitations
 
+- **Product-inside-bitwise expressions unsupported** — expressions where products are nested inside bitwise operators (e.g., `(a*b) & c`, `(a*b) ^ (c*d)`) fall outside CoBRA's current representation families. These account for the majority of remaining unsimplified cases.
 - **Some mixed products unsupported** — complex combinations of bitwise-product subexpressions may not simplify when the decomposition engine cannot extract a valid polynomial core or the residual falls outside supported families
 - **No general logic minimization** — CoBRA uses greedy algebraic rewrites, not Quine-McCluskey/Espresso/BDD
 

@@ -54,6 +54,8 @@ The decomposition engine is run on the **original folded AST** before any precon
 
 The **OperandSimplifier** recursively simplifies the operands of mixed product nodes. If a product like `(complex_bitwise_expr) * (another_expr)` has operands that can be individually simplified, the overall expression may become tractable for the standard pipeline.
 
+Each candidate replacement is verified at full width by probing the original and simplified operands on random inputs. This prevents a class of semantic corruption where an operand simplifies to a boolean-equivalent but full-width-incorrect expression — a replacement that is invisible on {0,1} inputs but alters the product's behavior at arbitrary values.
+
 After operand simplification, CoBRA re-attempts the standard pipeline. If the simplified operands reveal a linear or polynomial structure, the expression is resolved here.
 
 ## Step 2.5: Product Identity Collapse
@@ -74,10 +76,11 @@ The **DecompositionEngine** uses an extract-solve architecture to decompose mixe
 
 ### Core Extraction
 
-Two extractors produce candidate polynomial cores:
+Three extractors produce candidate polynomial cores:
 
-1. **ExtractProductCore**: Identifies variable-variable products in the AST (e.g., `c * x * y`) and builds a polynomial core from these terms.
-2. **ExtractTemplateCore**: Uses bounded template matching to find a polynomial expression that partially explains the target function.
+1. **ExtractProductCore**: Identifies variable-variable products in the add-tree of the AST — including `Mul(a,b)`, `-(Mul(a,b))`, and `~(Mul(a,b))` forms — and builds a polynomial core from these terms.
+2. **ExtractPolyCore**: Recovers a multivariate polynomial approximation via `RecoverMultivarPoly` at degree 2 or 3.
+3. **ExtractTemplateCore**: Uses bounded template matching to find a polynomial expression that partially explains the target function.
 
 ### Residual Solving
 
@@ -95,7 +98,7 @@ For each candidate core, the engine computes a **residual evaluator**: `r(x) = f
 
 4. **Template fallback**: If no polynomial or ghost solver succeeds, the engine falls back to template decomposition on the residual.
 
-All solver results are gated by `FullWidthCheckEval` — deterministic exhaustive verification at full bitwidth — before acceptance.
+All solver results are gated by `FullWidthCheckEval` before acceptance. The supported-pipeline residual path uses a hardened 64-probe recheck (rather than the default 8) to reject boolean-correct but full-width-incorrect false positives.
 
 ### Ghost Primitives
 
@@ -128,9 +131,9 @@ When any step succeeds in decomposing a mixed expression, the resulting subexpre
 
 Some mixed expressions remain unsupported:
 
-- **Complex shift interactions**: Deeply nested combinations of shifts and bitwise products where no rewrite rule applies
-- **High-degree mixed products**: Products of three or more bitwise subexpressions that don't match known identities
-- **Ghost residual families**: Boolean-null residuals that are not expressible as a polynomial times a known ghost primitive
-- **Core extraction failures**: Expressions where no polynomial core can be identified from the AST or template search
+- **Product-inside-bitwise** — expressions where products are nested inside bitwise operators (`(a*b) & c`, `(a*b) ^ (c*d)`) rather than at the top-level add-tree. These account for ~48% of remaining unsupported cases. The current pipeline can only extract products from add-tree leaves; bitwise-wrapped products require a new representation family.
+- **Boolean-null residuals** — residuals that are zero on all Boolean inputs but nonzero at full width, where neither ghost primitives nor polynomial quotients produce a match. These account for ~39% of remaining cases.
+- **Non-boolean-null mixed residuals** — product cores with residuals containing nested MBA-encoded max/min chains that resist both polynomial recovery and structural simplification. ~13% of remaining cases.
+- **Complex shift interactions**: Deeply nested combinations of shifts and bitwise products where no rewrite rule applies.
 
-The QSynth EA dataset contains the most challenging examples — CoBRA simplifies 406 of 500 expressions, with the remaining 94 falling outside current decomposition coverage.
+The QSynth EA dataset contains the most challenging examples — CoBRA simplifies 407 of 500 expressions, with the remaining 93 falling outside current decomposition coverage.
