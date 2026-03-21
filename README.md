@@ -185,11 +185,13 @@ ctest --test-dir build -R test_simplifier --output-on-failure
 ctest --test-dir build -V
 ```
 
-Dataset benchmarks validate against real-world obfuscated expressions from multiple independent sources. See [DATASETS.md](DATASETS.md) for the full benchmark report — 69,942 expressions simplified across 32 dataset files from 7 independent sources, with zero failures.
+Dataset benchmarks validate against real-world obfuscated expressions from multiple independent sources. See [DATASETS.md](DATASETS.md) for the full benchmark report — 69,199 expressions simplified across 32 dataset files from 7 independent sources, with zero failures.
 
 ## Known Limitations
 
-- **Product-inside-bitwise expressions unsupported** — expressions where products are nested inside bitwise operators (e.g., `(a*b) & c`, `(a*b) ^ (c*d)`) fall outside CoBRA's current representation families. These account for the majority of remaining unsimplified cases.
+- **Product-inside-bitwise expressions unsupported** — expressions where products are nested inside bitwise operators (e.g., `(a*b) & c`, `(a*b) ^ (c*d)`) fall outside CoBRA's current representation families
+- **Arithmetic-under-bitwise expressions** — patterns like `(x+y) & z` where arithmetic operations appear inside bitwise operators. Boolean-domain simplification produces results (e.g., `(x^y) & z`) that are correct on `{0,1}` inputs but incorrect at full width. These are correctly reported as unsupported
+- **Semilinear normalizer coverage** — approximately half of semilinear (constant-masked bitwise) expressions fail the normalizer's structural self-check and are reported as unsupported
 - **Some mixed products unsupported** — complex combinations of bitwise-product subexpressions may not simplify when the decomposition engine cannot extract a valid polynomial core or the residual falls outside supported families
 - **No general logic minimization** — CoBRA uses greedy algebraic rewrites, not Quine-McCluskey/Espresso/BDD
 

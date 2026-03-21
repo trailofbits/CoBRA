@@ -136,4 +136,4 @@ Some mixed expressions remain unsupported:
 - **Non-boolean-null mixed residuals** — product cores with residuals containing nested MBA-encoded max/min chains that resist both polynomial recovery and structural simplification. ~13% of remaining cases.
 - **Complex shift interactions**: Deeply nested combinations of shifts and bitwise products where no rewrite rule applies.
 
-The QSynth EA dataset contains the most challenging examples — CoBRA simplifies 407 of 500 expressions, with the remaining 93 falling outside current decomposition coverage.
+The QSynth EA dataset contains the most challenging examples — CoBRA simplifies 288 of 500 expressions, with the remaining 212 falling outside current decomposition coverage (including arithmetic-under-bitwise expressions that fail full-width verification).

@@ -739,9 +739,9 @@ TEST(SimplifierTest, MixedRewrite_AndTimesZ_Simplified) {
     EXPECT_TRUE(result.value().verified);
 }
 
-TEST(SimplifierTest, BitwiseOverArith_NoMul_Simplified) {
-    // (x + y) & z — no var*var multiplication, so routes to
-    // BitwiseOnly and simplifies via signature pipeline
+TEST(SimplifierTest, BitwiseOverArith_NoMul_Unsupported) {
+    // (x + y) & z — ArithOverBitwise; CoB produces (x^y)&z which is
+    // correct on {0,1} but wrong at full width. Verification catches this.
     std::vector< uint64_t > sig(8);
     for (uint32_t i = 0; i < 8; ++i) {
         uint64_t x = (i >> 0) & 1;
@@ -763,7 +763,7 @@ TEST(SimplifierTest, BitwiseOverArith_NoMul_Simplified) {
 
     auto result = Simplify(sig, vars, input.get(), opts);
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
+    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kUnchangedUnsupported);
 }
 
 TEST(SimplifierTest, MultivarHighPower_PurePolynomial_Simplifies) {

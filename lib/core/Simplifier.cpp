@@ -1,19 +1,28 @@
 #include "cobra/core/Simplifier.h"
+#include "cobra/core/AtomSimplifier.h"
 #include "cobra/core/AuxVarEliminator.h"
+#include "cobra/core/BitPartitioner.h"
 #include "cobra/core/Classification.h"
 #include "cobra/core/Classifier.h"
 #include "cobra/core/DecompositionEngine.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/ExprUtils.h"
+#include "cobra/core/MaskedAtomReconstructor.h"
 #include "cobra/core/MixedProductRewriter.h"
 #include "cobra/core/OperandSimplifier.h"
 #include "cobra/core/PatternMatcher.h"
 #include "cobra/core/ProductIdentityRecoverer.h"
 #include "cobra/core/Result.h"
+#include "cobra/core/SelfCheck.h"
+#include "cobra/core/SemilinearIR.h"
+#include "cobra/core/SemilinearNormalizer.h"
+#include "cobra/core/SemilinearSignature.h"
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/SignatureEval.h"
 #include "cobra/core/SignatureSimplifier.h"
 #include "cobra/core/SimplifyOutcome.h"
+#include "cobra/core/StructureRecovery.h"
+#include "cobra/core/TermRefiner.h"
 #include "cobra/core/Trace.h"
 #include <algorithm>
 #include <cstddef>
@@ -120,6 +129,83 @@ namespace cobra {
             }
 
             return e;
+        }
+
+        std::optional< SimplifyOutcome > TrySemilinearPipeline(
+            const Expr &ast, const std::vector< std::string > &vars, const Options &opts,
+            const Classification &cls
+        ) {
+            const auto kNumVars = static_cast< uint32_t >(vars.size());
+            COBRA_TRACE(
+                "Simplifier", "TrySemilinearPipeline: vars={} bitwidth={}", vars.size(),
+                opts.bitwidth
+            );
+
+            if (kNumVars > opts.max_vars) { return std::nullopt; }
+
+            auto ir_result = NormalizeToSemilinear(ast, vars, opts.bitwidth);
+            if (!ir_result.has_value()) {
+                COBRA_TRACE(
+                    "Simplifier", "TrySemilinearPipeline: normalization failed: {}",
+                    ir_result.error().message
+                );
+                return std::nullopt;
+            }
+            auto &ir = ir_result.value();
+
+            SimplifyStructure(ir);
+
+            auto plain = ReconstructMaskedAtoms(ir, {});
+            auto check = SelfCheckSemilinear(ir, *plain, vars, opts.bitwidth);
+            if (!check.passed) {
+                COBRA_TRACE(
+                    "Simplifier", "TrySemilinearPipeline: self-check failed: {}",
+                    check.mismatch_detail
+                );
+                return std::nullopt;
+            }
+
+            RecoverStructure(ir);
+            RefineTerms(ir);
+            CoalesceTerms(ir);
+
+            if (opts.evaluator) {
+                auto probe_expr = ReconstructMaskedAtoms(ir, {});
+                auto probe      = FullWidthCheckEval(
+                    opts.evaluator, kNumVars, *probe_expr, opts.bitwidth, 16
+                );
+                if (!probe.passed) {
+                    COBRA_TRACE(
+                        "Simplifier", "TrySemilinearPipeline: post-rewrite probe failed"
+                    );
+                    return std::nullopt;
+                }
+            }
+
+            CompactAtomTable(ir);
+            auto partitions = ComputePartitions(ir);
+            auto simplified = ReconstructMaskedAtoms(ir, partitions);
+
+            if (opts.evaluator) {
+                auto final_check =
+                    FullWidthCheckEval(opts.evaluator, kNumVars, *simplified, opts.bitwidth);
+                if (!final_check.passed) {
+                    COBRA_TRACE(
+                        "Simplifier", "TrySemilinearPipeline: final verification failed"
+                    );
+                    return std::nullopt;
+                }
+            }
+
+            SimplifyOutcome outcome;
+            outcome.kind                 = SimplifyOutcome::Kind::kSimplified;
+            outcome.expr                 = std::move(simplified);
+            outcome.real_vars            = vars;
+            outcome.verified             = true;
+            outcome.diag.classification  = cls;
+            outcome.diag.attempted_route = cls.route;
+            COBRA_TRACE("Simplifier", "TrySemilinearPipeline: success");
+            return outcome;
         }
 
     } // namespace
@@ -250,6 +336,22 @@ namespace cobra {
             static_cast< int >(cls.semantic)
         );
 
+        // Semilinear expressions need the AST-based pipeline, not
+        // boolean-signature simplification. Try it before routing.
+        // Use input_expr (pre-lowering) — LowerNotOverArith converts
+        // ~(const) into Add(Neg(const), mask) which inflates the IR.
+        if (cls.semantic == SemanticClass::kSemilinear
+            && !IsLinearShortcut(
+                *working_expr, static_cast< uint32_t >(vars.size()), opts.bitwidth
+            ))
+        {
+            auto semi = TrySemilinearPipeline(*input_expr, vars, opts, cls);
+            if (semi.has_value()) { return Ok(std::move(*semi)); }
+            COBRA_TRACE(
+                "Simplifier", "Semilinear pipeline failed, falling back to supported pipeline"
+            );
+        }
+
         switch (cls.route) {
             case Route::kBitwiseOnly:
             case Route::kMultilinear:
@@ -270,6 +372,29 @@ namespace cobra {
                         + result.error().message;
                     return Ok(std::move(outcome));
                 }
+
+                // Verify in original variable space. The internal
+                // FullWidthCheckEval uses a remapped evaluator that
+                // zeros eliminated variables, so it cannot catch wrong
+                // aux-var elimination (x*y == x&y on {0,1}).
+                // This mirrors kMixedRewrite Step 1's unconditional
+                // VerifyInOriginalSpace call.
+                if (opts.evaluator && result.value().kind == SimplifyOutcome::Kind::kSimplified)
+                {
+                    auto check = VerifyInOriginalSpace(
+                        opts.evaluator, vars, result.value().real_vars, *result.value().expr,
+                        opts.bitwidth
+                    );
+                    if (!check.passed) {
+                        return Ok(MakeUnchanged(
+                            working_expr, cls,
+                            "Supported pipeline result failed"
+                            " full-width verification"
+                        ));
+                    }
+                    result.value().verified = true;
+                }
+
                 result.value().diag.classification  = cls;
                 result.value().diag.attempted_route = cls.route;
                 return result;

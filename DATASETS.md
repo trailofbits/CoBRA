@@ -2,7 +2,7 @@
 
 CoBRA is validated against **73,119 expressions** drawn from **32 dataset files** spanning 7 independent sources. Every expression is parsed, simplified, and spot-checked at runtime. The numbers below are enforced by automated test assertions in [`test/verify/test_dataset_benchmarks.cpp`](test/verify/test_dataset_benchmarks.cpp) and verified on every CI run.
 
-**Overall: 69,942 / 70,060 parsed expressions simplified (99.83%), zero failures.**
+**Overall: 69,199 / 70,060 parsed expressions simplified (98.77%), zero failures.**
 
 ---
 
@@ -28,11 +28,11 @@ CoBRA classifies each input expression into one of four semantic classes, then r
 | `univariate64.txt` | 1,000 | 1,000 | **1,000** | 0 | **100%** |
 | `multivariate64.txt` | 1,000 | 1,000 | **1,000** | 0 | **100%** |
 | `permutation64.txt` | 13 | 13 | **13** | 0 | **100%** |
-| `msimba.txt` | 1,000 | 1,000 | **1,000** | 0 | **100%** |
+| `msimba.txt` | 1,000 | 1,000 | **448** | 552 | **44.8%** |
 
 - **univariate64** / **multivariate64**: Polynomial expressions (`x0*x0`, `x0*x1`) that simplify to linear targets. All 2,000 pass full-width verification.
 - **permutation64**: High-degree polynomial expressions with `**` (exponentiation). All 13 expressions parse and simplify correctly.
-- **msimba**: Semilinear expressions with bit-extraction patterns. All 1,000 simplified via the bit-partitioned pipeline.
+- **msimba**: Semilinear expressions with bit-extraction patterns. 448 of 1,000 simplify via the bit-partitioned semilinear pipeline. The remaining 552 fail the semilinear normalizer's structural self-check (constant mismatch during decomposition) and are reported as unsupported rather than returning incorrect results.
 
 ### SiMBA Datasets
 
@@ -90,12 +90,12 @@ Source: [GAMBA](https://github.com/DenuvoSoftwareSolutions/GAMBA)
 | `neureduce.txt` | NeuReduce | 10,000 | 10,000 | **10,000** | 0 | **100%** |
 | `mba_obf_linear.txt` | GAMBA | 1,001 | 1,000 | **1,000** | 0 | **100%** |
 | `mba_obf_nonlinear.txt` | GAMBA | 1,002 | 1,000 | **1,000** | 0 | **100%** |
-| `syntia.txt` | Syntia | 501 | 500 | **500** | 0 | **100%** |
-| `qsynth_ea.txt` | QSynth | 501 | 500 | **407** | 93 | **81.4%** |
+| `syntia.txt` | Syntia | 501 | 500 | **480** | 20 | **96.0%** |
+| `qsynth_ea.txt` | QSynth | 501 | 500 | **288** | 212 | **57.6%** |
 
 - **loki_tiny**: 25 sections covering add, subtract, AND, OR, XOR at depths 1-5. All 25,000 are 2-variable linear MBAs.
 - **mba_obf_nonlinear**: 500 polynomial + 500 linear expressions, all with linear ground-truth targets. All 1,000 pass full-width verification.
-- **qsynth_ea**: The most challenging dataset. 407 of 500 expressions simplify via the multi-step MixedRewrite pipeline and decomposition engine. The 93 unsupported expressions are dominated by product-inside-bitwise patterns (products nested inside `&`, `|`, `^`) and boolean-null residuals that fall outside current representation families.
+- **qsynth_ea**: The most challenging dataset. 288 of 500 expressions simplify via the multi-step MixedRewrite pipeline and decomposition engine. The 212 unsupported expressions include product-inside-bitwise patterns (products nested inside `&`, `|`, `^`), boolean-null residuals, and arithmetic-under-bitwise expressions where boolean-domain simplification does not generalize to full width.
 
 ### OSES Dataset
 
@@ -103,9 +103,9 @@ Source: [oracle-synthesis-meets-equality-saturation](https://github.com/fvrmatte
 
 | Dataset | Total Lines | Parsed | Simplified | Unsupported | Rate |
 |---------|:-----------:|:------:|:----------:|:-----------:|:----:|
-| `oses_all.txt` | 473 | 466 | **441** | 25 | **94.6%** |
+| `oses_all.txt` | 473 | 466 | **389** | 77 | **83.5%** |
 
-- **oses_all**: 472 MBA expressions extracted from the OSES `synth.py` evaluation script (plus 1 header comment). Expressions span linear (205), nonlinear/product (131), linear-with-constants (129), and constant (7) categories with 1-14 variables. The 25 unsupported expressions are dominated by product-inside-bitwise patterns and complex multi-variable mixed products that fall outside current representation families.
+- **oses_all**: 472 MBA expressions extracted from the OSES `synth.py` evaluation script (plus 1 header comment). Expressions span linear (205), nonlinear/product (131), linear-with-constants (129), and constant (7) categories with 1-14 variables. The 77 unsupported expressions include product-inside-bitwise patterns, arithmetic-under-bitwise expressions that fail full-width verification, and complex multi-variable mixed products that fall outside current representation families.
 
 ---
 
@@ -117,16 +117,16 @@ Source: [oracle-synthesis-meets-equality-saturation](https://github.com/fvrmatte
 | Comment/header lines skipped | 2,069 |
 | Non-expression lines (headers, no ground truth) | 990 |
 | **Parsed expressions** | **70,060** |
-| **Simplified** | **69,942** |
-| Unsupported (by design) | 118 |
+| **Simplified** | **69,199** |
+| Unsupported (by design) | 861 |
 | Errors / failures | **0** |
 
 | MBA Class | Expressions | Simplified | Rate |
 |-----------|:-----------:|:----------:|:----:|
 | Linear | ~55,000 | ~55,000 | **100%** |
-| Semilinear | 1,000 | 1,000 | **100%** |
+| Semilinear | 1,000 | 448 | **44.8%** |
 | Polynomial | ~5,000 | ~5,000 | **100%** |
-| Mixed / Hybrid | ~8,584 | ~8,467 | **~99%** |
+| Mixed / Hybrid | ~8,584 | ~8,276 | **~96%** |
 
 All simplified results are validated via spot-check (random-input evaluation) at 64-bit width. When Z3 is available, full equivalence proofs are performed.
 

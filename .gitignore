@@ -558,6 +558,7 @@ build_check/
 .cache/
 .serena/
 .worktrees/
+docs/gaps/
 Testing/
 compile_commands.json
 CMakeFiles/
