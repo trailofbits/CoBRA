@@ -259,12 +259,20 @@ namespace cobra {
                     var_result.constant = (var_result.constant + (coeff * kC)) & ctx.mask;
 
                     // -(n * coeff) * (a & c), where n=2 for XOR, n=1 for OR
-                    auto and_expr  = Expr::BitwiseAnd(CloneExpr(var_child), Expr::Constant(kC));
-                    AtomId and_aid = RegisterAtom(ctx, *and_expr);
+                    // Process through CollectTerms (not RegisterAtom) so that
+                    // further lowerings (e.g. (~a)&c) fire on the first pass,
+                    // keeping the normalize→reconstruct→re-normalize round-trip
+                    // idempotent.
+                    auto and_expr = Expr::BitwiseAnd(CloneExpr(var_child), Expr::Constant(kC));
                     uint64_t and_coeff = (expr.kind == Expr::Kind::kXor)
                         ? ModNeg((2 * coeff) & ctx.mask, ctx.bitwidth)
                         : ModNeg(coeff, ctx.bitwidth);
-                    var_result.terms.push_back({ .coeff = and_coeff, .atom_id = and_aid });
+                    auto and_result    = CollectTerms(ctx, *and_expr, and_coeff);
+                    var_result.constant =
+                        (var_result.constant + and_result.constant) & ctx.mask;
+                    var_result.terms.insert(
+                        var_result.terms.end(), and_result.terms.begin(), and_result.terms.end()
+                    );
 
                     return var_result;
                 }

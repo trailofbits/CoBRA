@@ -164,8 +164,8 @@ TEST(DatasetBenchmark, MSiMBA) {
     EXPECT_EQ(stats.total, 1000);
     EXPECT_EQ(stats.skipped_parse, 0);
     EXPECT_EQ(stats.parsed, 1000);
-    EXPECT_EQ(stats.simplified, 448);
-    EXPECT_EQ(stats.unsupported, 552);
+    EXPECT_EQ(stats.simplified, 972);
+    EXPECT_EQ(stats.unsupported, 28);
     EXPECT_EQ(stats.failed_simplify, 0);
 }
 
@@ -344,8 +344,8 @@ TEST(OSESDataset, Fast) {
     EXPECT_EQ(stats.total, 473);
     EXPECT_EQ(stats.skipped_parse, 15);
     EXPECT_EQ(stats.parsed, 458);
-    EXPECT_EQ(stats.simplified, 379);
-    EXPECT_EQ(stats.unsupported, 79);
+    EXPECT_EQ(stats.simplified, 380);
+    EXPECT_EQ(stats.unsupported, 78);
     EXPECT_EQ(stats.failed_simplify, 0);
 }
 
