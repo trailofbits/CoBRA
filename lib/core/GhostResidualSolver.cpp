@@ -209,7 +209,7 @@ namespace cobra {
 
     std::optional< GhostSolveResult > SolveFactoredGhostResidual(
         const Evaluator &residual_eval, const std::vector< uint32_t > &support,
-        uint32_t num_vars, uint32_t bitwidth
+        uint32_t num_vars, uint32_t bitwidth, uint8_t max_degree, uint8_t grid_degree
     ) {
         const auto kSupportSize = static_cast< uint32_t >(support.size());
         const auto &basis       = GetGhostBasis();
@@ -258,7 +258,7 @@ namespace cobra {
                 };
 
                 auto fit = RecoverWeightedPoly(
-                    residual_eval, weight, support, num_vars, bitwidth, 0, 2
+                    residual_eval, weight, support, num_vars, bitwidth, max_degree, grid_degree
                 );
                 if (!fit.has_value()) { continue; }
 

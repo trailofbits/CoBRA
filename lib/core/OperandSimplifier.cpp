@@ -2,6 +2,7 @@
 #include "cobra/core/Expr.h"
 #include "cobra/core/ExprCost.h"
 #include "cobra/core/ExprUtils.h"
+#include "cobra/core/SignatureChecker.h"
 #include "cobra/core/SignatureEval.h"
 #include "cobra/core/SignatureSimplifier.h"
 #include "cobra/core/Simplifier.h"
@@ -9,6 +10,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <random>
 #include <string>
 #include <utility>
 #include <vector>
@@ -156,6 +158,22 @@ namespace cobra {
 
             if (!result.has_value()) { return std::nullopt; }
             if (!IsBetter(result->cost, operand_cost)) { return std::nullopt; }
+
+            // Verify the simplified operand is FW-equivalent to
+            // the original. Boolean-equivalent replacement can
+            // differ on full-width inputs when the operand
+            // contains arithmetic (Mul, Add) — propagated
+            // through an outer Mul, this breaks semantics.
+            const uint64_t kMask = Bitmask(opts.bitwidth);
+            std::mt19937_64 rng(0xCA5E + num_vars);
+            constexpr int kProbes = 8;
+            for (int p = 0; p < kProbes; ++p) {
+                std::vector< uint64_t > pt(num_vars);
+                for (uint32_t i = 0; i < num_vars; ++i) { pt[i] = rng() & kMask; }
+                uint64_t orig_val = EvalExpr(operand, pt, opts.bitwidth) & kMask;
+                uint64_t simp_val = EvalExpr(*result->expr, pt, opts.bitwidth) & kMask;
+                if (orig_val != simp_val) { return std::nullopt; }
+            }
 
             return std::move(result->expr);
         }

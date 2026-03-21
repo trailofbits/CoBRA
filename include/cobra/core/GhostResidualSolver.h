@@ -41,7 +41,7 @@ namespace cobra {
     // Requires support.size() <= 6.
     std::optional< GhostSolveResult > SolveFactoredGhostResidual(
         const Evaluator &residual_eval, const std::vector< uint32_t > &support,
-        uint32_t num_vars, uint32_t bitwidth
+        uint32_t num_vars, uint32_t bitwidth, uint8_t max_degree = 0, uint8_t grid_degree = 2
     );
 
 } // namespace cobra

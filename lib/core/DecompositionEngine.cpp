@@ -24,6 +24,25 @@ namespace cobra {
             return !kLhsConst && !kRhsConst;
         }
 
+        // Check if e is a product addend: Mul(non-const,non-const),
+        // Neg(Mul(...)), or Not(Mul(...)) (== -(Mul(...))-1).
+        bool IsProductAddend(const Expr &e) {
+            if (IsVarProduct(e)) { return true; }
+            if (e.kind == Expr::Kind::kNeg && e.children.size() == 1
+                && IsVarProduct(*e.children[0]))
+            {
+                return true;
+            }
+            // ~(Mul(a,b)) = -(Mul(a,b)) - 1: the Mul is
+            // extractable; the -1 offset goes to residual.
+            if (e.kind == Expr::Kind::kNot && e.children.size() == 1
+                && IsVarProduct(*e.children[0]))
+            {
+                return true;
+            }
+            return false;
+        }
+
         void SplitAddTree(
             const Expr &e, std::vector< const Expr * > &products,
             std::vector< std::unique_ptr< Expr > > &residual
@@ -31,20 +50,14 @@ namespace cobra {
             if (e.kind == Expr::Kind::kAdd && e.children.size() == 2) {
                 SplitAddTree(*e.children[0], products, residual);
                 const Expr &rhs = *e.children[1];
-                if (IsVarProduct(rhs)) {
-                    products.push_back(&rhs);
-                } else if (
-                    rhs.kind == Expr::Kind::kNeg && rhs.children.size() == 1
-                    && IsVarProduct(*rhs.children[0])
-                )
-                {
+                if (IsProductAddend(rhs)) {
                     products.push_back(&rhs);
                 } else {
                     residual.push_back(CloneExpr(rhs));
                 }
                 return;
             }
-            if (IsVarProduct(e)) {
+            if (IsProductAddend(e)) {
                 products.push_back(&e);
             } else {
                 residual.push_back(CloneExpr(e));
@@ -254,6 +267,92 @@ namespace cobra {
         const uint32_t kBw = ctx.opts.bitwidth;
 
         COBRA_TRACE("DecompEngine", "TryDecomposition: vars={} bitwidth={}", kNv, kBw);
+
+        // Boolean-null direct path: when f(x) is zero on all {0,1}^k
+        // but non-zero at full width, try ghost solvers directly without
+        // requiring a non-trivial polynomial core first.
+        {
+            auto fw_elim  = EliminateAuxVars(ctx.sig, ctx.vars, ctx.opts.evaluator, kBw);
+            auto fw_count = static_cast< uint32_t >(fw_elim.real_vars.size());
+
+            std::vector< uint32_t > fw_support;
+            fw_support.reserve(fw_count);
+            for (const auto &rv : fw_elim.real_vars) {
+                for (uint32_t j = 0; j < kNv; ++j) {
+                    if (ctx.vars[j] == rv) {
+                        fw_support.push_back(j);
+                        break;
+                    }
+                }
+            }
+
+            bool is_bn =
+                IsBooleanNullResidual(ctx.opts.evaluator, fw_support, kNv, kBw, ctx.sig);
+
+            if (is_bn && fw_count <= 6) {
+                COBRA_TRACE(
+                    "DecompEngine",
+                    "Boolean-null function detected (fw_support={}), "
+                    "trying ghost solvers directly",
+                    fw_count
+                );
+
+                auto ghost = SolveGhostResidual(ctx.opts.evaluator, fw_support, kNv, kBw);
+                if (ghost.has_value()) {
+                    auto check = FullWidthCheckEval(ctx.opts.evaluator, kNv, *ghost->expr, kBw);
+                    if (check.passed) {
+                        COBRA_TRACE("DecompEngine", "Boolean-null: GhostResidual succeeded");
+                        DecompositionResult result;
+                        result.expr           = std::move(ghost->expr);
+                        result.extractor_kind = ExtractorKind::kBooleanNullDirect;
+                        result.solver_kind    = ResidualSolverKind::kGhostResidual;
+                        return result;
+                    }
+                }
+
+                auto factored =
+                    SolveFactoredGhostResidual(ctx.opts.evaluator, fw_support, kNv, kBw);
+                if (factored.has_value()) {
+                    auto check =
+                        FullWidthCheckEval(ctx.opts.evaluator, kNv, *factored->expr, kBw);
+                    if (check.passed) {
+                        COBRA_TRACE(
+                            "DecompEngine", "Boolean-null: FactoredGhost(d=0) succeeded"
+                        );
+                        DecompositionResult result;
+                        result.expr           = std::move(factored->expr);
+                        result.extractor_kind = ExtractorKind::kBooleanNullDirect;
+                        result.solver_kind    = ResidualSolverKind::kGhostResidual;
+                        return result;
+                    }
+                }
+
+                // Escalate: higher-degree polynomial weights
+                uint8_t grid   = (fw_count <= 2) ? 3 : 2;
+                auto factored2 = SolveFactoredGhostResidual(
+                    ctx.opts.evaluator, fw_support, kNv, kBw, 2, grid
+                );
+                if (factored2.has_value()) {
+                    auto check =
+                        FullWidthCheckEval(ctx.opts.evaluator, kNv, *factored2->expr, kBw);
+                    if (check.passed) {
+                        COBRA_TRACE(
+                            "DecompEngine", "Boolean-null: FactoredGhost(d=2) succeeded"
+                        );
+                        DecompositionResult result;
+                        result.expr           = std::move(factored2->expr);
+                        result.extractor_kind = ExtractorKind::kBooleanNullDirect;
+                        result.solver_kind    = ResidualSolverKind::kGhostResidual;
+                        return result;
+                    }
+                }
+
+                COBRA_TRACE(
+                    "DecompEngine",
+                    "Boolean-null: all ghost solvers failed, falling through to extractors"
+                );
+            }
+        }
 
         // Helper: try a core candidate through the decomposition pipeline
         auto TryCore = [&](CoreCandidate &core) -> std::optional< DecompositionResult > {
@@ -484,25 +583,46 @@ namespace cobra {
                             }
                             RemapVarIndices(*solved_expr, idx_map);
                         }
-                        auto combined =
-                            Expr::Add(CloneExpr(*core.expr), std::move(solved_expr));
-                        auto check =
-                            FullWidthCheckEval(ctx.opts.evaluator, kNv, *combined, kBw);
-                        if (check.passed) {
+
+                        // Verify solved_expr against residual evaluator
+                        // with stronger probing before recombination.
+                        // RunSupportedPipeline's internal FW check uses
+                        // only 8 deterministic probes, which can false-
+                        // positive on boolean-correct but FW-incorrect
+                        // expressions.
+                        auto res_check =
+                            FullWidthCheckEval(residual_eval, kNv, *solved_expr, kBw, 64);
+                        if (!res_check.passed) {
                             COBRA_TRACE(
-                                "DecompEngine", "Decomposed: kind={} + SupportedPipeline",
-                                static_cast< int >(core.kind)
+                                "DecompEngine",
+                                "SupportedPipeline: residual FW "
+                                "recheck failed (false positive)"
                             );
-                            DecompositionResult result;
-                            result.expr           = std::move(combined);
-                            result.extractor_kind = core.kind;
-                            result.solver_kind    = ResidualSolverKind::kSupportedPipeline;
-                            result.core_degree    = core.degree_used;
-                            return result;
+                        } else {
+                            auto combined =
+                                Expr::Add(CloneExpr(*core.expr), std::move(solved_expr));
+                            auto check =
+                                FullWidthCheckEval(ctx.opts.evaluator, kNv, *combined, kBw);
+                            if (check.passed) {
+                                COBRA_TRACE(
+                                    "DecompEngine",
+                                    "Decomposed: kind={} + "
+                                    "SupportedPipeline",
+                                    static_cast< int >(core.kind)
+                                );
+                                DecompositionResult result;
+                                result.expr           = std::move(combined);
+                                result.extractor_kind = core.kind;
+                                result.solver_kind    = ResidualSolverKind::kSupportedPipeline;
+                                result.core_degree    = core.degree_used;
+                                return result;
+                            }
+                            COBRA_TRACE(
+                                "DecompEngine",
+                                "SupportedPipeline: solved but "
+                                "recombination failed"
+                            );
                         }
-                        COBRA_TRACE(
-                            "DecompEngine", "SupportedPipeline: solved but recombination failed"
-                        );
                     } else {
                         COBRA_TRACE("DecompEngine", "SupportedPipeline: residual unsupported");
                     }

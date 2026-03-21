@@ -15,6 +15,7 @@ namespace cobra {
         kProductAST,
         kPolynomial,
         kTemplate,
+        kBooleanNullDirect,
     };
 
     enum class ResidualSolverKind : uint8_t {
