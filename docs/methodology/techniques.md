@@ -30,11 +30,19 @@ Pre-processing step that detects variables which cancel out of an expression. If
 
 ---
 
+### Atom Table Compaction
+
+Removes unreferenced atoms from the IR atom table after rewrite passes (structure recovery, term refinement, coalescing) and before bit partitioning. Remaps term atom IDs to maintain referential integrity. Avoids paying partitioning cost for dead intermediate atoms created during rewrites.
+
+**Used in:** [Semilinear Pipeline](semilinear-pipeline.md#stage-8-atom-table-compaction)
+
+---
+
 ### Bit Partitioning
 
 Decomposes constant masks into minimal groups of bit positions where all masks have uniform behavior. Within each partition, constants reduce to 0 or 1, enabling standard linear simplification.
 
-**Used in:** [Semilinear Pipeline](semilinear-pipeline.md#stage-2-bit-partitioning)
+**Used in:** [Semilinear Pipeline](semilinear-pipeline.md#stage-9-bit-partitioning)
 
 **Reference:** Skees, [Deobfuscation of Semi-Linear Mixed Boolean-Arithmetic Expressions](https://arxiv.org/abs/2406.10016) (MSiMBA, 2024)
 
@@ -92,6 +100,20 @@ ANF cleanup pass that extracts shared AND-factors from multiple terms. For examp
 
 ---
 
+### Constant Lowering (Semilinear)
+
+Algebraic decomposition of XOR, OR, and NOT-AND patterns with constant operands into AND-basis form during semilinear normalization. Creates additional `(a & c)` atoms that participate in coefficient deduplication and cancellation.
+
+| Pattern | Decomposition |
+|---------|---------------|
+| `a ^ c` | `a + c - 2*(a & c)` |
+| `a \| c` | `a + c - (a & c)` |
+| `(~a) & c` | `c - (a & c)` |
+
+**Used in:** [Semilinear Pipeline](semilinear-pipeline.md#constant-lowering)
+
+---
+
 ### Evaluator-Based Polynomial Recovery
 
 Recovers polynomial coefficients from an evaluator function (rather than an explicit expression) by evaluating on the {0, 1, ..., d}^n grid and solving the falling-factorial interpolation system directly. Used by the decomposition engine to recover polynomial residuals and by WeightedPolyFit for weighted quotient systems.
@@ -133,6 +155,22 @@ Iterative algorithm for computing modular inverses of odd numbers modulo 2^w. St
 **Used in:** [Polynomial Pipeline](polynomial-pipeline.md#stage-2-coefficient-splitting)
 
 **Reference:** Dumas, [On Newton-Raphson iteration for multiplicative inverses modulo prime powers](https://arxiv.org/abs/1209.6626) (2012)
+
+---
+
+### Linear Shortcut Detection
+
+Pre-check that evaluates a semilinear-classified expression at `{0, 2^i}` per bit position. If all semi-linear signature rows are identical, the expression is linear in disguise and can be routed to the faster linear pipeline. Avoids the overhead of full semilinear normalization for expressions that don't need it.
+
+**Used in:** [Semilinear Pipeline](semilinear-pipeline.md#when-this-pipeline-runs)
+
+---
+
+### Mask Elimination
+
+Structure recovery pass that rewrites complement mask pairs with different coefficients: `a*(c & x) + b*(~c & x)` becomes `(a-b)*(c & x) + b*x`. Strips the mask from one term, replacing it with a bare variable reference. Applied when the pair doesn't qualify for XOR recovery (coefficients aren't negated).
+
+**Used in:** [Semilinear Pipeline](semilinear-pipeline.md#stage-4-structure-recovery)
 
 ---
 
@@ -216,11 +254,35 @@ Detects `x^k` terms via finite differences. Evaluates a univariate slice at cons
 
 ---
 
+### Structure Recovery (XOR Recovery)
+
+Identifies complement mask pairs within same-basis atom groups where coefficients are negated: `m*(c & x) + (-m)*(~c & x)`. Rewrites to `-m*(c ^ x) + m*c`, recovering XOR operations hidden by the semilinear decomposition. Part of the `RecoverStructure` pass.
+
+**Used in:** [Semilinear Pipeline](semilinear-pipeline.md#stage-4-structure-recovery)
+
+---
+
 ### Template Decomposition
 
 Bounded brute-force search over small compositions of known atoms. Builds a pool of candidate subexpressions (constants, variables, unary/pairwise ops) and searches for 1- or 2-layer compositions that match the target signature.
 
 **Used in:** [Mixed Pipeline](mixed-pipeline.md#phase-2-decomposition-engine)
+
+---
+
+### Term Coalescing
+
+Per-bit coefficient analysis that computes the effective coefficient at each bit position for same-basis atom groups, then groups bits by effective coefficient to form new partitions. If the new partition count is smaller than the current term count, the group is replaced. For example, `3*(0x55 & x) + 3*(0xAA & x)` coalesces to `3*x`.
+
+**Used in:** [Semilinear Pipeline](semilinear-pipeline.md#stage-6-term-coalescing)
+
+---
+
+### Term Refinement
+
+Local optimizations on individual semilinear terms. **ReduceMask** strips dead bits from masks — bits where the coefficient's contribution is zero. **Same-coefficient merge** combines two atoms with the same coefficient and compatible masks into a single term with a wider mask.
+
+**Used in:** [Semilinear Pipeline](semilinear-pipeline.md#stage-5-term-refinement)
 
 ---
 

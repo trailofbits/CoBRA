@@ -26,8 +26,9 @@ Input Expression
        +-- Linear ──────────> BitwiseOnly pipeline
        |                      (signature vector, CoB transform, pattern matching, ANF)
        |
-       +-- Semilinear ──────> BitwiseOnly pipeline (with bit-partitioning)
-       |                      (constant-masked atoms, per-partition reconstruction)
+       +-- Semilinear ──────> Semilinear pipeline
+       |                      (constant lowering, structure recovery, term refinement,
+       |                       bit-partitioned OR-assembly reconstruction)
        |
        +-- Polynomial ──────> Multilinear / PowerRecovery pipeline
        |                      (coefficient splitting, finite differences, interpolation)

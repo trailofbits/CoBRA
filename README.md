@@ -4,7 +4,7 @@
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)](https://en.cppreference.com/w/cpp/23)
-[![Tests](https://img.shields.io/badge/tests-965-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-1015-brightgreen.svg)](#testing)
 
 CoBRA deobfuscates expressions that interleave arithmetic (`+`, `-`, `*`) with bitwise (`&`, `|`, `^`, `~`) and shift (`<<`, `>>`) operators — a technique commonly used in software obfuscation.
 
@@ -20,6 +20,9 @@ c ^ a & b
 
 $ cobra-cli --mba "(x&0xFF)+(x&0xFF00)" --bitwidth 16
 x & 255 | x & -256
+
+$ cobra-cli --mba "(x ^ 0x10) + 2 * (x & 0x10)"
+16 + x
 
 $ cobra-cli --mba "x << 3"
 8 * x
@@ -51,7 +54,7 @@ CoBRA classifies each expression and routes it through the appropriate pipeline:
 | Pipeline | Input | Technique |
 |----------|-------|-----------|
 | **Linear** | Weighted sums of bitwise atoms | Signature vector → CoB butterfly transform → pattern matching / ANF cleanup |
-| **Semilinear** | Constant-masked atoms (`x & 0xFF`) | Bit-partitioned decomposition per mask partition |
+| **Semilinear** | Constant-masked atoms (`x & 0xFF`) | Constant lowering, structure recovery, term refinement, bit-partitioned reconstruction |
 | **Polynomial** | Variable products (`x*y`, `x^2`) | Coefficient splitting + singleton power recovery |
 | **Mixed** | Products of bitwise subexpressions | Multi-step rewriting, decomposition engine (extract-solve), ghost residual solving |
 
@@ -61,7 +64,7 @@ The core insight is the **Change of Basis (CoB) transform**: evaluate the expres
 
 - **Linear MBA simplification** — arbitrary combinations of `&`, `|`, `^`, `~` with `+`, `-`, constant multipliers
 - **Scaled pattern matching** — expressions like `k * f(vars) + c` where `f` is a bitwise function; Shannon decomposition extends coverage to 4- and 5-variable Boolean expressions
-- **Semilinear support** — constant-masked atoms like `x & 0xFF`, `y | 0xF0` via bit-partitioned reconstruction
+- **Semilinear support** — constant-masked atoms like `x & 0xFF`, `y | 0xF0` with XOR/OR/NOT-AND constant lowering, structure recovery (XOR recovery, mask elimination), term refinement, coalescing, and bit-partitioned OR-assembly reconstruction
 - **Polynomial recovery** — multilinear terms (`x*y`) and singleton powers (`x^2`) via coefficient splitting
 - **Mixed product handling** — multi-step rewriting pipeline with operand simplification, product identity collapse, and XOR lowering
 - **Decomposition engine** — extract-solve architecture that splits mixed expressions into polynomial cores and residuals, with hardened full-width verification and ghost residual solving for boolean-null components
@@ -132,7 +135,7 @@ cobra-cli --mba "(x&y)+(x|y)" --verbose
 ## Project Structure
 
 ```
-lib/core/                Core simplification pipeline (42 source files)
+lib/core/                Core simplification pipeline (45 source files)
   Simplifier               Top-level orchestration and route dispatch
   Classifier               Route: Linear / Semilinear / Polynomial / Mixed
   SignatureVector           Evaluate expression on {0,1}^n inputs
@@ -153,19 +156,23 @@ lib/core/                Core simplification pipeline (42 source files)
   MixedProductRewriter     Expand bitwise products into linear sums
   TemplateDecomposer       Bounded template matching for mixed expressions
   ProductIdentityRecoverer Recover product-of-sums identities
-  SemilinearNormalizer     Decompose into weighted bitwise atoms
-  BitPartitioner           Split constant-masked atoms by bit position
+  SemilinearNormalizer     Decompose into weighted bitwise atoms (XOR/OR/NOT-AND lowering)
+  SemilinearSignature      Per-bit signature evaluation and linear shortcut detection
+  StructureRecovery        XOR recovery, mask elimination, term coalescing
+  TermRefiner              Dead-bit mask reduction, same-coefficient merge
+  BitPartitioner           Group bit positions by semantic profile
+  MaskedAtomReconstructor  Reassemble with OR-rewrite for disjoint masks
 
 lib/llvm/                LLVM pass plugin (CobraPass, MBADetector, IRReconstructor)
 lib/verify/              Z3-based equivalence verification
 include/cobra/           Public headers
 tools/cobra-cli/         CLI frontend and expression parser
-test/                    965 tests across 54 test files (unit + integration + dataset benchmarks)
+test/                    1015 tests across 55 test files (unit + integration + dataset benchmarks)
 ```
 
 ## Testing
 
-CoBRA has 965 tests covering unit, integration, and dataset benchmarks:
+CoBRA has 1015 tests covering unit, integration, and dataset benchmarks:
 
 ```bash
 # Run all tests
