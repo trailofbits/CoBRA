@@ -23,15 +23,18 @@ TEST(NormalizerTest, WeightedAtom) {
 }
 
 TEST(NormalizerTest, TwoAtoms) {
+    // (x & 0xFF) + (y | 0x80)
+    // OR lowering: y | 0x80 → y + 0x80 - (y & 0x80)
+    // Result: constant=0x80, atoms: x&0xFF, y, y&0x80
     auto e = Expr::Add(
         Expr::BitwiseAnd(Expr::Variable(0), Expr::Constant(0xFF)),
         Expr::BitwiseOr(Expr::Variable(1), Expr::Constant(0x80))
     );
     auto ir = NormalizeToSemilinear(*e, { "x", "y" }, 64);
     ASSERT_TRUE(ir.has_value());
-    EXPECT_EQ(ir.value().constant, 0u);
-    EXPECT_EQ(ir.value().terms.size(), 2u);
-    EXPECT_EQ(ir.value().atom_table.size(), 2u);
+    EXPECT_EQ(ir.value().constant, 0x80u);
+    EXPECT_EQ(ir.value().terms.size(), 3u);
+    EXPECT_EQ(ir.value().atom_table.size(), 3u);
 }
 
 TEST(NormalizerTest, ConstantTerm) {
@@ -46,13 +49,15 @@ TEST(NormalizerTest, ConstantTerm) {
 
 TEST(NormalizerTest, SubtractionAsAddNeg) {
     // (x & 0xFF) - (y | 0x80)
+    // OR lowering on -(y | 0x80): -y - 0x80 + (y & 0x80)
+    // Result: constant=-0x80, atoms: x&0xFF(+1), y(-1), y&0x80(+1)
     auto e = Expr::Add(
         Expr::BitwiseAnd(Expr::Variable(0), Expr::Constant(0xFF)),
         Expr::Negate(Expr::BitwiseOr(Expr::Variable(1), Expr::Constant(0x80)))
     );
     auto ir = NormalizeToSemilinear(*e, { "x", "y" }, 64);
     ASSERT_TRUE(ir.has_value());
-    EXPECT_EQ(ir.value().terms.size(), 2u);
+    EXPECT_EQ(ir.value().terms.size(), 3u);
     uint64_t neg_one = UINT64_MAX;
     bool found_neg   = false;
     for (const auto &t : ir.value().terms) {
@@ -76,6 +81,8 @@ TEST(NormalizerTest, DuplicateAtomsMerged) {
 
 TEST(NormalizerTest, Distribution) {
     // 3 * ((x & 0xFF) + (y | 0x80))
+    // OR lowering: y|0x80 → y + 0x80 - (y&0x80), then *3 distributes
+    // Result: constant=3*0x80, atoms: x&0xFF(3), y(3), y&0x80(-3)
     auto e = Expr::Mul(
         Expr::Constant(3),
         Expr::Add(
@@ -85,8 +92,8 @@ TEST(NormalizerTest, Distribution) {
     );
     auto ir = NormalizeToSemilinear(*e, { "x", "y" }, 64);
     ASSERT_TRUE(ir.has_value());
-    EXPECT_EQ(ir.value().terms.size(), 2u);
-    for (const auto &t : ir.value().terms) { EXPECT_EQ(t.coeff, 3u); }
+    EXPECT_EQ(ir.value().constant, 3u * 0x80u);
+    EXPECT_EQ(ir.value().terms.size(), 3u);
 }
 
 TEST(NormalizerTest, ConstantOnlyBitwiseFolds) {
@@ -237,6 +244,90 @@ TEST(NormalizerTest, ShrNestedUnderBitwiseConstant) {
     uint64_t expected = ~uint64_t(0xF);
     EXPECT_EQ(ir.value().constant, expected);
     EXPECT_EQ(ir.value().terms.size(), 1u);
+}
+
+// --- XOR/OR constant lowering tests ---
+
+TEST(NormalizerTest, XorConstantLowering) {
+    // x ^ 0x10 → x + 0x10 - 2*(x & 0x10)
+    auto e  = Expr::BitwiseXor(Expr::Variable(0), Expr::Constant(0x10));
+    auto ir = NormalizeToSemilinear(*e, { "x" }, 64);
+    ASSERT_TRUE(ir.has_value());
+    EXPECT_EQ(ir.value().constant, 0x10u);
+    // Two atoms: x (coeff 1) and x&0x10 (coeff -2)
+    EXPECT_EQ(ir.value().terms.size(), 2u);
+}
+
+TEST(NormalizerTest, OrConstantLowering) {
+    // x | 0x80 → x + 0x80 - (x & 0x80)
+    auto e  = Expr::BitwiseOr(Expr::Variable(0), Expr::Constant(0x80));
+    auto ir = NormalizeToSemilinear(*e, { "x" }, 64);
+    ASSERT_TRUE(ir.has_value());
+    EXPECT_EQ(ir.value().constant, 0x80u);
+    EXPECT_EQ(ir.value().terms.size(), 2u);
+}
+
+TEST(NormalizerTest, XorConstantCancellation) {
+    // Issue #8: (x ^ 0x10) + 2*(x & 0x10) → x + 0x10
+    // XOR lowering: x + 0x10 - 2*(x&0x10) + 2*(x&0x10) → x + 0x10
+    auto e = Expr::Add(
+        Expr::BitwiseXor(Expr::Variable(0), Expr::Constant(0x10)),
+        Expr::Mul(Expr::Constant(2), Expr::BitwiseAnd(Expr::Variable(0), Expr::Constant(0x10)))
+    );
+    auto ir = NormalizeToSemilinear(*e, { "x" }, 64);
+    ASSERT_TRUE(ir.has_value());
+    EXPECT_EQ(ir.value().constant, 0x10u);
+    // x&0x10 coefficients cancel: -2 + 2 = 0, only bare x remains
+    EXPECT_EQ(ir.value().terms.size(), 1u);
+    EXPECT_EQ(ir.value().terms[0].coeff, 1u);
+}
+
+TEST(NormalizerTest, OrConstantCancellation) {
+    // (x | 0x10) + (x & 0x10) → x + 0x10
+    // OR lowering: x + 0x10 - (x&0x10) + (x&0x10) → x + 0x10
+    auto e = Expr::Add(
+        Expr::BitwiseOr(Expr::Variable(0), Expr::Constant(0x10)),
+        Expr::BitwiseAnd(Expr::Variable(0), Expr::Constant(0x10))
+    );
+    auto ir = NormalizeToSemilinear(*e, { "x" }, 64);
+    ASSERT_TRUE(ir.has_value());
+    EXPECT_EQ(ir.value().constant, 0x10u);
+    EXPECT_EQ(ir.value().terms.size(), 1u);
+    EXPECT_EQ(ir.value().terms[0].coeff, 1u);
+}
+
+TEST(NormalizerTest, XorConstantOnLeft) {
+    // 0x10 ^ x → same as x ^ 0x10 (constant on left side)
+    auto e  = Expr::BitwiseXor(Expr::Constant(0x10), Expr::Variable(0));
+    auto ir = NormalizeToSemilinear(*e, { "x" }, 64);
+    ASSERT_TRUE(ir.has_value());
+    EXPECT_EQ(ir.value().constant, 0x10u);
+    EXPECT_EQ(ir.value().terms.size(), 2u);
+}
+
+TEST(NormalizerTest, XorNoConstantNotLowered) {
+    // x ^ y (no constants) should remain as a single atom
+    auto e  = Expr::BitwiseXor(Expr::Variable(0), Expr::Variable(1));
+    auto ir = NormalizeToSemilinear(*e, { "x", "y" }, 64);
+    ASSERT_TRUE(ir.has_value());
+    EXPECT_EQ(ir.value().constant, 0u);
+    EXPECT_EQ(ir.value().terms.size(), 1u);
+    EXPECT_EQ(ir.value().atom_table.size(), 1u);
+}
+
+TEST(NormalizerTest, AndOrCancellation) {
+    // (x & 0xFF) + (x | 0xFF) = x + 0xFF
+    // OR lowering: x + 0xFF - (x & 0xFF), then + (x & 0xFF) cancels
+    auto e = Expr::Add(
+        Expr::BitwiseAnd(Expr::Variable(0), Expr::Constant(0xFF)),
+        Expr::BitwiseOr(Expr::Variable(0), Expr::Constant(0xFF))
+    );
+    auto ir = NormalizeToSemilinear(*e, { "x" }, 64);
+    ASSERT_TRUE(ir.has_value());
+    EXPECT_EQ(ir.value().constant, 0xFFu);
+    // x&0xFF cancels (1 + -1 = 0), only bare x remains
+    EXPECT_EQ(ir.value().terms.size(), 1u);
+    EXPECT_EQ(ir.value().terms[0].coeff, 1u);
 }
 
 TEST(SemilinearNormalizerTest, StructuralHashDedup) {

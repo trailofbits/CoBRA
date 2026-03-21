@@ -66,4 +66,32 @@ namespace cobra {
         const Expr &atom, const std::vector< GlobalVarIdx > &support, uint32_t bitwidth
     );
 
+    /// Structural hash for Expr trees (stable basis grouping).
+    uint64_t StructuralHash(const Expr &expr);
+
+    /// Decomposition of an atom into (basis_expr & constant_mask) form.
+    struct Decomposed
+    {
+        bool valid          = false;
+        const Expr *basis   = nullptr;
+        uint64_t mask       = 0;
+        uint64_t basis_hash = 0;
+    };
+
+    /// Decompose an atom into (basis_expr & constant_mask) form.
+    /// Returns invalid for opaque atoms that don't fit this pattern.
+    Decomposed DecomposeAtom(const AtomInfo &info, uint64_t modmask);
+
+    /// Collect variable indices from an expression tree.
+    void CollectVarsFromExpr(const Expr &expr, std::vector< GlobalVarIdx > &out);
+
+    /// Create a new atom entry in the IR and return its ID.
+    AtomId
+    CreateAtom(SemilinearIR &ir, std::unique_ptr< Expr > subtree, OperatorFamily provenance);
+
+    /// Remove unreferenced atoms from the atom table and remap term IDs.
+    /// Call after rewrite passes and before ComputePartitions to avoid
+    /// paying partitioning cost for dead intermediate atoms.
+    void CompactAtomTable(SemilinearIR &ir);
+
 } // namespace cobra

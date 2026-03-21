@@ -19,6 +19,7 @@ target_sources(cobra-core PRIVATE
     ExprUtils.cpp
     BitPartitioner.cpp
     MaskedAtomReconstructor.cpp
+    TermRefiner.cpp
     SelfCheck.cpp
     CoefficientSplitter.cpp
     ArithmeticLowering.cpp
@@ -42,6 +43,8 @@ target_sources(cobra-core PRIVATE
     GhostBasis.cpp
     GhostResidualSolver.cpp
     WeightedPolyFit.cpp
+    SemilinearSignature.cpp
+    StructureRecovery.cpp
 )
 
 target_include_directories(cobra-core PUBLIC

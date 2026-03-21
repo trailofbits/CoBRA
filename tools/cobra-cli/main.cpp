@@ -8,8 +8,11 @@
 #include "cobra/core/SelfCheck.h"
 #include "cobra/core/SemilinearIR.h"
 #include "cobra/core/SemilinearNormalizer.h"
-#include "cobra/core/SignatureChecker.h"
+#include "cobra/core/SemilinearSignature.h"
+#include "cobra/core/SignatureChecker.h" // FullWidthCheck
 #include "cobra/core/Simplifier.h"
+#include "cobra/core/StructureRecovery.h"
+#include "cobra/core/TermRefiner.h"
 #include "cobra/core/Trace.h"
 #include <cstdint>
 #include <utility>
@@ -308,11 +311,6 @@ namespace {
                       << ir.atom_table.size() << " atoms\n";
         }
 
-        if (verbose) { std::cerr << "Computing bit partitions...\n"; }
-        auto partitions = cobra::ComputePartitions(ir);
-
-        if (verbose) { std::cerr << "Bit partitions: " << partitions.size() << "\n"; }
-
         // Self-check uses plain reconstruction (no OR-rewrite)
         // to ensure structural round-trip fidelity.
         auto plain = cobra::ReconstructMaskedAtoms(ir, {});
@@ -326,8 +324,54 @@ namespace {
 
         if (verbose) {
             std::cerr << "Running self-check... passed\n";
-            std::cerr << "Reconstructing with OR-rewrite...\n";
+            std::cerr << "Recovering structure...\n";
         }
+
+        cobra::RecoverStructure(ir);
+
+        if (verbose) {
+            std::cerr << "After structure recovery: " << ir.terms.size() << " terms\n";
+            std::cerr << "Refining terms...\n";
+        }
+
+        cobra::RefineTerms(ir);
+
+        if (verbose) {
+            std::cerr << "After refinement: " << ir.terms.size() << " terms\n";
+            std::cerr << "Coalescing terms...\n";
+        }
+
+        cobra::CoalesceTerms(ir);
+
+        if (verbose) { std::cerr << "After coalescing: " << ir.terms.size() << " terms\n"; }
+
+        // Post-rewrite probe check: evaluate original and reconstructed
+        // expressions at random full-width inputs to catch rewrite bugs.
+        // Works without Z3; uses 16 samples for high confidence.
+        {
+            auto probe_expr = cobra::ReconstructMaskedAtoms(ir, {});
+            auto num_vars   = static_cast< uint32_t >(vars.size());
+            auto probe =
+                cobra::FullWidthCheck(original_ast, num_vars, *probe_expr, {}, bitwidth, 16);
+            COBRA_TRACE("CLI", "PostRewriteProbe: passed={}", probe.passed);
+            if (!probe.passed) {
+                if (verbose) { std::cerr << "Running post-rewrite probe check... failed\n"; }
+                std::cerr << "Error: post-rewrite equivalence probe failed\n";
+                return 1;
+            }
+            if (verbose) { std::cerr << "Running post-rewrite probe check... passed\n"; }
+        }
+
+        // Remove dead intermediate atoms before partitioning.
+        cobra::CompactAtomTable(ir);
+
+        if (verbose) { std::cerr << "Computing bit partitions...\n"; }
+
+        auto partitions = cobra::ComputePartitions(ir);
+
+        if (verbose) { std::cerr << "Bit partitions: " << partitions.size() << "\n"; }
+
+        if (verbose) { std::cerr << "Reconstructing with OR-rewrite...\n"; }
 
         // Final reconstruction uses partitions for OR-rewrite.
         auto simplified = cobra::ReconstructMaskedAtoms(ir, partitions);
@@ -445,6 +489,34 @@ int main(int argc, char *argv[]) {
             return RunLinearPath(*folded, vars, bitwidth, max_vars, verbose, verify);
 
         case cobra::SemanticClass::kSemilinear: {
+            // Linear shortcut: if all semi-linear signature rows are
+            // identical, the expression is actually linear.
+            if (vars.size() <= 12
+                && cobra::IsLinearShortcut(
+                    *folded, static_cast< uint32_t >(vars.size()), bitwidth
+                ))
+            {
+                if (verbose) {
+                    std::cerr << "Linear shortcut: expression is linear in disguise\n";
+                }
+                // Semilinear-classified: apply semilinear verification contract.
+                bool shortcut_verify = verify;
+#ifdef COBRA_HAS_Z3
+                shortcut_verify = true;
+#endif
+                const int kRc =
+                    RunLinearPath(*folded, vars, bitwidth, max_vars, verbose, shortcut_verify);
+                if (kRc != 0) { return kRc; }
+#ifndef COBRA_HAS_Z3
+                if (strict) {
+                    std::cerr << "Error: --strict requires Z3 for semilinear verification\n";
+                    return 1;
+                }
+                std::cerr << "Warning: semilinear result unverified (Z3 not available)\n";
+#endif
+                return 0;
+            }
+
             const int kRc =
                 RunSemilinearPath(*folded, vars, bitwidth, max_vars, verbose, strict);
             if (kRc != 0) {

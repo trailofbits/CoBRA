@@ -51,6 +51,9 @@ cobra_add_test(test_decomposition_engine core/test_decomposition_engine.cpp)
 cobra_add_test(test_ghost_basis core/test_ghost_basis.cpp)
 cobra_add_test(test_ghost_residual_solver core/test_ghost_residual_solver.cpp)
 cobra_add_test(test_weighted_poly_fit core/test_weighted_poly_fit.cpp)
+cobra_add_test(test_term_refiner core/test_term_refiner.cpp)
+cobra_add_test(test_semilinear_signature core/test_semilinear_signature.cpp)
+cobra_add_test(test_structure_recovery core/test_structure_recovery.cpp)
 
 # ProductIdentityRecoverer diagnostic against real datasets.
 # Not registered with gtest_discover_tests — run manually:

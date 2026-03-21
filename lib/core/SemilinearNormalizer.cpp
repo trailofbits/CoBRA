@@ -173,20 +173,6 @@ namespace cobra {
             return OperatorFamily::kMixed;
         }
 
-        uint64_t ComputeStructuralHash(const Expr &expr) {
-            auto h = static_cast< uint64_t >(expr.kind);
-            if (expr.kind == Expr::Kind::kConstant || expr.kind == Expr::Kind::kShr) {
-                h ^= expr.constant_val * 0x9E3779B97F4A7C15ULL;
-            } else if (expr.kind == Expr::Kind::kVariable) {
-                h ^= (expr.var_index + 1) * 0x517CC1B727220A95ULL;
-            }
-            for (const auto &child : expr.children) {
-                const uint64_t ch  = ComputeStructuralHash(*child);
-                h                 ^= ch + 0x9E3779B97F4A7C15ULL + (h << 6) + (h >> 2);
-            }
-            return h;
-        }
-
         struct CollectCtx
         {
             uint32_t bitwidth{};
@@ -209,7 +195,7 @@ namespace cobra {
             std::sort(support.begin(), support.end());
             support.erase(std::unique(support.begin(), support.end()), support.end());
 
-            const uint64_t kStructHash = ComputeStructuralHash(expr);
+            const uint64_t kStructHash = StructuralHash(expr);
 
             // Fast path: if structural hash matches an existing atom with the same
             // support, structurally identical subtrees are semantically identical —
@@ -251,6 +237,38 @@ namespace cobra {
         CollectResult CollectTerms(CollectCtx &ctx, const Expr &expr, uint64_t coeff) {
             coeff &= ctx.mask;
             if (coeff == 0) { return { .constant = 0, .terms = {} }; }
+
+            // Lower XOR/OR with a constant operand to AND-basis:
+            //   a ^ c  =  a + c - 2*(a & c)
+            //   a | c  =  a + c - (a & c)
+            if ((expr.kind == Expr::Kind::kXor || expr.kind == Expr::Kind::kOr)
+                && IsPurelyBitwise(expr) && HasVariable(expr))
+            {
+                const bool kLhsConst = !HasVariable(*expr.children[0]);
+                const bool kRhsConst = !HasVariable(*expr.children[1]);
+                if (kLhsConst || kRhsConst) {
+                    const auto &const_child = kLhsConst ? *expr.children[0] : *expr.children[1];
+                    const auto &var_child   = kLhsConst ? *expr.children[1] : *expr.children[0];
+
+                    const uint64_t kC = EvalConstantBitwise(const_child, ctx.mask);
+
+                    // +a with current coefficient
+                    auto var_result = CollectTerms(ctx, var_child, coeff);
+
+                    // +c * coeff
+                    var_result.constant = (var_result.constant + (coeff * kC)) & ctx.mask;
+
+                    // -(n * coeff) * (a & c), where n=2 for XOR, n=1 for OR
+                    auto and_expr  = Expr::BitwiseAnd(CloneExpr(var_child), Expr::Constant(kC));
+                    AtomId and_aid = RegisterAtom(ctx, *and_expr);
+                    uint64_t and_coeff = (expr.kind == Expr::Kind::kXor)
+                        ? ModNeg((2 * coeff) & ctx.mask, ctx.bitwidth)
+                        : ModNeg(coeff, ctx.bitwidth);
+                    var_result.terms.push_back({ .coeff = and_coeff, .atom_id = and_aid });
+
+                    return var_result;
+                }
+            }
 
             // Purely bitwise with variables: treat as atom
             if (IsPurelyBitwise(expr) && HasVariable(expr)) {

@@ -6,6 +6,9 @@
 #include "cobra/core/MaskedAtomReconstructor.h"
 #include "cobra/core/SelfCheck.h"
 #include "cobra/core/SemilinearNormalizer.h"
+#include "cobra/core/SignatureChecker.h"
+#include "cobra/core/StructureRecovery.h"
+#include "cobra/core/TermRefiner.h"
 #include <gtest/gtest.h>
 
 #ifdef COBRA_HAS_Z3
@@ -33,6 +36,22 @@ static std::unique_ptr< Expr > run_semilinear(
         EXPECT_TRUE(check.passed) << "Self-check failed: " << check.mismatch_detail;
     }
 
+    RecoverStructure(ir);
+    RefineTerms(ir);
+    CoalesceTerms(ir);
+
+    // Post-rewrite probe check: verify equivalence at random full-width inputs.
+    {
+        auto probe_expr = ReconstructMaskedAtoms(ir, {});
+        EXPECT_NE(probe_expr, nullptr) << "Post-rewrite reconstruction failed";
+        if (probe_expr) {
+            auto nv    = static_cast< uint32_t >(vars.size());
+            auto probe = FullWidthCheck(input, nv, *probe_expr, {}, bitwidth, 16);
+            EXPECT_TRUE(probe.passed) << "Post-rewrite probe check failed";
+        }
+    }
+
+    CompactAtomTable(ir);
     auto partitions = ComputePartitions(ir);
     auto result     = ReconstructMaskedAtoms(ir, partitions);
     return result;
@@ -78,9 +97,10 @@ TEST(SemilinearIntegration, SpuriousVarOnBoolean) {
 #endif
 }
 
-// Test 3: linear-in-disguise
+// Test 3: linear-in-disguise — now simplifies via OR lowering
 TEST(SemilinearIntegration, LinearInDisguise) {
-    // (x & 0xFF) + (x | 0xFF)
+    // (x & 0xFF) + (x | 0xFF) = x + 0xFF
+    // OR lowering cancels the (x & 0xFF) terms.
     auto input = Expr::Add(
         Expr::BitwiseAnd(Expr::Variable(0), Expr::Constant(0xFF)),
         Expr::BitwiseOr(Expr::Variable(0), Expr::Constant(0xFF))
@@ -90,8 +110,11 @@ TEST(SemilinearIntegration, LinearInDisguise) {
     auto result = run_semilinear(*input, { "x" });
     ASSERT_NE(result, nullptr);
 
-    // v1: not expected to simplify to x + 0xFF
-    // but result must be equivalent
+    // After OR lowering: (x & 0xFF) + x + 0xFF - (x & 0xFF) = x + 0xFF
+    auto rendered = Render(*result, { "x" }, 64);
+    EXPECT_EQ(rendered.find("&"), std::string::npos)
+        << "Expected no AND in simplified output, got: " << rendered;
+
 #ifdef COBRA_HAS_Z3
     auto verify = Z3VerifyExprs(*input, *result, { "x" }, 64);
     EXPECT_TRUE(verify.equivalent);
@@ -145,6 +168,55 @@ TEST(SemilinearIntegration, CoefficientPreventsOR) {
 #endif
 }
 
+// Test: Issue #8 — XOR constant cancellation
+TEST(SemilinearIntegration, XorConstantCancellation) {
+    // (x ^ 0x10) + 2*(x & 0x10) = x + 0x10
+    auto input = Expr::Add(
+        Expr::BitwiseXor(Expr::Variable(0), Expr::Constant(0x10)),
+        Expr::Mul(Expr::Constant(2), Expr::BitwiseAnd(Expr::Variable(0), Expr::Constant(0x10)))
+    );
+    EXPECT_EQ(ClassifyStructural(*input).semantic, SemanticClass::kSemilinear);
+
+    auto result = run_semilinear(*input, { "x" });
+    ASSERT_NE(result, nullptr);
+
+    // XOR lowering enables full cancellation: x + 16
+    auto rendered = Render(*result, { "x" }, 64);
+    EXPECT_EQ(rendered.find("^"), std::string::npos)
+        << "Expected no XOR in simplified output, got: " << rendered;
+    EXPECT_EQ(rendered.find("&"), std::string::npos)
+        << "Expected no AND in simplified output, got: " << rendered;
+
+#ifdef COBRA_HAS_Z3
+    auto verify = Z3VerifyExprs(*input, *result, { "x" }, 64);
+    EXPECT_TRUE(verify.equivalent) << "Counterexample: " << verify.counterexample;
+#endif
+}
+
+// Test: OR constant cancellation
+TEST(SemilinearIntegration, OrConstantCancellation) {
+    // (x | 0x10) + (x & 0x10) = x + 0x10
+    auto input = Expr::Add(
+        Expr::BitwiseOr(Expr::Variable(0), Expr::Constant(0x10)),
+        Expr::BitwiseAnd(Expr::Variable(0), Expr::Constant(0x10))
+    );
+    EXPECT_EQ(ClassifyStructural(*input).semantic, SemanticClass::kSemilinear);
+
+    auto result = run_semilinear(*input, { "x" });
+    ASSERT_NE(result, nullptr);
+
+    auto rendered = Render(*result, { "x" }, 64);
+    EXPECT_EQ(rendered.find("|"), std::string::npos)
+        << "Expected no OR in simplified output, got: " << rendered;
+    EXPECT_EQ(rendered.find("&"), std::string::npos)
+        << "Expected no AND in simplified output, got: " << rendered;
+
+#ifdef COBRA_HAS_Z3
+    auto verify = Z3VerifyExprs(*input, *result, { "x" }, 64);
+    EXPECT_TRUE(verify.equivalent) << "Counterexample: " << verify.counterexample;
+#endif
+}
+
 TEST(SemilinearIntegration, ShrAtomRoundTrip) {
     auto input = Expr::LogicalShr(Expr::BitwiseAnd(Expr::Variable(0), Expr::Constant(0xFF)), 4);
     EXPECT_EQ(ClassifyStructural(*input).semantic, SemanticClass::kSemilinear);
@@ -173,6 +245,103 @@ TEST(SemilinearIntegration, ShrWithCoeffAndAdd) {
 
 #ifdef COBRA_HAS_Z3
     auto verify = Z3VerifyExprs(*input, *result, { "x", "y" }, 64);
+    EXPECT_TRUE(verify.equivalent) << "Counterexample: " << verify.counterexample;
+#endif
+}
+
+// Phase 3: XOR recovery — complement pair with negated coefficients
+TEST(SemilinearIntegration, XorRecoveryZ3) {
+    // (-10)*(98 & x) + 10*(~98 & x) = 10*(98 ^ x) - 980
+    auto input = Expr::Add(
+        Expr::Mul(
+            Expr::Constant(static_cast< uint64_t >(-10LL)),
+            Expr::BitwiseAnd(Expr::Variable(0), Expr::Constant(98))
+        ),
+        Expr::Mul(
+            Expr::Constant(10), Expr::BitwiseAnd(Expr::Variable(0), Expr::Constant(~98ULL))
+        )
+    );
+
+    auto result = run_semilinear(*input, { "x" });
+    ASSERT_NE(result, nullptr);
+
+#ifdef COBRA_HAS_Z3
+    auto verify = Z3VerifyExprs(*input, *result, { "x" }, 64);
+    EXPECT_TRUE(verify.equivalent) << "Counterexample: " << verify.counterexample;
+#endif
+}
+
+// Phase 3: XOR recovery in 8-bit
+TEST(SemilinearIntegration, XorRecovery8bitZ3) {
+    // 1*(0x0F & x) + (-1)*(0xF0 & x) in 8-bit
+    auto input = Expr::Add(
+        Expr::BitwiseAnd(Expr::Variable(0), Expr::Constant(0x0F)),
+        Expr::Mul(
+            Expr::Constant(0xFF), // -1 in 8-bit
+            Expr::BitwiseAnd(Expr::Variable(0), Expr::Constant(0xF0))
+        )
+    );
+
+    auto result = run_semilinear(*input, { "x" }, 8);
+    ASSERT_NE(result, nullptr);
+
+#ifdef COBRA_HAS_Z3
+    auto verify = Z3VerifyExprs(*input, *result, { "x" }, 8);
+    EXPECT_TRUE(verify.equivalent) << "Counterexample: " << verify.counterexample;
+#endif
+}
+
+// Phase 3: mask elimination — complement pair with different coefficients
+TEST(SemilinearIntegration, MaskEliminationZ3) {
+    // 5*(0x0F & x) + 3*(0xF0 & x) in 8-bit
+    auto input = Expr::Add(
+        Expr::Mul(Expr::Constant(5), Expr::BitwiseAnd(Expr::Variable(0), Expr::Constant(0x0F))),
+        Expr::Mul(Expr::Constant(3), Expr::BitwiseAnd(Expr::Variable(0), Expr::Constant(0xF0)))
+    );
+
+    auto result = run_semilinear(*input, { "x" }, 8);
+    ASSERT_NE(result, nullptr);
+
+#ifdef COBRA_HAS_Z3
+    auto verify = Z3VerifyExprs(*input, *result, { "x" }, 8);
+    EXPECT_TRUE(verify.equivalent) << "Counterexample: " << verify.counterexample;
+#endif
+}
+
+// Phase 3: re-invocation merges same-coefficient partitions
+TEST(SemilinearIntegration, CoalesceTermsZ3) {
+    // 3*(0x55 & x) + 3*(0xAA & x) = 3*x in 8-bit
+    auto input = Expr::Add(
+        Expr::Mul(Expr::Constant(3), Expr::BitwiseAnd(Expr::Variable(0), Expr::Constant(0x55))),
+        Expr::Mul(Expr::Constant(3), Expr::BitwiseAnd(Expr::Variable(0), Expr::Constant(0xAA)))
+    );
+
+    auto result = run_semilinear(*input, { "x" }, 8);
+    ASSERT_NE(result, nullptr);
+
+#ifdef COBRA_HAS_Z3
+    auto verify = Z3VerifyExprs(*input, *result, { "x" }, 8);
+    EXPECT_TRUE(verify.equivalent) << "Counterexample: " << verify.counterexample;
+#endif
+}
+
+// Phase 3: two-variable XOR recovery
+TEST(SemilinearIntegration, XorRecoveryTwoVarZ3) {
+    // 7*((x&y) & 0x0F) + (-7)*((x&y) & 0xF0) in 8-bit
+    auto basis = Expr::BitwiseAnd(Expr::Variable(0), Expr::Variable(1));
+    auto input = Expr::Add(
+        Expr::Mul(Expr::Constant(7), Expr::BitwiseAnd(CloneExpr(*basis), Expr::Constant(0x0F))),
+        Expr::Mul(
+            Expr::Constant(0xF9), // -7 in 8-bit
+            Expr::BitwiseAnd(CloneExpr(*basis), Expr::Constant(0xF0))
+        )
+    );
+
+    auto result = run_semilinear(*input, { "x", "y" }, 8);
+    ASSERT_NE(result, nullptr);
+
+#ifdef COBRA_HAS_Z3
+    auto verify = Z3VerifyExprs(*input, *result, { "x", "y" }, 8);
     EXPECT_TRUE(verify.equivalent) << "Counterexample: " << verify.counterexample;
 #endif
 }
