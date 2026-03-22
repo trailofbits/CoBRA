@@ -11,6 +11,7 @@ namespace cobra {
     struct Z3VerifyResult
     {
         bool equivalent{};
+        bool timed_out{};
         std::string counterexample;
     };
 

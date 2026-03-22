@@ -3,7 +3,6 @@
 #include "cobra/core/Expr.h"
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/Simplifier.h"
-#include <algorithm>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <string>

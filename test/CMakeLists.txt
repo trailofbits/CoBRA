@@ -99,6 +99,21 @@ target_compile_definitions(test_dataset_benchmarks PRIVATE
     DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
 gtest_discover_tests(test_dataset_benchmarks)
 
+# Z3 formal verification of dataset results (manual, not auto-discovered).
+# Compares original MBA AST against simplified AST via Z3 bitvector solver.
+# Slow (~minutes per dataset) — run locally, not in CI:
+#   ./test/test_dataset_z3
+if(Z3_FOUND)
+    add_executable(test_dataset_z3 verify/test_dataset_z3.cpp
+                   ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+    target_link_libraries(test_dataset_z3 PRIVATE
+        cobra-core cobra-verify GTest::gtest_main)
+    target_include_directories(test_dataset_z3 PRIVATE
+        ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+    target_compile_definitions(test_dataset_z3 PRIVATE
+        DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+endif()
+
 # PLDIPoly diagnostic (manual, not auto-discovered)
 add_executable(test_pldi_poly_diagnostic verify/test_pldi_poly_diagnostic.cpp
                ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)

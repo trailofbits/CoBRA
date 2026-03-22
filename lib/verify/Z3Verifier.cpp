@@ -143,6 +143,7 @@ namespace cobra {
             result.counterexample = ss.str();
         } else {
             result.equivalent     = false;
+            result.timed_out      = true;
             result.counterexample = "Z3 returned unknown (possible timeout)";
         }
 
@@ -192,6 +193,7 @@ namespace cobra {
             result.counterexample = ss.str();
         } else {
             result.equivalent     = false;
+            result.timed_out      = true;
             result.counterexample = "Z3 returned unknown (possible timeout)";
         }
 
