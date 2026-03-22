@@ -104,9 +104,16 @@ namespace cobra {
             child = FoldConstantBitwise(std::move(child), bitwidth);
         }
 
-        // Arithmetic nodes: return after child recursion without
-        // applying bitwise folds to the node itself
-        if (IsArithmetic(expr->kind) || expr->kind == Expr::Kind::kShr) { return expr; }
+        // Arithmetic nodes: fold to constant if all children are constants,
+        // otherwise return after child recursion without bitwise folds.
+        // This ensures e.g. Neg(Constant(C)) → Constant(-C mod 2^bw) so that
+        // And(Neg(Constant(C)), Variable(x)) becomes purely bitwise.
+        if (IsArithmetic(expr->kind) || expr->kind == Expr::Kind::kShr) {
+            if (IsConstantSubtree(*expr)) {
+                return Expr::Constant(EvalConstantExpr(*expr, bitwidth));
+            }
+            return expr;
+        }
 
         // Constant-only bitwise subtree: evaluate to single constant
         if (IsBitwise(expr->kind) && IsConstantSubtree(*expr)) {

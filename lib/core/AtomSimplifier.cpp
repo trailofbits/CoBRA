@@ -65,6 +65,17 @@ namespace cobra {
             return true;
         }
 
+        /// An atom containing constants (e.g. x & 0xFF) is not safe for
+        /// boolean-truth-table-based complement recognition because two atoms
+        /// can have complementary truth tables on {0,1} inputs yet differ on
+        /// full-width inputs.
+        bool HasConstantOrShr(const Expr &e) {
+            if (e.kind == Expr::Kind::kConstant || e.kind == Expr::Kind::kShr) { return true; }
+            return std::ranges::any_of(e.children, [](const auto &c) {
+                return HasConstantOrShr(*c);
+            });
+        }
+
     } // namespace
 
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -173,6 +184,17 @@ namespace cobra {
                     if (ki.truth_table.empty() || kj.truth_table.empty()) { continue; }
                     if (ki.support != kj.support) { continue; }
                     if (ki.truth_table.size() != kj.truth_table.size()) { continue; }
+
+                    // Complement recognition is only safe for pure-variable
+                    // atoms. Atoms with constants can have complementary
+                    // boolean truth tables but diverge at full width.
+                    const auto &si = ir.atom_table[ir.terms[i].atom_id];
+                    const auto &sj = ir.atom_table[ir.terms[j].atom_id];
+                    if (HasConstantOrShr(*si.original_subtree)
+                        || HasConstantOrShr(*sj.original_subtree))
+                    {
+                        continue;
+                    }
 
                     bool complementary = true;
                     for (size_t k = 0; k < ki.truth_table.size(); ++k) {

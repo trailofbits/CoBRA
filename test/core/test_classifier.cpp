@@ -164,7 +164,9 @@ TEST(ClassifierTest, ShrOverArithmeticIsLinear) {
 TEST(FoldBitwiseTest, ShrConstantFolds) {
     auto e      = Expr::LogicalShr(Expr::Constant(8), 2);
     auto folded = FoldConstantBitwise(std::move(e), 64);
-    EXPECT_EQ(folded->kind, Expr::Kind::kShr);
+    // Constant arithmetic subtrees now fold to a single constant
+    EXPECT_EQ(folded->kind, Expr::Kind::kConstant);
+    EXPECT_EQ(folded->constant_val, 2);
 }
 
 TEST(FoldBitwiseTest, ShrDoesNotBreakBitwiseFold) {
