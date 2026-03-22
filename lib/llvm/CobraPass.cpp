@@ -18,6 +18,7 @@
 #else
     #include "llvm/Passes/PassPlugin.h"
 #endif
+#include "llvm/ADT/Statistic.h"
 #include "llvm/Support/Debug.h"
 
 #include <cstdint>
@@ -25,6 +26,11 @@
 #include <vector>
 
 #define DEBUG_TYPE "cobra"
+
+STATISTIC(NumCandidates, "Number of MBA candidates found");
+STATISTIC(NumSimplified, "Number of MBA expressions simplified");
+STATISTIC(NumSkippedCost, "Number of candidates skipped (cost gate)");
+STATISTIC(NumSkippedUnsupported, "Number of candidates skipped (unsupported)");
 
 namespace cobra {
 
@@ -34,6 +40,8 @@ namespace cobra {
 
         for (auto &bb : f) {
             auto candidates = DetectMbaCandidates(bb, min_ast_size_, max_vars_);
+
+            NumCandidates += candidates.size();
 
             for (auto &cand : candidates) {
                 Options opts{ .bitwidth   = cand.bitwidth,
@@ -47,6 +55,7 @@ namespace cobra {
 
                 auto result = Simplify(cand.sig, cand.var_names, ast, opts);
                 if (!result.has_value()) {
+                    ++NumSkippedUnsupported;
                     LLVM_DEBUG(
                         llvm::dbgs()
                         << "CoBRA: skipping candidate: " << result.error().message << "\n"
@@ -55,6 +64,7 @@ namespace cobra {
                 }
 
                 if (result.value().kind != SimplifyOutcome::Kind::kSimplified) {
+                    ++NumSkippedUnsupported;
                     LLVM_DEBUG(
                         llvm::dbgs()
                         << "CoBRA: not simplified: " << result.value().diag.reason << "\n"
@@ -70,6 +80,7 @@ namespace cobra {
                     auto original_cost   = ComputeCost(*cand.expr);
                     auto simplified_cost = ComputeCost(*result.value().expr);
                     if (!IsBetter(simplified_cost.cost, original_cost.cost)) {
+                        ++NumSkippedCost;
                         LLVM_DEBUG(
                             llvm::dbgs() << "CoBRA: skipping — simplified form is not smaller\n"
                         );
@@ -98,6 +109,7 @@ namespace cobra {
                 auto *new_val = ReconstructIr(*result.value().expr, cand, builder, var_map);
 
                 cand.root->replaceAllUsesWith(new_val);
+                ++NumSimplified;
                 changed = true;
 
                 LLVM_DEBUG(
