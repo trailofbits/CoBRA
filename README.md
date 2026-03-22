@@ -4,7 +4,7 @@
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)](https://en.cppreference.com/w/cpp/23)
-[![Tests](https://img.shields.io/badge/tests-1017-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-1022-brightgreen.svg)](#testing)
 
 CoBRA deobfuscates expressions that interleave arithmetic (`+`, `-`, `*`) with bitwise (`&`, `|`, `^`, `~`) and shift (`<<`, `>>`) operators — a technique commonly used in software obfuscation.
 
@@ -19,7 +19,7 @@ $ cobra-cli --mba "((a^b)&c) | ((a&b)^c)"
 c ^ a & b
 
 $ cobra-cli --mba "(x&0xFF)+(x&0xFF00)" --bitwidth 16
-x & 255 | x & -256
+x
 
 $ cobra-cli --mba "(x ^ 0x10) + 2 * (x & 0x10)"
 16 + x
@@ -36,7 +36,7 @@ $ cobra-cli --mba "~x"
 ~x
 
 $ cobra-cli --mba "(x^y)*(x&y) + 3*(x|y)"
-(x & y) * (x ^ y) + ~2 * -(x | y)
+(x ^ y) * (x & y) + 3 * (x | y)
 
 $ cobra-cli --mba '-357*(x&~y)*(x&y)+102*(x&~y)*(x&~y)+374*(x&~y)*~(x^y)
   -306*(x&~y)*~(x|y)-17*(x&~y)*~(x|~y)-105*~(x|~y)*(x&y)+30*~(x|~y)*(x&~y)
@@ -167,12 +167,12 @@ lib/llvm/                LLVM pass plugin (CobraPass, MBADetector, IRReconstruct
 lib/verify/              Z3-based equivalence verification
 include/cobra/           Public headers
 tools/cobra-cli/         CLI frontend and expression parser
-test/                    1017 tests across 55 test files (unit + integration + dataset benchmarks)
+test/                    1022 tests across 55 test files (unit + integration + dataset benchmarks)
 ```
 
 ## Testing
 
-CoBRA has 1017 tests covering unit, integration, and dataset benchmarks:
+CoBRA has 1022 tests covering unit, integration, and dataset benchmarks:
 
 ```bash
 # Run all tests
