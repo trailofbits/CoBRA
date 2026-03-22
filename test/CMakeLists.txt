@@ -155,6 +155,15 @@ target_include_directories(test_semilinear_selfcheck_diagnostic PRIVATE
 target_compile_definitions(test_semilinear_selfcheck_diagnostic PRIVATE
     DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
 
+# OSES unsupported-family diagnostic (manual, not auto-discovered)
+add_executable(test_oses_diagnostic verify/test_oses_diagnostic.cpp
+               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(test_oses_diagnostic PRIVATE cobra-core GTest::gtest_main)
+target_include_directories(test_oses_diagnostic PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+target_compile_definitions(test_oses_diagnostic PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
 # QSynth trace dive (manual, not auto-discovered)
 add_executable(test_qsynth_trace_dive verify/test_qsynth_trace_dive.cpp
                ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
@@ -163,6 +172,11 @@ target_include_directories(test_qsynth_trace_dive PRIVATE
     ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
 target_compile_definitions(test_qsynth_trace_dive PRIVATE
     DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
+# LLVM pass FileCheck tests (only when pass is built)
+if(COBRA_BUILD_LLVM_PASS)
+    add_subdirectory(llvm)
+endif()
 
 # ExprParser test needs access to tools/cobra-cli headers
 add_executable(test_expr_parser core/test_expr_parser.cpp

@@ -1,6 +1,9 @@
 #pragma once
 
+#include "cobra/core/Expr.h"
+#include "cobra/core/Simplifier.h"
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -16,6 +19,8 @@ namespace cobra {
         std::vector< std::string > var_names;
         std::vector< uint64_t > sig;
         uint32_t bitwidth;
+        std::unique_ptr< Expr > expr;
+        Evaluator evaluator;
     };
 
     // Find MBA candidates in a basic block.

@@ -1,10 +1,14 @@
 ; RUN: opt -load-pass-plugin=%cobra_pass -passes=cobra-simplify -S %s | FileCheck %s
 
-; Test: (x ^ y) + 2 * (x & y) should simplify to x + y
-; CHECK-LABEL: @test_xor_and
+; Test: dead instructions from replaced MBA trees are erased.
+; After simplifying (x ^ y) + 2*(x & y) → x + y, the intermediate
+; xor, and, mul instructions should be removed.
+; CHECK-LABEL: @test_dce
+; CHECK-NOT: xor
+; CHECK-NOT: mul
 ; CHECK: %cobra.add = add i64 %x, %y
 ; CHECK-NEXT: ret i64 %cobra.add
-define i64 @test_xor_and(i64 %x, i64 %y) {
+define i64 @test_dce(i64 %x, i64 %y) {
 entry:
   %xor = xor i64 %x, %y
   %and = and i64 %x, %y

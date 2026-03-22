@@ -1,5 +1,7 @@
 #include "MBADetector.h"
 #include "cobra/core/BitWidth.h"
+#include "cobra/core/Expr.h"
+#include "cobra/core/Simplifier.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"
@@ -12,6 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <queue>
 #include <string>
 #include <utility>
@@ -29,6 +32,7 @@ namespace cobra {
                 case llvm::Instruction::And:
                 case llvm::Instruction::Or:
                 case llvm::Instruction::Xor:
+                case llvm::Instruction::LShr:
                 case llvm::Instruction::ZExt:
                 case llvm::Instruction::SExt:
                     return true;
@@ -52,6 +56,17 @@ namespace cobra {
 
                 auto *inst = llvm::dyn_cast< llvm::Instruction >(v);
                 if ((inst != nullptr) && IsMbaOpcode(inst->getOpcode())) {
+                    // LShr with variable shift amount is unsupported —
+                    // treat the whole instruction as a leaf.
+                    if (inst->getOpcode() == llvm::Instruction::LShr
+                        && !llvm::isa< llvm::ConstantInt >(inst->getOperand(1)))
+                    {
+                        if (std::find(leaves.begin(), leaves.end(), v) == leaves.end()) {
+                            leaves.push_back(v);
+                        }
+                        continue;
+                    }
+
                     tree_insts.push_back(inst);
                     for (auto &op : inst->operands()) { work.push(op.get()); }
                 } else {
@@ -120,6 +135,9 @@ namespace cobra {
                     case llvm::Instruction::Xor:
                         result = (lhs ^ rhs) & mask;
                         break;
+                    case llvm::Instruction::LShr:
+                        result = (lhs >> rhs) & mask;
+                        break;
                     default:
                         result = 0;
                         break;
@@ -135,8 +153,6 @@ namespace cobra {
         bool HasPolynomialMul(
             llvm::Instruction *root, const llvm::DenseSet< llvm::Value * > &visited_tree
         ) {
-            // Check if any Mul instruction has both operands depending on variables.
-            // Uses a DFS that tracks whether each value is variable-dependent.
             llvm::DenseMap< llvm::Value *, bool > depends_on_var;
 
             std::function< bool(llvm::Value *) > check = [&](llvm::Value *v) -> bool {
@@ -150,7 +166,7 @@ namespace cobra {
 
                 auto *inst = llvm::dyn_cast< llvm::Instruction >(v);
                 if (!inst || !visited_tree.contains(inst)) {
-                    depends_on_var[v] = true; // leaf = variable
+                    depends_on_var[v] = true;
                     return true;
                 }
 
@@ -169,18 +185,15 @@ namespace cobra {
                 depends_on_var[v] = dep;
 
                 if (inst->getOpcode() == llvm::Instruction::Mul && lhs_dep && rhs_dep) {
-                    return true; // signal polynomial mul found
+                    return true;
                 }
                 return dep;
             };
 
-            // We need to detect polynomial mul, not just return dependency.
-            // Rewrite as a separate traversal.
             llvm::DenseSet< llvm::Value * > visited;
             std::queue< llvm::Value * > work;
             work.push(root);
 
-            // First pass: compute variable-dependence for all nodes
             while (!work.empty()) {
                 auto *v = work.front();
                 work.pop();
@@ -193,7 +206,6 @@ namespace cobra {
                 }
             }
 
-            // Second pass: check all Mul instructions
             for (auto *v : visited) {
                 auto *inst = llvm::dyn_cast< llvm::Instruction >(v);
                 if (inst == nullptr) { continue; }
@@ -204,6 +216,72 @@ namespace cobra {
                 if (lhs_dep && rhs_dep) { return true; }
             }
             return false;
+        }
+
+        std::unique_ptr< Expr > BuildExprFromIR(
+            llvm::Value *v, const std::vector< llvm::Value * > &leaves,
+            const llvm::DenseSet< llvm::Value * > &tree_set, uint64_t mask
+        ) {
+            // Constant
+            if (auto *ci = llvm::dyn_cast< llvm::ConstantInt >(v)) {
+                return Expr::Constant(ci->getZExtValue() & mask);
+            }
+
+            // Leaf (variable)
+            auto leaf_it = std::find(leaves.begin(), leaves.end(), v);
+            if (leaf_it != leaves.end()) {
+                auto idx = static_cast< uint32_t >(leaf_it - leaves.begin());
+                return Expr::Variable(idx);
+            }
+
+            auto *inst = llvm::dyn_cast< llvm::Instruction >(v);
+            if (inst == nullptr || !tree_set.contains(inst)) { return nullptr; }
+
+            // ZExt/SExt — pass through to inner operand
+            if (inst->getOpcode() == llvm::Instruction::ZExt
+                || inst->getOpcode() == llvm::Instruction::SExt)
+            {
+                return BuildExprFromIR(inst->getOperand(0), leaves, tree_set, mask);
+            }
+
+            // LShr with constant shift amount
+            if (inst->getOpcode() == llvm::Instruction::LShr) {
+                auto *shift_amt = llvm::dyn_cast< llvm::ConstantInt >(inst->getOperand(1));
+                if (shift_amt == nullptr) { return nullptr; }
+                auto child = BuildExprFromIR(inst->getOperand(0), leaves, tree_set, mask);
+                if (child == nullptr) { return nullptr; }
+                return Expr::LogicalShr(std::move(child), shift_amt->getZExtValue());
+            }
+
+            // Binary operations
+            auto lhs = BuildExprFromIR(inst->getOperand(0), leaves, tree_set, mask);
+            auto rhs = BuildExprFromIR(inst->getOperand(1), leaves, tree_set, mask);
+            if (lhs == nullptr || rhs == nullptr) { return nullptr; }
+
+            switch (inst->getOpcode()) {
+                case llvm::Instruction::Add:
+                    return Expr::Add(std::move(lhs), std::move(rhs));
+                case llvm::Instruction::Sub:
+                    return Expr::Add(std::move(lhs), Expr::Negate(std::move(rhs)));
+                case llvm::Instruction::Mul:
+                    return Expr::Mul(std::move(lhs), std::move(rhs));
+                case llvm::Instruction::And:
+                    return Expr::BitwiseAnd(std::move(lhs), std::move(rhs));
+                case llvm::Instruction::Or:
+                    return Expr::BitwiseOr(std::move(lhs), std::move(rhs));
+                case llvm::Instruction::Xor: {
+                    // Detect NOT: xor %x, -1
+                    if (auto *ci = llvm::dyn_cast< llvm::ConstantInt >(inst->getOperand(1))) {
+                        if (ci->isAllOnesValue()) { return Expr::BitwiseNot(std::move(lhs)); }
+                    }
+                    if (auto *ci = llvm::dyn_cast< llvm::ConstantInt >(inst->getOperand(0))) {
+                        if (ci->isAllOnesValue()) { return Expr::BitwiseNot(std::move(rhs)); }
+                    }
+                    return Expr::BitwiseXor(std::move(lhs), std::move(rhs));
+                }
+                default:
+                    return nullptr;
+            }
         }
 
     } // namespace
@@ -230,7 +308,6 @@ namespace cobra {
             constexpr uint32_t kPreElimCap = 20;
             if (leaves.size() > kPreElimCap) { continue; }
 
-            // Reject polynomial MBA (variable*variable multiplication)
             const llvm::DenseSet< llvm::Value * > tree_set(
                 tree_insts.begin(), tree_insts.end()
             );
@@ -259,12 +336,32 @@ namespace cobra {
                 }
             }
 
+            const uint64_t mask = Bitmask(bw);
+            auto expr           = BuildExprFromIR(&inst, leaves, tree_set, mask);
+
+            // Build evaluator lambda for full-width verification.
+            // Captures raw pointers to LLVM Values which remain valid
+            // for the lifetime of the function being processed.
+            Evaluator evaluator;
+            if (expr != nullptr) {
+                evaluator = [root_inst = &inst, leaf_vals = leaves,
+                             bitwidth = bw](const std::vector< uint64_t > &vals) -> uint64_t {
+                    llvm::DenseMap< llvm::Value *, uint64_t > assignments;
+                    for (size_t i = 0; i < leaf_vals.size(); ++i) {
+                        assignments[leaf_vals[i]] = vals[i];
+                    }
+                    return EvaluateTree(root_inst, assignments, bitwidth);
+                };
+            }
+
             candidates.push_back(
                 MBACandidate{ .root        = &inst,
                               .leaf_values = std::move(leaves),
                               .var_names   = std::move(var_names),
                               .sig         = std::move(sig),
-                              .bitwidth    = bw }
+                              .bitwidth    = bw,
+                              .expr        = std::move(expr),
+                              .evaluator   = std::move(evaluator) }
             );
         }
 
