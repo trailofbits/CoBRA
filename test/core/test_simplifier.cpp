@@ -1396,3 +1396,35 @@ TEST(SimplifierTest, NotOverMulSubExpression) {
     auto check = FullWidthCheckEval(opts.evaluator, 3, *result.value().expr, 64);
     EXPECT_TRUE(check.passed);
 }
+
+// Regression: issue #9 — a | ((1+a) & (2-a)) was incorrectly simplified
+// to a. Boolean sig [0,1] but diverges at full width (f(3)=7 ≠ 3).
+TEST(SimplifierTest, Issue9_CarryPropagation) {
+    auto one_a = Expr::Add(Expr::Constant(1), Expr::Variable(0));
+    auto neg_a = Expr::Add(Expr::Negate(Expr::Variable(0)), Expr::Constant(2));
+    auto inner = Expr::BitwiseAnd(std::move(one_a), std::move(neg_a));
+    auto e     = Expr::BitwiseOr(Expr::Variable(0), std::move(inner));
+
+    auto original = CloneExpr(*e);
+    auto sig      = EvaluateBooleanSignature(*e, 1, 64);
+    ASSERT_EQ(sig.size(), 2);
+    EXPECT_EQ(sig[0], 0);
+    EXPECT_EQ(sig[1], 1);
+
+    std::vector< std::string > vars = { "a" };
+    Options opts;
+    opts.bitwidth  = 64;
+    opts.evaluator = [&](const std::vector< uint64_t > &v) {
+        return EvalExpr(*original, v, 64);
+    };
+
+    auto result = Simplify(sig, vars, e.get(), opts);
+    ASSERT_TRUE(result.has_value());
+
+    if (result.value().kind == SimplifyOutcome::Kind::kSimplified) {
+        auto fw = FullWidthCheckEval(opts.evaluator, 1, *result.value().expr, 64);
+        EXPECT_TRUE(fw.passed) << "Simplified to "
+                               << Render(*result.value().expr, result.value().real_vars)
+                               << " but fails full-width check";
+    }
+}

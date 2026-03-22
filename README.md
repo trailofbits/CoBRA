@@ -4,7 +4,7 @@
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)](https://en.cppreference.com/w/cpp/23)
-[![Tests](https://img.shields.io/badge/tests-1022-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-1023-brightgreen.svg)](#testing)
 
 CoBRA deobfuscates expressions that interleave arithmetic (`+`, `-`, `*`) with bitwise (`&`, `|`, `^`, `~`) and shift (`<<`, `>>`) operators — a technique commonly used in software obfuscation.
 
@@ -167,12 +167,12 @@ lib/llvm/                LLVM pass plugin (CobraPass, MBADetector, IRReconstruct
 lib/verify/              Z3-based equivalence verification
 include/cobra/           Public headers
 tools/cobra-cli/         CLI frontend and expression parser
-test/                    1022 tests across 55 test files (unit + integration + dataset benchmarks)
+test/                    1023 tests across 55 test files (unit + integration + dataset benchmarks)
 ```
 
 ## Testing
 
-CoBRA has 1022 tests covering unit, integration, and dataset benchmarks:
+CoBRA has 1023 tests covering unit, integration, and dataset benchmarks:
 
 ```bash
 # Run all tests

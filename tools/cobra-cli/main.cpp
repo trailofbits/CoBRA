@@ -486,7 +486,9 @@ int main(int argc, char *argv[]) {
 
     switch (cls.semantic) {
         case cobra::SemanticClass::kLinear:
-            return RunLinearPath(*folded, vars, bitwidth, max_vars, verbose, verify);
+            return RunLinearPath(
+                *folded, vars, bitwidth, max_vars, verbose, verify, folded.get()
+            );
 
         case cobra::SemanticClass::kSemilinear: {
             // Linear shortcut: if all semi-linear signature rows are
@@ -504,8 +506,9 @@ int main(int argc, char *argv[]) {
 #ifdef COBRA_HAS_Z3
                 shortcut_verify = true;
 #endif
-                const int kRc =
-                    RunLinearPath(*folded, vars, bitwidth, max_vars, verbose, shortcut_verify);
+                const int kRc = RunLinearPath(
+                    *folded, vars, bitwidth, max_vars, verbose, shortcut_verify, folded.get()
+                );
                 if (kRc != 0) { return kRc; }
 #ifndef COBRA_HAS_Z3
                 if (strict) {
@@ -524,7 +527,9 @@ int main(int argc, char *argv[]) {
                     std::cerr << "kSemilinear path failed, "
                                  "falling back to linear\n";
                 }
-                return RunLinearPath(*folded, vars, bitwidth, max_vars, verbose, verify);
+                return RunLinearPath(
+                    *folded, vars, bitwidth, max_vars, verbose, verify, folded.get()
+                );
             }
             return kRc;
         }

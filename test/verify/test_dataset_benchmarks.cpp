@@ -343,8 +343,8 @@ TEST(OSESDataset, Fast) {
     EXPECT_EQ(stats.total, 473);
     EXPECT_EQ(stats.skipped_parse, 15);
     EXPECT_EQ(stats.parsed, 458);
-    EXPECT_EQ(stats.simplified, 380);
-    EXPECT_EQ(stats.unsupported, 78);
+    EXPECT_EQ(stats.simplified, 379);
+    EXPECT_EQ(stats.unsupported, 79);
     EXPECT_EQ(stats.failed_simplify, 0);
 }
 
