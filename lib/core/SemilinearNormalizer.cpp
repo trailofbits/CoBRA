@@ -361,11 +361,17 @@ namespace cobra {
 
                 case Expr::Kind::kConstant:
                 case Expr::Kind::kVariable:
+                    break;
+
                 case Expr::Kind::kAnd:
                 case Expr::Kind::kOr:
                 case Expr::Kind::kXor:
                 case Expr::Kind::kNot:
-                    break;
+                    // Reached when the node has variables but is NOT
+                    // purely bitwise (e.g. (x+y) & 0x457). Reject
+                    // explicitly instead of silently dropping the subtree.
+                    ctx.encountered_nonlinear = true;
+                    return { .constant = 0, .terms = {} };
             }
 
             return { .constant = 0, .terms = {} };

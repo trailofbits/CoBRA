@@ -357,6 +357,36 @@ TEST(SemilinearIntegration, ShrIdentityFold) {
         << "Did not expect >> in output, got: " << text;
 }
 
+// Regression: mixed bitwise-over-arithmetic must reject, not silently drop
+TEST(SemilinearIntegration, RejectMaskAndArith) {
+    // (x + y) & 0x457 — AND over arithmetic, not purely bitwise
+    auto input = Expr::BitwiseAnd(
+        Expr::Add(Expr::Variable(0), Expr::Variable(1)), Expr::Constant(0x457)
+    );
+    auto ir = NormalizeToSemilinear(*input, { "x", "y" }, 64);
+    EXPECT_FALSE(ir.has_value()) << "Expected normalization to fail for AND-over-arithmetic";
+    if (!ir.has_value()) { EXPECT_EQ(ir.error().code, CobraError::kNonLinearInput); }
+}
+
+TEST(SemilinearIntegration, RejectNotOverArith) {
+    // ~(x + y) — NOT over arithmetic
+    auto input = Expr::BitwiseNot(Expr::Add(Expr::Variable(0), Expr::Variable(1)));
+    auto ir    = NormalizeToSemilinear(*input, { "x", "y" }, 64);
+    EXPECT_FALSE(ir.has_value()) << "Expected normalization to fail for NOT-over-arithmetic";
+    if (!ir.has_value()) { EXPECT_EQ(ir.error().code, CobraError::kNonLinearInput); }
+}
+
+TEST(SemilinearIntegration, RejectXorOverArith) {
+    // (x * 3 + y) ^ 0xFF — XOR over arithmetic with variable-dependent
+    // non-pure operand (the XOR/OR constant lowering fires only when
+    // IsPurelyBitwise is true, so this reaches the bottom of CollectTerms)
+    auto arith = Expr::Add(Expr::Mul(Expr::Constant(3), Expr::Variable(0)), Expr::Variable(1));
+    auto input = Expr::BitwiseXor(std::move(arith), Expr::Constant(0xFF));
+    auto ir    = NormalizeToSemilinear(*input, { "x", "y" }, 64);
+    EXPECT_FALSE(ir.has_value()) << "Expected normalization to fail for XOR-over-arithmetic";
+    if (!ir.has_value()) { EXPECT_EQ(ir.error().code, CobraError::kNonLinearInput); }
+}
+
 // Issue #7: per-partition coefficient elision via NOT-AND lowering
 TEST(SemilinearIntegration, Issue7NotAndElision) {
     // (x | 0x10) - (~x & 0x10) - (x & 0xEF) = (x & 0x10) in 8-bit
