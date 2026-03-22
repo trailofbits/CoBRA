@@ -38,95 +38,94 @@ namespace cobra {
     CobraPass::run(llvm::Function &f, llvm::FunctionAnalysisManager &AM) {
         bool changed = false;
 
-        for (auto &bb : f) {
-            auto candidates = DetectMbaCandidates(bb, min_ast_size_, max_vars_);
+        auto candidates = DetectMbaCandidates(f, min_ast_size_, max_vars_);
 
-            NumCandidates += candidates.size();
+        NumCandidates += candidates.size();
 
-            for (auto &cand : candidates) {
-                Options opts{ .bitwidth   = cand.bitwidth,
-                              .max_vars   = max_vars_,
-                              .spot_check = true,
-                              .evaluator  = cand.evaluator };
+        for (auto &cand : candidates) {
+            Options opts{ .bitwidth   = cand.bitwidth,
+                          .max_vars   = max_vars_,
+                          .spot_check = true,
+                          .evaluator  = cand.evaluator };
 
-                // Pass AST when available — unlocks semilinear,
-                // MixedRewrite, and decomposition pipelines.
-                const Expr *ast = cand.expr.get();
+            // Pass AST when available — unlocks semilinear,
+            // MixedRewrite, and decomposition pipelines.
+            const Expr *ast = cand.expr.get();
 
-                auto result = Simplify(cand.sig, cand.var_names, ast, opts);
-                if (!result.has_value()) {
-                    ++NumSkippedUnsupported;
+            auto result = Simplify(cand.sig, cand.var_names, ast, opts);
+            if (!result.has_value()) {
+                ++NumSkippedUnsupported;
+                LLVM_DEBUG(
+                    llvm::dbgs() << "CoBRA: skipping candidate: " << result.error().message
+                                 << "\n"
+                );
+                continue;
+            }
+
+            if (result.value().kind != SimplifyOutcome::Kind::kSimplified) {
+                ++NumSkippedUnsupported;
+                LLVM_DEBUG(
+                    llvm::dbgs() << "CoBRA: not simplified: " << result.value().diag.reason
+                                 << "\n"
+                );
+                continue;
+            }
+
+            // Cost gate: don't replace if simplified form is not
+            // smaller. nuw/nsw flags are intentionally dropped —
+            // CoBRA's Expr model is modular arithmetic and we
+            // cannot soundly preserve wrapping guarantees.
+            if (cand.expr != nullptr) {
+                auto original_cost   = ComputeCost(*cand.expr);
+                auto simplified_cost = ComputeCost(*result.value().expr);
+                if (!IsBetter(simplified_cost.cost, original_cost.cost)) {
+                    ++NumSkippedCost;
                     LLVM_DEBUG(
-                        llvm::dbgs()
-                        << "CoBRA: skipping candidate: " << result.error().message << "\n"
+                        llvm::dbgs() << "CoBRA: skipping — simplified form is not smaller\n"
                     );
                     continue;
                 }
+            }
 
-                if (result.value().kind != SimplifyOutcome::Kind::kSimplified) {
-                    ++NumSkippedUnsupported;
-                    LLVM_DEBUG(
-                        llvm::dbgs()
-                        << "CoBRA: not simplified: " << result.value().diag.reason << "\n"
-                    );
-                    continue;
-                }
-
-                // Cost gate: don't replace if simplified form is not
-                // smaller. nuw/nsw flags are intentionally dropped —
-                // CoBRA's Expr model is modular arithmetic and we
-                // cannot soundly preserve wrapping guarantees.
-                if (cand.expr != nullptr) {
-                    auto original_cost   = ComputeCost(*cand.expr);
-                    auto simplified_cost = ComputeCost(*result.value().expr);
-                    if (!IsBetter(simplified_cost.cost, original_cost.cost)) {
-                        ++NumSkippedCost;
-                        LLVM_DEBUG(
-                            llvm::dbgs() << "CoBRA: skipping — simplified form is not smaller\n"
-                        );
-                        continue;
-                    }
-                }
-
-                // Build variable index map for aux var elimination.
-                // real_vars may be a subset of var_names with
-                // reindexed positions.
-                std::vector< uint32_t > var_map;
-                const auto &real_vars = result.value().real_vars;
-                if (!real_vars.empty() && real_vars.size() != cand.var_names.size()) {
-                    var_map.reserve(real_vars.size());
-                    for (const auto &rv : real_vars) {
-                        for (uint32_t j = 0; j < cand.var_names.size(); ++j) {
-                            if (cand.var_names[j] == rv) {
-                                var_map.push_back(j);
-                                break;
-                            }
+            // Build variable index map for aux var elimination.
+            // real_vars may be a subset of var_names with
+            // reindexed positions.
+            std::vector< uint32_t > var_map;
+            const auto &real_vars = result.value().real_vars;
+            if (!real_vars.empty() && real_vars.size() != cand.var_names.size()) {
+                var_map.reserve(real_vars.size());
+                for (const auto &rv : real_vars) {
+                    for (uint32_t j = 0; j < cand.var_names.size(); ++j) {
+                        if (cand.var_names[j] == rv) {
+                            var_map.push_back(j);
+                            break;
                         }
                     }
                 }
-
-                llvm::IRBuilder<> builder(cand.root);
-                auto *new_val = ReconstructIr(*result.value().expr, cand, builder, var_map);
-
-                cand.root->replaceAllUsesWith(new_val);
-                ++NumSimplified;
-                changed = true;
-
-                LLVM_DEBUG(
-                    llvm::dbgs()
-                    << "CoBRA: simplified to "
-                    << Render(*result.value().expr, result.value().real_vars, cand.bitwidth)
-                    << "\n"
-                );
             }
 
-            // DCE: iteratively erase dead instructions from replaced
-            // trees. Needs multiple passes because erasing %mul may
-            // make its operand %and dead.
-            if (changed) {
-                bool erased = true;
-                while (erased) {
-                    erased = false;
+            llvm::IRBuilder<> builder(cand.root);
+            auto *new_val = ReconstructIr(*result.value().expr, cand, builder, var_map);
+
+            cand.root->replaceAllUsesWith(new_val);
+            ++NumSimplified;
+            changed = true;
+
+            LLVM_DEBUG(
+                llvm::dbgs()
+                << "CoBRA: simplified to "
+                << Render(*result.value().expr, result.value().real_vars, cand.bitwidth) << "\n"
+            );
+        }
+
+        // DCE: iteratively erase dead instructions from replaced
+        // trees across the whole function.  Needs multiple passes
+        // because erasing %mul may make its operand %and dead.
+        if (changed) {
+            bool erased = true;
+            while (erased) {
+                erased = false;
+                for (auto &bb : f) {
                     llvm::SmallVector< llvm::Instruction *, 16 > dead;
                     for (auto &inst : bb) {
                         if (inst.use_empty() && !inst.isTerminator()
