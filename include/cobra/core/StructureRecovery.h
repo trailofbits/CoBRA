@@ -14,4 +14,11 @@ namespace cobra {
     /// coefficients and re-partitions to minimize term count.
     void CoalesceTerms(SemilinearIR &ir);
 
+    /// Flatten complex single-variable atoms to canonical (x & mask) form.
+    /// Evaluates each complex atom at x=0 and x=UINT64_MAX to decompose:
+    ///   f(x) = f(0) + (x & pass_mask) - (x & invert_mask)
+    /// This enables CoalesceTerms + RecoverStructure to produce optimal output.
+    /// Returns true if any atoms were flattened.
+    bool FlattenComplexAtoms(SemilinearIR &ir);
+
 } // namespace cobra

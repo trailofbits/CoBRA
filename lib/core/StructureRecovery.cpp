@@ -2,6 +2,7 @@
 #include "cobra/core/BitWidth.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/SemilinearIR.h"
+#include "cobra/core/SignatureChecker.h"
 #include "cobra/core/Trace.h"
 #include <algorithm>
 #include <cstddef>
@@ -76,6 +77,13 @@ namespace cobra {
             );
         }
 
+        bool HasShr(const Expr &expr) {
+            if (expr.kind == Expr::Kind::kShr) { return true; }
+            return std::ranges::any_of(expr.children, [](const auto &child) {
+                return HasShr(*child);
+            });
+        }
+
     } // namespace
 
     void RecoverStructure(SemilinearIR &ir) {
@@ -120,23 +128,33 @@ namespace cobra {
                     if ((a.mask & b.mask) != 0) { continue; }
 
                     // XOR recovery: m*(c&x) + (-m)*((~c)&x) = -m*(c^x) + m*c
+                    //
+                    // Choose which entry provides the XOR constant to
+                    // minimize the additive constant (prefer the mask
+                    // with fewer set bits — the resulting m*c is
+                    // smaller, and when m*c == 0 the constant vanishes).
                     if (((a.coeff + b.coeff) & kMod) == 0) {
-                        const uint64_t kM = a.coeff;
-                        const uint64_t kC = a.mask;
+                        auto &src =
+                            (__builtin_popcountll(a.mask) <= __builtin_popcountll(b.mask)) ? a
+                                                                                           : b;
+                        auto &dst = (&src == &a) ? b : a;
+
+                        const uint64_t kM = src.coeff;
+                        const uint64_t kC = src.mask;
 
                         auto xor_expr = Expr::BitwiseXor(Expr::Constant(kC), CloneExpr(*basis));
                         AtomId xor_id =
                             CreateAtom(ir, std::move(xor_expr), OperatorFamily::kXor);
 
-                        a.coeff    = b.coeff; // = -m
-                        a.atom_id  = xor_id;
-                        a.mask     = kMod;
-                        b.consumed = true;
+                        src.coeff    = dst.coeff; // = -m
+                        src.atom_id  = xor_id;
+                        src.mask     = kMod;
+                        dst.consumed = true;
 
                         ir.constant = (ir.constant + (kM * kC)) & kMod;
                         any_changed = true;
                         COBRA_TRACE(
-                            "StructRecovery", "XOR recovery: mask={:#x} coeff={}", kC, b.coeff
+                            "StructRecovery", "XOR recovery: mask={:#x} coeff={}", kC, dst.coeff
                         );
                         break;
                     }
@@ -281,6 +299,107 @@ namespace cobra {
         );
 
         COBRA_TRACE("StructRecovery", "CoalesceTerms: refined to {} terms", ir.terms.size());
+    }
+
+    bool FlattenComplexAtoms(SemilinearIR &ir) {
+        COBRA_TRACE("StructRecovery", "FlattenComplexAtoms: terms={}", ir.terms.size());
+
+        const uint64_t kMod = Bitmask(ir.bitwidth);
+
+        std::vector< WeightedAtom > new_terms;
+        uint64_t added_constant = 0;
+        bool any_flattened      = false;
+
+        for (const auto &term : ir.terms) {
+            const auto &info = ir.atom_table[term.atom_id];
+
+            // Skip bare variables — already canonical.
+            if (info.original_subtree->kind == Expr::Kind::kVariable) {
+                new_terms.push_back(term);
+                continue;
+            }
+
+            // Skip atoms with var & const form — already canonical.
+            auto decomp = DecomposeAtom(info, kMod);
+            if (decomp.valid && decomp.basis->kind == Expr::Kind::kVariable) {
+                new_terms.push_back(term);
+                continue;
+            }
+
+            // Only flatten single-variable atoms without shifts.
+            // Shifts mix bits across positions, breaking the per-bit
+            // decomposition f(x) = f(0) + (x & pass) - (x & invert).
+            if (info.key.support.size() != 1 || HasShr(*info.original_subtree)) {
+                new_terms.push_back(term);
+                continue;
+            }
+
+            // Copy values we need before CreateAtom potentially reallocs atom_table.
+            const auto kVarIdx  = info.key.support[0];
+            const auto kVecSize = static_cast< size_t >(kVarIdx) + 1;
+
+            // Evaluate atom at x=0 and x=UINT64_MAX.
+            std::vector< uint64_t > vals(kVecSize, 0);
+            const uint64_t kZeroVal =
+                EvalExpr(*info.original_subtree, vals, ir.bitwidth) & kMod;
+            vals[kVarIdx] = kMod;
+            const uint64_t kOnesVal =
+                EvalExpr(*info.original_subtree, vals, ir.bitwidth) & kMod;
+
+            const uint64_t kPassMask   = kOnesVal & ~kZeroVal;
+            const uint64_t kInvertMask = kZeroVal & ~kOnesVal;
+
+            // Constant contribution: coeff * f(0)
+            added_constant = (added_constant + (term.coeff * kZeroVal)) & kMod;
+
+            // +coeff * (x & pass_mask)
+            if (kPassMask != 0) {
+                auto pass_expr = (kPassMask == kMod)
+                    ? Expr::Variable(kVarIdx)
+                    : Expr::BitwiseAnd(Expr::Variable(kVarIdx), Expr::Constant(kPassMask));
+                AtomId pass_id = CreateAtom(ir, std::move(pass_expr), OperatorFamily::kAnd);
+                new_terms.push_back({ .coeff = term.coeff, .atom_id = pass_id });
+            }
+
+            // -coeff * (x & invert_mask)
+            if (kInvertMask != 0) {
+                auto inv_expr = (kInvertMask == kMod)
+                    ? Expr::Variable(kVarIdx)
+                    : Expr::BitwiseAnd(Expr::Variable(kVarIdx), Expr::Constant(kInvertMask));
+                AtomId inv_id = CreateAtom(ir, std::move(inv_expr), OperatorFamily::kAnd);
+                const uint64_t kNegCoeff = ModNeg(term.coeff, ir.bitwidth);
+                new_terms.push_back({ .coeff = kNegCoeff, .atom_id = inv_id });
+            }
+
+            any_flattened = true;
+        }
+
+        if (!any_flattened) {
+            COBRA_TRACE("StructRecovery", "FlattenComplexAtoms: no changes");
+            return false;
+        }
+
+        ir.constant = (ir.constant + added_constant) & kMod;
+
+        // Merge duplicate atom_ids.
+        std::unordered_map< AtomId, uint64_t > merged;
+        for (const auto &t : new_terms) {
+            merged[t.atom_id] = (merged[t.atom_id] + t.coeff) & kMod;
+        }
+
+        ir.terms.clear();
+        for (const auto &[aid, coeff] : merged) {
+            if (coeff != 0) { ir.terms.push_back({ .coeff = coeff, .atom_id = aid }); }
+        }
+        std::sort(
+            ir.terms.begin(), ir.terms.end(),
+            [](const WeightedAtom &a, const WeightedAtom &b) { return a.atom_id < b.atom_id; }
+        );
+
+        COBRA_TRACE(
+            "StructRecovery", "FlattenComplexAtoms: flattened to {} terms", ir.terms.size()
+        );
+        return true;
     }
 
 } // namespace cobra
