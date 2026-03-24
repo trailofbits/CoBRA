@@ -265,4 +265,28 @@ namespace cobra {
         const PassAttemptCache &attempted
     );
 
+    // ---------------------------------------------------------------
+    // Orchestrator entry points
+    // ---------------------------------------------------------------
+
+    /// Main orchestrator function: seeds the worklist, runs the
+    /// pass loop, and returns an OrchestratorResult.
+    Result< OrchestratorResult > OrchestrateSimplify(
+        const Expr *input_expr, const std::vector< uint64_t > &sig,
+        const std::vector< std::string > &vars, const Options &opts,
+        const OrchestratorPolicy &policy
+    );
+
+    /// Convert an OrchestratorResult to the legacy SimplifyOutcome
+    /// format used by the existing test harnesses and CLI.
+    SimplifyOutcome AdaptToLegacy(OrchestratorResult result, const Expr *original_expr);
+
+    /// Test-only convenience: runs OrchestrateSimplify then
+    /// AdaptToLegacy, returning Result< SimplifyOutcome >.
+    Result< SimplifyOutcome > OrchestrateSimplifyForTest(
+        const Expr *input_expr, const std::vector< uint64_t > &sig,
+        const std::vector< std::string > &vars, const Options &opts,
+        const OrchestratorPolicy &policy
+    );
+
 } // namespace cobra

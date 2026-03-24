@@ -1,7 +1,14 @@
 #include "Orchestrator.h"
 #include "OrchestratorPasses.h"
+#include "SimplifierInternal.h"
+#include "cobra/core/AuxVarEliminator.h"
+#include "cobra/core/ExprUtils.h"
+#include "cobra/core/PatternMatcher.h"
+#include "cobra/core/SignatureEval.h"
+#include "cobra/core/SimplifyOutcome.h"
 
 #include <algorithm>
+#include <unordered_map>
 
 namespace cobra {
 
@@ -266,6 +273,319 @@ namespace cobra {
         // 5. Last PassId enum order
         if (a.last_pass != b.last_pass) { return a.last_pass > b.last_pass; }
         return false;
+    }
+
+    // ---------------------------------------------------------------
+    // PassId hash for unordered_map keying
+    // ---------------------------------------------------------------
+
+    namespace {
+        struct PassIdHash
+        {
+            size_t operator()(PassId id) const {
+                return std::hash< uint8_t >{}(static_cast< uint8_t >(id));
+            }
+        };
+    } // namespace
+
+    // ---------------------------------------------------------------
+    // OrchestrateSimplify — main orchestrator loop
+    // ---------------------------------------------------------------
+
+    namespace {
+
+        // Seed the worklist for the no-AST path (signature only).
+        Result< std::optional< OrchestratorResult > > SeedNoAst(
+            const std::vector< uint64_t > &sig, const std::vector< std::string > &vars,
+            OrchestratorContext &ctx, Worklist &worklist
+        ) {
+            const auto num_vars = static_cast< uint32_t >(vars.size());
+
+            // Constant pruning
+            auto pm = MatchPattern(sig, num_vars, ctx.bitwidth);
+            if (pm && (*pm)->kind == Expr::Kind::kConstant) {
+                ItemMetadata meta;
+                meta.sig_vector   = sig;
+                meta.verification = VerificationState::kVerified;
+
+                return Ok(
+                    std::optional< OrchestratorResult >(OrchestratorResult{
+                        .outcome = PassOutcome::Success(
+                            std::move(*pm), {}, VerificationState::kVerified
+                        ),
+                        .metadata     = std::move(meta),
+                        .run_metadata = ctx.run_metadata,
+                    })
+                );
+            }
+
+            // Eliminate auxiliary variables
+            auto elim                 = EliminateAuxVars(sig, vars);
+            const auto real_var_count = static_cast< uint32_t >(elim.real_vars.size());
+
+            if (real_var_count > ctx.opts.max_vars) {
+                return Err< std::optional< OrchestratorResult > >(
+                    CobraError::kTooManyVariables,
+                    "Variable count after elimination (" + std::to_string(real_var_count)
+                        + ") exceeds max_vars (" + std::to_string(ctx.opts.max_vars) + ")"
+                );
+            }
+
+            auto original_indices = BuildVarSupport(vars, elim.real_vars);
+
+            WorkItem sig_item;
+            sig_item.payload = SignatureStatePayload{
+                .sig                               = sig,
+                .real_vars                         = elim.real_vars,
+                .elimination                       = std::move(elim),
+                .original_indices                  = std::move(original_indices),
+                .needs_original_space_verification = false,
+            };
+            sig_item.features.provenance = Provenance::kOriginal;
+            worklist.Push(std::move(sig_item));
+
+            return Ok(std::optional< OrchestratorResult >(std::nullopt));
+        }
+
+        // Seed the worklist for the with-AST path.
+        Result< std::optional< OrchestratorResult > >
+        SeedWithAst(const Expr &input_expr, OrchestratorContext &ctx, Worklist &worklist) {
+            // Create initial AST item
+            WorkItem seed;
+            seed.payload = AstPayload{
+                .expr       = CloneExpr(input_expr),
+                .provenance = Provenance::kOriginal,
+            };
+            seed.features.provenance = Provenance::kOriginal;
+
+            // Prerequisite: lower NOT-over-arith
+            auto lower_result = RunLowerNotOverArith(seed, ctx);
+            if (!lower_result.has_value()) { return std::unexpected(lower_result.error()); }
+
+            auto &lr = lower_result.value();
+
+            WorkItem *classify_target = nullptr;
+            std::optional< WorkItem > lowered_item;
+
+            if (lr.decision == PassDecision::kAdvance && !lr.next.empty()) {
+                lowered_item    = std::move(lr.next[0]);
+                classify_target = &*lowered_item;
+            } else {
+                classify_target = &seed;
+            }
+
+            // Classify the target
+            auto cls_result = RunClassifyAst(*classify_target, ctx);
+            if (!cls_result.has_value()) { return std::unexpected(cls_result.error()); }
+
+            auto &cr        = cls_result.value();
+            auto classified = std::move(cr.next[0]);
+            auto cls        = classified.features.classification;
+
+            // Copy classification to the original seed
+            seed.features.classification = cls;
+            if (auto *ast = std::get_if< AstPayload >(&seed.payload)) {
+                ast->classification = cls;
+            }
+
+            // Push items to the worklist
+            if (lowered_item) {
+                // Push the classified lowered item
+                worklist.Push(std::move(classified));
+                // Push the original (for semilinear)
+                worklist.Push(std::move(seed));
+            } else {
+                // Push the classified item (was the original, now classified)
+                worklist.Push(std::move(classified));
+            }
+
+            return Ok(std::optional< OrchestratorResult >(std::nullopt));
+        }
+
+    } // namespace
+
+    Result< OrchestratorResult > OrchestrateSimplify(
+        const Expr *input_expr, const std::vector< uint64_t > &sig,
+        const std::vector< std::string > &vars, const Options &opts,
+        const OrchestratorPolicy &policy
+    ) {
+        OrchestratorContext context{
+            .opts          = opts,
+            .original_vars = vars,
+            .evaluator =
+                opts.evaluator ? std::optional< Evaluator >(opts.evaluator) : std::nullopt,
+            .bitwidth     = opts.bitwidth,
+            .run_metadata = {},
+        };
+
+        Worklist worklist;
+
+        // Seeding
+        if (input_expr == nullptr) {
+            auto seed_result = SeedNoAst(sig, vars, context, worklist);
+            if (!seed_result.has_value()) { return std::unexpected(seed_result.error()); }
+            if (seed_result.value().has_value()) { return Ok(std::move(*seed_result.value())); }
+        } else {
+            auto seed_result = SeedWithAst(*input_expr, context, worklist);
+            if (!seed_result.has_value()) { return std::unexpected(seed_result.error()); }
+            if (seed_result.value().has_value()) { return Ok(std::move(*seed_result.value())); }
+        }
+
+        // Build registry lookup map
+        const auto &registry = GetPassRegistry();
+        std::unordered_map< PassId, const PassDescriptor *, PassIdHash > registry_map;
+        for (const auto &desc : registry) { registry_map[desc.id] = &desc; }
+
+        PassAttemptCache cache;
+        uint32_t expansions    = 0;
+        uint32_t verifications = 0;
+        std::optional< UnsupportedCandidate > best_unsupported;
+
+        // Main loop
+        while (!worklist.Empty() && expansions < policy.max_expansions) {
+            auto item = worklist.Pop();
+            ++expansions;
+
+            // Track best unsupported
+            UnsupportedCandidate current{
+                .metadata           = item.metadata,
+                .depth              = item.depth,
+                .rewrite_gen        = item.rewrite_gen,
+                .history_size       = static_cast< uint32_t >(item.history.size()),
+                .last_pass          = item.history.empty() ? PassId{} : item.history.back(),
+                .is_candidate_state = std::holds_alternative< CandidatePayload >(item.payload),
+            };
+            if (!best_unsupported || UnsupportedRankBetter(current, *best_unsupported)) {
+                best_unsupported = current;
+            }
+
+            // Candidate acceptance: verified candidates are immediately returned
+            if (auto *cand = std::get_if< CandidatePayload >(&item.payload)) {
+                if (!cand->needs_original_space_verification) {
+                    return Ok(
+                        OrchestratorResult{
+                            .outcome = PassOutcome::Success(
+                                CloneExpr(*cand->expr), cand->real_vars,
+                                item.metadata.verification
+                            ),
+                            .metadata     = std::move(item.metadata),
+                            .run_metadata = context.run_metadata,
+                        }
+                    );
+                }
+            }
+
+            // Schedule and execute passes
+            auto passes = SchedulePasses(item, policy, cache);
+
+            for (auto pass_id : passes) {
+                if (pass_id == PassId::kVerifyCandidate
+                    && verifications >= policy.max_candidates)
+                {
+                    continue;
+                }
+
+                auto it = registry_map.find(pass_id);
+                if (it == registry_map.end()) { continue; }
+
+                auto result = it->second->run(item, context);
+                if (pass_id == PassId::kVerifyCandidate) { ++verifications; }
+                if (!result.has_value()) { return std::unexpected(result.error()); }
+
+                auto fp = ComputeFingerprint(item, context.bitwidth, policy.allow_reroute);
+                cache.Record(fp, pass_id);
+
+                auto &pr = result.value();
+                if (pr.decision == PassDecision::kSolvedCandidate
+                    || pr.decision == PassDecision::kAdvance)
+                {
+                    for (auto &next : pr.next) {
+                        next.depth = item.depth + 1;
+                        next.history.push_back(pass_id);
+                        worklist.Push(std::move(next));
+                    }
+                    break; // first-progress-yields
+                }
+
+                // On blocked/no-progress, update last_failure tracking
+                if (pr.decision == PassDecision::kBlocked
+                    || pr.decision == PassDecision::kNoProgress)
+                {
+                    if (!pr.reason.top.message.empty()) {
+                        best_unsupported->metadata.last_failure = pr.reason;
+                    }
+                }
+            }
+        }
+
+        // Exhaustion: build the final unsupported result
+        ReasonDetail exhaustion_reason;
+        if (best_unsupported && !best_unsupported->metadata.last_failure.top.message.empty()) {
+            exhaustion_reason = best_unsupported->metadata.last_failure;
+        } else {
+            exhaustion_reason = ReasonDetail{
+                .top = { .code    = { ReasonCategory::kSearchExhausted,
+                                      ReasonDomain::kOrchestrator },
+                        .message = "Worklist exhausted" },
+            };
+        }
+
+        return Ok(
+            OrchestratorResult{
+                .outcome = PassOutcome::Blocked(std::move(exhaustion_reason)),
+                .metadata =
+                    best_unsupported ? std::move(best_unsupported->metadata) : ItemMetadata{},
+                .run_metadata = context.run_metadata,
+            }
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // AdaptToLegacy — convert OrchestratorResult to SimplifyOutcome
+    // ---------------------------------------------------------------
+
+    SimplifyOutcome AdaptToLegacy(OrchestratorResult result, const Expr *original_expr) {
+        SimplifyOutcome outcome;
+
+        if (result.outcome.Succeeded()) {
+            outcome.kind       = SimplifyOutcome::Kind::kSimplified;
+            outcome.expr       = result.outcome.TakeExpr();
+            outcome.real_vars  = result.outcome.RealVars();
+            outcome.verified   = result.metadata.verification == VerificationState::kVerified;
+            outcome.sig_vector = std::move(result.metadata.sig_vector);
+        } else {
+            outcome.kind = SimplifyOutcome::Kind::kUnchangedUnsupported;
+            outcome.expr = original_expr != nullptr ? CloneExpr(*original_expr) : nullptr;
+        }
+
+        outcome.diag.classification             = result.run_metadata.input_classification;
+        outcome.diag.attempted_route            = result.metadata.attempted_route;
+        outcome.diag.rewrite_rounds             = result.metadata.rewrite_rounds;
+        outcome.diag.rewrite_produced_candidate = result.metadata.rewrite_produced_candidate;
+        outcome.diag.candidate_failed_verification =
+            result.metadata.candidate_failed_verification;
+        outcome.diag.reason_code = result.metadata.reason_code;
+        outcome.diag.cause_chain = std::move(result.metadata.cause_chain);
+
+        if (!result.outcome.Succeeded()) {
+            outcome.diag.reason = result.outcome.Reason().top.message;
+        }
+
+        return outcome;
+    }
+
+    // ---------------------------------------------------------------
+    // OrchestrateSimplifyForTest — convenience wrapper
+    // ---------------------------------------------------------------
+
+    Result< SimplifyOutcome > OrchestrateSimplifyForTest(
+        const Expr *input_expr, const std::vector< uint64_t > &sig,
+        const std::vector< std::string > &vars, const Options &opts,
+        const OrchestratorPolicy &policy
+    ) {
+        auto result = OrchestrateSimplify(input_expr, sig, vars, opts, policy);
+        if (!result.has_value()) { return std::unexpected(result.error()); }
+        return Ok(AdaptToLegacy(std::move(result.value()), input_expr));
     }
 
 } // namespace cobra
