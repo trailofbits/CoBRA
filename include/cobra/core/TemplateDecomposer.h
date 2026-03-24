@@ -1,9 +1,9 @@
 #pragma once
 
 #include "cobra/core/ExprCost.h"
+#include "cobra/core/PassContract.h"
 #include "cobra/core/SignatureSimplifier.h"
 #include <cstdint>
-#include <optional>
 #include <vector>
 
 namespace cobra {
@@ -17,7 +17,7 @@ namespace cobra {
     // Layer 2: target = G_out(A, G_in(B, C)) for atoms A, B, C.
     //
     // All candidates are full-width verified via the evaluator.
-    std::optional< SubResult > TryTemplateDecomposition(
+    SolverResult< SubResult > TryTemplateDecomposition(
         const SignatureContext &ctx, const Options &opts, uint32_t num_vars,
         const ExprCost *baseline_cost
     );

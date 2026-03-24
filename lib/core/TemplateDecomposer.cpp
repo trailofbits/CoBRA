@@ -1,6 +1,7 @@
 #include "cobra/core/TemplateDecomposer.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/ExprCost.h"
+#include "cobra/core/PassContract.h"
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/SignatureSimplifier.h"
 #include "cobra/core/Simplifier.h"
@@ -17,6 +18,17 @@
 #include <vector>
 
 namespace cobra {
+
+    namespace template_decomposer {
+
+        enum Subcode : uint16_t {
+            kNoEvaluator  = 1,
+            kTooManyVars  = 2,
+            kCostRejected = 3,
+            kNoMatch      = 10,
+        };
+
+    } // namespace template_decomposer
 
     namespace {
 
@@ -411,12 +423,29 @@ namespace cobra {
 
     } // namespace
 
-    std::optional< SubResult > TryTemplateDecomposition(
+    SolverResult< SubResult > TryTemplateDecomposition(
         const SignatureContext &ctx, const Options &opts, uint32_t num_vars,
         const ExprCost *baseline_cost
     ) {
         COBRA_TRACE("TemplateDecomp", "TryTemplateDecomposition: vars={}", num_vars);
-        if (!ctx.eval || num_vars > kMaxVars) { return std::nullopt; }
+        if (!ctx.eval) {
+            ReasonDetail reason{
+                .top = { .code    = { ReasonCategory::kGuardFailed,
+                                      ReasonDomain::kTemplateDecomposer,
+                                      template_decomposer::kNoEvaluator },
+                        .message = "no evaluator available" }
+            };
+            return SolverResult< SubResult >::Inapplicable(std::move(reason));
+        }
+        if (num_vars > kMaxVars) {
+            ReasonDetail reason{
+                .top = { .code    = { ReasonCategory::kGuardFailed,
+                                      ReasonDomain::kTemplateDecomposer,
+                                      template_decomposer::kTooManyVars },
+                        .message = "too many variables" }
+            };
+            return SolverResult< SubResult >::Inapplicable(std::move(reason));
+        }
 
         // Zero real variables: the function is a constant.
         if (num_vars == 0) {
@@ -424,13 +453,19 @@ namespace cobra {
             auto e              = Expr::Constant(kVal);
             auto info           = ComputeCost(*e);
             if ((baseline_cost != nullptr) && !IsBetter(info.cost, *baseline_cost)) {
-                return std::nullopt;
+                ReasonDetail reason{
+                    .top = { .code    = { ReasonCategory::kCostRejected,
+                                          ReasonDomain::kTemplateDecomposer,
+                                          template_decomposer::kCostRejected },
+                            .message = "constant result not cheaper than baseline" }
+                };
+                return SolverResult< SubResult >::Blocked(std::move(reason));
             }
             SubResult s;
             s.expr     = std::move(e);
             s.cost     = info.cost;
             s.verified = true;
-            return s;
+            return SolverResult< SubResult >::Success(std::move(s));
         }
 
         const uint64_t kMask =
@@ -466,7 +501,7 @@ namespace cobra {
                         s.expr     = std::move(e);
                         s.cost     = info.cost;
                         s.verified = true;
-                        return s;
+                        return SolverResult< SubResult >::Success(std::move(s));
                     }
                 }
             }
@@ -476,13 +511,13 @@ namespace cobra {
         auto r1 = Layer1(
             target, pool, vmap, kMask, *ctx.eval, num_vars, opts.bitwidth, baseline_cost
         );
-        if (r1.has_value()) { return r1; }
+        if (r1.has_value()) { return SolverResult< SubResult >::Success(std::move(*r1)); }
 
         // Layer 2.
         auto r2 = Layer2(
             target, pool, vmap, kMask, *ctx.eval, num_vars, opts.bitwidth, baseline_cost
         );
-        if (r2.has_value()) { return r2; }
+        if (r2.has_value()) { return SolverResult< SubResult >::Success(std::move(*r2)); }
 
         // Unary wrapping: check Neg(target) and Not(target)
         // against Layers 1 and 2.
@@ -517,7 +552,9 @@ namespace cobra {
                 auto it = vmap.find(lifted);
                 if (it != vmap.end()) {
                     auto r = check_wrap(CloneExpr(*pool[it->second].expr));
-                    if (r.has_value()) { return r; }
+                    if (r.has_value()) {
+                        return SolverResult< SubResult >::Success(std::move(*r));
+                    }
                 }
             }
 
@@ -526,7 +563,7 @@ namespace cobra {
                 Layer1(lifted, pool, vmap, kMask, *ctx.eval, num_vars, opts.bitwidth, nullptr);
             if (w1.has_value()) {
                 auto r = check_wrap(std::move(w1->expr));
-                if (r.has_value()) { return r; }
+                if (r.has_value()) { return SolverResult< SubResult >::Success(std::move(*r)); }
             }
         }
 
@@ -597,7 +634,7 @@ namespace cobra {
                             s.expr     = std::move(e);
                             s.cost     = info.cost;
                             s.verified = true;
-                            return s;
+                            return SolverResult< SubResult >::Success(std::move(s));
                         }
                     }
                 }
@@ -605,7 +642,13 @@ namespace cobra {
         }
 
         COBRA_TRACE("TemplateDecomp", "TryTemplateDecomposition: found={}", false);
-        return std::nullopt;
+        ReasonDetail reason{
+            .top = { .code    = { ReasonCategory::kSearchExhausted,
+                                  ReasonDomain::kTemplateDecomposer,
+                                  template_decomposer::kNoMatch },
+                    .message = "no template match found" }
+        };
+        return SolverResult< SubResult >::Blocked(std::move(reason));
     }
 
 } // namespace cobra

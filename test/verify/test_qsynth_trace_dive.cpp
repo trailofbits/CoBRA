@@ -289,15 +289,17 @@ namespace {
             auto td = TryTemplateDecomposition(ctx, opts, rv_count, nullptr);
             std::print(
                 stderr, "    reduced ({} vars): {}\n", rv_count,
-                td.has_value() ? "FOUND" : "none"
+                td.Succeeded() ? "FOUND" : "none"
             );
-            if (td.has_value()) {
+            if (td.Succeeded()) {
                 std::print(
-                    stderr, "    candidate: {} verified={}\n", expr_str(*td->expr), td->verified
+                    stderr, "    candidate: {} verified={}\n", expr_str(*td.Payload().expr),
+                    td.Payload().verified
                 );
                 // Verify in original space with all vars
                 auto check = FullWidthCheckEval(
-                    opts.evaluator, static_cast< uint32_t >(vars.size()), *td->expr, bitwidth
+                    opts.evaluator, static_cast< uint32_t >(vars.size()), *td.Payload().expr,
+                    bitwidth
                 );
                 std::print(stderr, "    VerifyOrigSpace: {}\n", check.passed ? "PASS" : "FAIL");
                 if (check.passed) {
@@ -319,12 +321,12 @@ namespace {
                 auto td2      = TryTemplateDecomposition(full_ctx, opts, all_vars, nullptr);
                 std::print(
                     stderr, "    full ({} vars): {}\n", all_vars,
-                    td2.has_value() ? "FOUND" : "none"
+                    td2.Succeeded() ? "FOUND" : "none"
                 );
-                if (td2.has_value()) {
+                if (td2.Succeeded()) {
                     std::print(
-                        stderr, "    candidate: {} verified={}\n", expr_str(*td2->expr),
-                        td2->verified
+                        stderr, "    candidate: {} verified={}\n",
+                        expr_str(*td2.Payload().expr), td2.Payload().verified
                     );
                 }
             }

@@ -532,9 +532,9 @@ TEST(QSynthDiagnostic, DecompEngineTelemetry) {
                 }
 
                 auto td = TryTemplateDecomposition(res_sig_ctx, res_opts, res_count, nullptr);
-                if (td.has_value()) {
+                if (td.Succeeded()) {
                     tmpl_solved      = true;
-                    auto solved_expr = std::move(td->expr);
+                    auto solved_expr = std::move(td.TakePayload().expr);
                     if (res_elim.real_vars.size() < vars.size()) {
                         std::function< void(Expr &, const std::vector< uint32_t > &) > remap =
                             [&remap](Expr &e, const std::vector< uint32_t > &m) {
@@ -2303,9 +2303,9 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
             }
 
             auto td = TryTemplateDecomposition(res_sig_ctx, res_opts, res_count, nullptr);
-            if (td.has_value()) {
+            if (td.Succeeded()) {
                 tmpl_solved      = true;
-                auto solved_expr = std::move(td->expr);
+                auto solved_expr = std::move(td.TakePayload().expr);
                 if (res_elim.real_vars.size() < vars.size()) {
                     std::function< void(Expr &, const std::vector< uint32_t > &) > remap =
                         [&remap](Expr &e, const std::vector< uint32_t > &m) {

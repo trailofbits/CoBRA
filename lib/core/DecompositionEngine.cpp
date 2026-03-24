@@ -200,17 +200,18 @@ namespace cobra {
         }
 
         auto td = TryTemplateDecomposition(sig_ctx, ctx.opts, kRvCount, nullptr);
-        if (td.has_value()) {
+        if (td.Succeeded()) {
+            auto td_payload = td.TakePayload();
             // Remap to original variable space if reduced
             if (elim.real_vars.size() < ctx.vars.size()) {
-                RemapVarIndices(*td->expr, sig_ctx.original_indices);
+                RemapVarIndices(*td_payload.expr, sig_ctx.original_indices);
             }
             // Verify in original variable space — reject false positives from
             // reduced-var template before consuming this extractor slot.
-            auto check = FullWidthCheckEval(ctx.opts.evaluator, kNv, *td->expr, kBw);
+            auto check = FullWidthCheckEval(ctx.opts.evaluator, kNv, *td_payload.expr, kBw);
             if (check.passed) {
                 CoreCandidate core;
-                core.expr = std::move(td->expr);
+                core.expr = std::move(td_payload.expr);
                 core.kind = ExtractorKind::kTemplate;
                 return core;
             }
@@ -225,9 +226,9 @@ namespace cobra {
             full_ctx.eval = ctx.opts.evaluator;
 
             auto td2 = TryTemplateDecomposition(full_ctx, ctx.opts, kNv, nullptr);
-            if (td2.has_value()) {
+            if (td2.Succeeded()) {
                 CoreCandidate core;
-                core.expr = std::move(td2->expr);
+                core.expr = std::move(td2.TakePayload().expr);
                 core.kind = ExtractorKind::kTemplate;
                 return core;
             }
@@ -493,8 +494,8 @@ namespace cobra {
                     auto td = TryTemplateDecomposition(
                         res_sig_ctx, residual_opts, kResRealCount, nullptr
                     );
-                    if (td.has_value()) {
-                        auto solved_expr = std::move(td->expr);
+                    if (td.Succeeded()) {
+                        auto solved_expr = std::move(td.TakePayload().expr);
                         if (res_fw_elim.real_vars.size() < ctx.vars.size()) {
                             RemapVarIndices(*solved_expr, res_support);
                         }
@@ -647,8 +648,8 @@ namespace cobra {
                     auto td = TryTemplateDecomposition(
                         res_sig_ctx, residual_opts, kResRealCount, nullptr
                     );
-                    if (td.has_value()) {
-                        auto solved_expr = std::move(td->expr);
+                    if (td.Succeeded()) {
+                        auto solved_expr = std::move(td.TakePayload().expr);
                         if (res_fw_elim.real_vars.size() < ctx.vars.size()) {
                             RemapVarIndices(*solved_expr, res_support);
                         }
