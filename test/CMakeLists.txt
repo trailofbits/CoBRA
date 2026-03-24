@@ -9,6 +9,7 @@ endfunction()
 
 # Core tests
 cobra_add_test(test_result core/test_result.cpp)
+cobra_add_test(test_pass_contract core/test_pass_contract.cpp)
 cobra_add_test(test_bitwidth core/test_bitwidth.cpp)
 cobra_add_test(test_expr core/test_expr.cpp)
 cobra_add_test(test_signature_vector core/test_signature_vector.cpp)
