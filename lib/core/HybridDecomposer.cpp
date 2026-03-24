@@ -121,6 +121,11 @@ namespace cobra {
             uint32_t active_count;
         };
 
+        void AppendReasonFrames(std::vector< ReasonFrame > &out, const ReasonDetail &detail) {
+            out.push_back(detail.top);
+            for (const auto &cause : detail.causes) { out.push_back(cause); }
+        }
+
     } // namespace
 
     namespace hybrid_decomposer {
@@ -214,6 +219,7 @@ namespace cobra {
         );
 
         std::optional< SignaturePayload > best;
+        std::vector< ReasonFrame > all_causes;
 
         for (const auto &cand : candidates) {
             // Build sub-evaluator: r_eval(vars) = f(vars) OP^{-1} v_k
@@ -237,7 +243,10 @@ namespace cobra {
             auto sub_result =
                 SimplifyFromSignature(cand.r_sig, r_ctx, opts, depth + 1, baseline_cost);
 
-            if (!sub_result.Succeeded()) { continue; }
+            if (!sub_result.Succeeded()) {
+                AppendReasonFrames(all_causes, sub_result.Reason());
+                continue;
+            }
 
             // Compose in context-space (variable indices 0..n-1).
             // No remap needed: sub-result already uses context indices.
@@ -268,7 +277,8 @@ namespace cobra {
         ReasonDetail reason{
             .top = { .code = { ReasonCategory::kSearchExhausted,
                                ReasonDomain::kHybridDecomposer, hybrid_decomposer::kNoMatch },
-                    .message = "no extraction matched" }
+                    .message = "no extraction matched" },
+            .causes = std::move(all_causes),
         };
         return SolverResult< SignaturePayload >::Blocked(std::move(reason));
     }

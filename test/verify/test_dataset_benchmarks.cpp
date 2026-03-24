@@ -10,6 +10,7 @@
 #include <iostream>
 #include <map>
 #include <string>
+#include <tuple>
 
 using namespace cobra;
 
@@ -159,11 +160,15 @@ namespace {
                         const auto &rc = *result.value().diag.reason_code;
                         stats.by_category[rc.category]++;
                         stats.by_domain[rc.domain]++;
-                        stats.by_triple[{ rc.category, rc.domain, rc.subcode }]++;
+                        stats.by_triple[DatasetStats::Triple{ rc.category, rc.domain,
+                                                              rc.subcode }]++;
                     }
                     for (const auto &frame : result.value().diag.cause_chain) {
                         if (frame.code.domain == ReasonDomain::kDecomposition) {
                             stats.decomp_cause_frames++;
+                            EXPECT_NE(frame.code.subcode, 0)
+                                << "Decomposition cause has unspecified subcode on line "
+                                << line_num;
                         }
                     }
                     break;
@@ -369,6 +374,8 @@ TEST(GAMBADataset, MbaObfNonlinear) {
 
 TEST(GAMBADataset, Syntia) {
     auto stats = run_dataset(DATASET_DIR "/gamba/syntia.txt");
+    const auto kOrchestratorVerify =
+        DatasetStats::Triple{ ReasonCategory::kVerifyFailed, ReasonDomain::kOrchestrator, 0 };
     EXPECT_EQ(stats.total, 501);
     EXPECT_EQ(stats.skipped_parse, 1); // header
     EXPECT_EQ(stats.parsed, 500);
@@ -379,10 +386,13 @@ TEST(GAMBADataset, Syntia) {
     // Every unsupported result carries a structured reason code.
     EXPECT_EQ(stats.has_structured_reason, stats.unsupported);
     EXPECT_EQ(stats.by_category[ReasonCategory::kVerifyFailed], 20);
+    EXPECT_EQ(stats.by_triple[kOrchestratorVerify], 20);
 }
 
 TEST(GAMBADataset, QSynthEA) {
     auto stats = run_dataset(DATASET_DIR "/gamba/qsynth_ea.txt");
+    const auto kOrchestratorVerify =
+        DatasetStats::Triple{ ReasonCategory::kVerifyFailed, ReasonDomain::kOrchestrator, 0 };
     EXPECT_EQ(stats.total, 501);
     EXPECT_EQ(stats.skipped_parse, 1); // header only
     EXPECT_EQ(stats.parsed, 500);
@@ -395,6 +405,8 @@ TEST(GAMBADataset, QSynthEA) {
     EXPECT_EQ(stats.by_category[ReasonCategory::kVerifyFailed], 119);
     EXPECT_EQ(stats.by_category[ReasonCategory::kRepresentationGap], 63);
     EXPECT_EQ(stats.by_category[ReasonCategory::kSearchExhausted], 30);
+    EXPECT_GT(stats.by_triple[kOrchestratorVerify], 0)
+        << "No orchestrator-level FW verification failures recorded";
 
     // Decomposition cause frames propagated into cause_chain.
     // MixedRewrite unsupported outcomes should carry delegated
@@ -420,6 +432,8 @@ TEST(GAMBADataset, LokiTiny) {
 
 TEST(OSESDataset, Fast) {
     auto stats = run_dataset(DATASET_DIR "/oses/oses_fast.txt");
+    const auto kOrchestratorVerify =
+        DatasetStats::Triple{ ReasonCategory::kVerifyFailed, ReasonDomain::kOrchestrator, 0 };
     EXPECT_EQ(stats.total, 473);
     EXPECT_EQ(stats.skipped_parse, 15);
     EXPECT_EQ(stats.parsed, 458);
@@ -433,6 +447,8 @@ TEST(OSESDataset, Fast) {
     EXPECT_EQ(stats.by_category[ReasonCategory::kVerifyFailed], 40);
     EXPECT_EQ(stats.by_category[ReasonCategory::kRepresentationGap], 23);
     EXPECT_EQ(stats.by_category[ReasonCategory::kSearchExhausted], 5);
+    EXPECT_GT(stats.by_triple[kOrchestratorVerify], 0)
+        << "No orchestrator-level FW verification failures recorded";
 }
 
 TEST(OSESDataset, DISABLED_Slow) {

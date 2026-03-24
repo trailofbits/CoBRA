@@ -161,6 +161,11 @@ namespace cobra {
             return { compacted, active_vars };
         }
 
+        void AppendReasonFrames(std::vector< ReasonFrame > &out, const ReasonDetail &detail) {
+            out.push_back(detail.top);
+            for (const auto &cause : detail.causes) { out.push_back(cause); }
+        }
+
     } // namespace
 
     namespace bitwise_decomposer {
@@ -337,6 +342,7 @@ namespace cobra {
         );
 
         std::optional< SignaturePayload > best;
+        std::vector< ReasonFrame > all_causes;
 
         for (const auto &cand : candidates) {
             // Build the variable list for g (all vars except k)
@@ -444,7 +450,10 @@ namespace cobra {
             auto sub_result =
                 SimplifyFromSignature(compacted_sig, g_ctx, opts, depth + 1, baseline_cost);
 
-            if (!sub_result.Succeeded()) { continue; }
+            if (!sub_result.Succeeded()) {
+                AppendReasonFrames(all_causes, sub_result.Reason());
+                continue;
+            }
 
             // Remap the sub-expression variable indices back to
             // context-space indices
@@ -481,7 +490,8 @@ namespace cobra {
         ReasonDetail reason{
             .top = { .code = { ReasonCategory::kSearchExhausted,
                                ReasonDomain::kBitwiseDecomposer, bitwise_decomposer::kNoMatch },
-                    .message = "no decomposition matched" }
+                    .message = "no decomposition matched" },
+            .causes = std::move(all_causes),
         };
         return SolverResult< SignaturePayload >::Blocked(std::move(reason));
     }
