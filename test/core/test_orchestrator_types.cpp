@@ -113,3 +113,54 @@ TEST(UnsupportedRank, DeeperDepthWins) {
     UnsupportedCandidate b{ .depth = 3, .last_pass = PassId::kDecompose };
     EXPECT_TRUE(UnsupportedRankBetter(a, b));
 }
+
+// --- Worklist tests ---
+
+TEST(Worklist, CandidatePopsFirst) {
+    Worklist wl;
+    WorkItem ast, cand;
+    ast.payload  = AstPayload{ .expr = Expr::Constant(0) };
+    cand.payload = CandidatePayload{ .expr = Expr::Constant(1) };
+    wl.Push(std::move(ast));
+    wl.Push(std::move(cand));
+    auto first = wl.Pop();
+    EXPECT_EQ(GetStateKind(first.payload), StateKind::kCandidateExpr);
+}
+
+TEST(Worklist, ShallowerDepthFirst) {
+    Worklist wl;
+    WorkItem deep, shallow;
+    deep.payload    = AstPayload{ .expr = Expr::Constant(0) };
+    deep.depth      = 5;
+    shallow.payload = AstPayload{ .expr = Expr::Constant(1) };
+    shallow.depth   = 1;
+    wl.Push(std::move(deep));
+    wl.Push(std::move(shallow));
+    auto first = wl.Pop();
+    EXPECT_EQ(first.depth, 1);
+}
+
+TEST(Worklist, HighWaterMark) {
+    Worklist wl;
+    WorkItem a, b, c;
+    a.payload = AstPayload{ .expr = Expr::Constant(0) };
+    b.payload = AstPayload{ .expr = Expr::Constant(1) };
+    c.payload = AstPayload{ .expr = Expr::Constant(2) };
+    wl.Push(std::move(a));
+    wl.Push(std::move(b));
+    wl.Push(std::move(c));
+    EXPECT_EQ(wl.HighWaterMark(), 3);
+    wl.Pop();
+    EXPECT_EQ(wl.HighWaterMark(), 3); // Stays at peak
+}
+
+// --- PassAttemptCache tests ---
+
+TEST(PassAttemptCache, RecordAndQuery) {
+    PassAttemptCache cache;
+    StateFingerprint fp{ .kind = StateKind::kFoldedAst };
+    EXPECT_FALSE(cache.HasAttempted(fp, PassId::kDecompose));
+    cache.Record(fp, PassId::kDecompose);
+    EXPECT_TRUE(cache.HasAttempted(fp, PassId::kDecompose));
+    EXPECT_FALSE(cache.HasAttempted(fp, PassId::kSupportedSolve));
+}

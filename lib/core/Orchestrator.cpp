@@ -1,4 +1,7 @@
 #include "Orchestrator.h"
+#include "OrchestratorPasses.h"
+
+#include <algorithm>
 
 namespace cobra {
 
@@ -67,6 +70,71 @@ namespace cobra {
 
         return fp;
     }
+
+    namespace {
+        int BandOf(const WorkItem &item) {
+            return GetStateKind(item.payload) == StateKind::kCandidateExpr ? 0 : 1;
+        }
+
+        bool IsBetterPriority(const WorkItem &a, const WorkItem &b) {
+            int band_a = BandOf(a);
+            int band_b = BandOf(b);
+            if (band_a != band_b) { return band_a < band_b; }
+            if (a.depth != b.depth) { return a.depth < b.depth; }
+            if (a.features.provenance != b.features.provenance) {
+                return a.features.provenance < b.features.provenance;
+            }
+            if (a.history.size() != b.history.size()) {
+                return a.history.size() < b.history.size();
+            }
+            return false;
+        }
+    } // namespace
+
+    size_t StateFingerprintHash::operator()(const StateFingerprint &fp) const {
+        size_t h = std::hash< uint64_t >{}(fp.payload_hash);
+        h ^= std::hash< int >{}(static_cast< int >(fp.kind)) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash< uint32_t >{}(fp.bitwidth) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash< int >{}(static_cast< int >(fp.provenance)) + 0x9e3779b9 + (h << 6)
+            + (h >> 2);
+        h ^= std::hash< uint32_t >{}(fp.stage_cursor) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        for (const auto &v : fp.vars) {
+            h ^= std::hash< std::string >{}(v) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        }
+        return h;
+    }
+
+    void PassAttemptCache::Record(const StateFingerprint &fp, PassId pass) {
+        cache_[fp].push_back(pass);
+    }
+
+    bool PassAttemptCache::HasAttempted(const StateFingerprint &fp, PassId pass) const {
+        auto it = cache_.find(fp);
+        if (it == cache_.end()) { return false; }
+        const auto &passes = it->second;
+        return std::find(passes.begin(), passes.end(), pass) != passes.end();
+    }
+
+    void Worklist::Push(WorkItem item) {
+        items_.push_back(std::move(item));
+        high_water_ = std::max(high_water_, items_.size());
+    }
+
+    WorkItem Worklist::Pop() {
+        size_t best = 0;
+        for (size_t i = 1; i < items_.size(); ++i) {
+            if (IsBetterPriority(items_[i], items_[best])) { best = i; }
+        }
+        WorkItem result = std::move(items_[best]);
+        items_.erase(items_.begin() + static_cast< ptrdiff_t >(best));
+        return result;
+    }
+
+    bool Worklist::Empty() const { return items_.empty(); }
+
+    size_t Worklist::Size() const { return items_.size(); }
+
+    size_t Worklist::HighWaterMark() const { return high_water_; }
 
     bool UnsupportedRankBetter(const UnsupportedCandidate &a, const UnsupportedCandidate &b) {
         // 1. Candidates (verification-failed) rank highest

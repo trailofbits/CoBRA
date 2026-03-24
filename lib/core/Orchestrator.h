@@ -11,6 +11,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -212,5 +213,47 @@ namespace cobra {
     // Deterministic ordering for selecting the best unsupported candidate
     // to surface in the final result.
     bool UnsupportedRankBetter(const UnsupportedCandidate &a, const UnsupportedCandidate &b);
+
+    // ---------------------------------------------------------------
+    // StateFingerprintHash — std::unordered_map key support
+    // ---------------------------------------------------------------
+
+    struct StateFingerprintHash
+    {
+        size_t operator()(const StateFingerprint &fp) const;
+    };
+
+    // ---------------------------------------------------------------
+    // PassAttemptCache — deduplication of pass attempts per fingerprint
+    // ---------------------------------------------------------------
+
+    class PassAttemptCache
+    {
+      public:
+        void Record(const StateFingerprint &fp, PassId pass);
+        bool HasAttempted(const StateFingerprint &fp, PassId pass) const;
+
+      private:
+        std::unordered_map< StateFingerprint, std::vector< PassId >, StateFingerprintHash >
+            cache_;
+    };
+
+    // ---------------------------------------------------------------
+    // Worklist — priority queue over WorkItems
+    // ---------------------------------------------------------------
+
+    class Worklist
+    {
+      public:
+        void Push(WorkItem item);
+        WorkItem Pop();
+        bool Empty() const;
+        size_t Size() const;
+        size_t HighWaterMark() const;
+
+      private:
+        std::vector< WorkItem > items_;
+        size_t high_water_ = 0;
+    };
 
 } // namespace cobra
