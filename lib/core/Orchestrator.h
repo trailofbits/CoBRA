@@ -202,13 +202,7 @@ namespace cobra {
     // ---------------------------------------------------------------
 
     // Returns the StateKind corresponding to the active variant alternative.
-    inline StateKind GetStateKind(const StateData &data) {
-        if (std::holds_alternative< AstPayload >(data)) { return StateKind::kFoldedAst; }
-        if (std::holds_alternative< SignatureStatePayload >(data)) {
-            return StateKind::kSignatureState;
-        }
-        return StateKind::kCandidateExpr;
-    }
+    StateKind GetStateKind(const StateData &data);
 
     // Computes a deduplication fingerprint for a WorkItem.
     // When normalize_stage_cursor is true, the cursor is zeroed in the key.

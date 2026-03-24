@@ -46,6 +46,8 @@ target_sources(cobra-core PRIVATE
     SemilinearSignature.cpp
     StructureRecovery.cpp
     PassContract.cpp
+    Orchestrator.cpp
+    OrchestratorPasses.cpp
 )
 
 target_include_directories(cobra-core PUBLIC
