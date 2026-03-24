@@ -346,17 +346,18 @@ namespace cobra {
         // Delegate to SignatureSimplifier
         auto sub = SimplifyFromSignature(elim.reduced_sig, ctx, opts, 0);
         COBRA_TRACE(
-            "Simplifier", "RunSupportedPipeline: SignatureSimplifier returned has_value={}",
-            sub.has_value()
+            "Simplifier", "RunSupportedPipeline: SignatureSimplifier returned succeeded={}",
+            sub.Succeeded()
         );
 
-        if (sub.has_value()) {
+        if (sub.Succeeded()) {
+            auto payload = sub.TakePayload();
             SimplifyOutcome outcome;
             outcome.kind       = SimplifyOutcome::Kind::kSimplified;
-            outcome.expr       = std::move(sub->expr);
+            outcome.expr       = std::move(payload.expr);
             outcome.sig_vector = elim.reduced_sig;
             outcome.real_vars  = std::move(elim.real_vars);
-            outcome.verified   = sub->verified;
+            outcome.verified   = payload.verification == VerificationState::kVerified;
             return Ok(std::move(outcome));
         }
 

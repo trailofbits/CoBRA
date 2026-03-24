@@ -171,17 +171,18 @@ namespace {
         // SignatureSimplifier
         auto ctx = build_ctx(elim, vars, opts.evaluator);
         auto sub = SimplifyFromSignature(elim.reduced_sig, ctx, opts, 0);
-        if (sub.has_value()) {
+        if (sub.Succeeded()) {
+            auto payload = sub.TakePayload();
             std::print(
                 stderr, "    {}: SigSimplifier => {} verified={}\n", label,
-                expr_str(*sub->expr), sub->verified
+                expr_str(*payload.expr), payload.verification == VerificationState::kVerified
             );
             SimplifyOutcome outcome;
             outcome.kind       = SimplifyOutcome::Kind::kSimplified;
-            outcome.expr       = std::move(sub->expr);
+            outcome.expr       = std::move(payload.expr);
             outcome.sig_vector = elim.reduced_sig;
             outcome.real_vars  = std::move(elim.real_vars);
-            outcome.verified   = sub->verified;
+            outcome.verified   = payload.verification == VerificationState::kVerified;
             return outcome;
         }
 
@@ -294,7 +295,7 @@ namespace {
             if (td.Succeeded()) {
                 std::print(
                     stderr, "    candidate: {} verified={}\n", expr_str(*td.Payload().expr),
-                    td.Payload().verified
+                    td.Payload().verification == VerificationState::kVerified
                 );
                 // Verify in original space with all vars
                 auto check = FullWidthCheckEval(
@@ -326,7 +327,8 @@ namespace {
                 if (td2.Succeeded()) {
                     std::print(
                         stderr, "    candidate: {} verified={}\n",
-                        expr_str(*td2.Payload().expr), td2.Payload().verified
+                        expr_str(*td2.Payload().expr),
+                        td2.Payload().verification == VerificationState::kVerified
                     );
                 }
             }

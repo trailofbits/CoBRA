@@ -15,9 +15,9 @@ TEST(SignatureSimplifierTest, ConstantSig) {
     Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = SimplifyFromSignature(sig, ctx, opts, 0);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->expr->kind, Expr::Kind::kConstant);
-    EXPECT_EQ(result->expr->constant_val, 42u);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_EQ(result.Payload().expr->kind, Expr::Kind::kConstant);
+    EXPECT_EQ(result.Payload().expr->constant_val, 42u);
 }
 
 TEST(SignatureSimplifierTest, XorSig) {
@@ -29,8 +29,8 @@ TEST(SignatureSimplifierTest, XorSig) {
     Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = SimplifyFromSignature(sig, ctx, opts, 0);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->expr->kind, Expr::Kind::kXor);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_EQ(result.Payload().expr->kind, Expr::Kind::kXor);
 }
 
 TEST(SignatureSimplifierTest, XPlusYSig) {
@@ -42,8 +42,8 @@ TEST(SignatureSimplifierTest, XPlusYSig) {
     Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = SimplifyFromSignature(sig, ctx, opts, 0);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->expr->kind, Expr::Kind::kAdd);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_EQ(result.Payload().expr->kind, Expr::Kind::kAdd);
 }
 
 TEST(SignatureSimplifierTest, IsBooleanValued) {
@@ -69,7 +69,7 @@ TEST(SignatureSimplifierTest, FeatureFlagDisablesDecomposition) {
     };
     opts_on.evaluator = eval;
     auto r1           = SimplifyFromSignature(sig, ctx, opts_on, 0);
-    ASSERT_TRUE(r1.has_value());
+    ASSERT_TRUE(r1.Succeeded());
 
     // With decomposition disabled — should still produce a result
     // (pattern matcher handles pure bitwise), but the path through
@@ -80,7 +80,7 @@ TEST(SignatureSimplifierTest, FeatureFlagDisablesDecomposition) {
                       .enable_bitwise_decomposition = false };
     opts_off.evaluator = eval;
     auto r2            = SimplifyFromSignature(sig, ctx, opts_off, 0);
-    ASSERT_TRUE(r2.has_value());
+    ASSERT_TRUE(r2.Succeeded());
 }
 
 // --- kPolynomial recovery with singleton power interaction ---
@@ -104,10 +104,10 @@ TEST(SignatureSimplifierTest, CrossTermRecoveredWithSingleton) {
     opts.evaluator = eval;
 
     auto result = SimplifyFromSignature(sig, ctx, opts, 0);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->verified);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_TRUE(result.Payload().verification == VerificationState::kVerified);
 
-    auto check = FullWidthCheckEval(eval, 2, *result->expr, 64);
+    auto check = FullWidthCheckEval(eval, 2, *result.Payload().expr, 64);
     EXPECT_TRUE(check.passed);
 }
 
@@ -125,10 +125,10 @@ TEST(SignatureSimplifierTest, LinearPlusCrossTermRecovered) {
     opts.evaluator = eval;
 
     auto result = SimplifyFromSignature(sig, ctx, opts, 0);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->verified);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_TRUE(result.Payload().verification == VerificationState::kVerified);
 
-    auto check = FullWidthCheckEval(eval, 2, *result->expr, 64);
+    auto check = FullWidthCheckEval(eval, 2, *result.Payload().expr, 64);
     EXPECT_TRUE(check.passed);
 }
 
@@ -146,10 +146,10 @@ TEST(SignatureSimplifierTest, PureMulStillWorks) {
     opts.evaluator = eval;
 
     auto result = SimplifyFromSignature(sig, ctx, opts, 0);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->verified);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_TRUE(result.Payload().verification == VerificationState::kVerified);
 
-    auto check = FullWidthCheckEval(eval, 2, *result->expr, 64);
+    auto check = FullWidthCheckEval(eval, 2, *result.Payload().expr, 64);
     EXPECT_TRUE(check.passed);
 }
 
@@ -176,10 +176,10 @@ TEST(SignatureSimplifierTest, WordValuedOrFullPipeline) {
     opts.evaluator = eval;
 
     auto result = SimplifyFromSignature(sig, ctx, opts, 0);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->verified);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_TRUE(result.Payload().verification == VerificationState::kVerified);
 
-    auto check = FullWidthCheckEval(eval, 3, *result->expr, 64);
+    auto check = FullWidthCheckEval(eval, 3, *result.Payload().expr, 64);
     EXPECT_TRUE(check.passed);
 }
 
@@ -201,10 +201,10 @@ TEST(SignatureSimplifierTest, WordValuedXorFullPipeline) {
     opts.evaluator = eval;
 
     auto result = SimplifyFromSignature(sig, ctx, opts, 0);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->verified);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_TRUE(result.Payload().verification == VerificationState::kVerified);
 
-    auto check = FullWidthCheckEval(eval, 3, *result->expr, 64);
+    auto check = FullWidthCheckEval(eval, 3, *result.Payload().expr, 64);
     EXPECT_TRUE(check.passed);
 }
 
@@ -223,9 +223,9 @@ TEST(SignatureSimplifierTest, QuadraticOnlyNoSpuriousMul) {
     opts.evaluator = eval;
 
     auto result = SimplifyFromSignature(sig, ctx, opts, 0);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->verified);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_TRUE(result.Payload().verification == VerificationState::kVerified);
 
-    auto check = FullWidthCheckEval(eval, 1, *result->expr, 64);
+    auto check = FullWidthCheckEval(eval, 1, *result.Payload().expr, 64);
     EXPECT_TRUE(check.passed);
 }

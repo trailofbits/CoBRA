@@ -249,7 +249,7 @@ namespace cobra {
         // Try to verify and update the best result.
         // NOLINTNEXTLINE(readability-identifier-naming)
         bool TryUpdate(
-            std::optional< SubResult > &best, std::unique_ptr< Expr > candidate,
+            std::optional< SignaturePayload > &best, std::unique_ptr< Expr > candidate,
             const Evaluator &eval, uint32_t num_vars, uint32_t bw, const ExprCost *baseline
         ) {
             auto chk = FullWidthCheckEval(eval, num_vars, *candidate, bw);
@@ -259,21 +259,21 @@ namespace cobra {
             if ((baseline != nullptr) && !IsBetter(info.cost, *baseline)) { return false; }
             if (best.has_value() && !IsBetter(info.cost, best->cost)) { return false; }
 
-            SubResult s;
-            s.expr     = std::move(candidate);
-            s.cost     = info.cost;
-            s.verified = true;
-            best       = std::move(s);
+            best = SignaturePayload{
+                .expr         = std::move(candidate),
+                .cost         = info.cost,
+                .verification = VerificationState::kVerified,
+            };
             return true;
         }
 
         // Layer 1: target = G(A, B) for atoms A, B.
-        std::optional< SubResult > Layer1(
+        std::optional< SignaturePayload > Layer1(
             const ProbeVals &target, const std::vector< Atom > &pool, const ValMap &vmap,
             uint64_t mask, const Evaluator &eval, uint32_t nv, uint32_t bw,
             const ExprCost *baseline
         ) {
-            std::optional< SubResult > best;
+            std::optional< SignaturePayload > best;
 
             for (auto g : kAllGates) {
                 if (GateInvertible(g)) {
@@ -306,12 +306,12 @@ namespace cobra {
 
         // Layer 1, invertible gates only (XOR, ADD).
         // Uses hash lookup — O(pool) per gate.
-        std::optional< SubResult > Layer1Fast(
+        std::optional< SignaturePayload > Layer1Fast(
             const ProbeVals &target, const std::vector< Atom > &pool, const ValMap &vmap,
             uint64_t mask, const Evaluator &eval, uint32_t nv, uint32_t bw,
             const ExprCost *baseline
         ) {
-            std::optional< SubResult > best;
+            std::optional< SignaturePayload > best;
             for (auto g : kAllGates) {
                 if (!GateInvertible(g)) { continue; }
                 for (size_t ai = 0; ai < pool.size(); ++ai) {
@@ -347,7 +347,7 @@ namespace cobra {
         }
 
         // Layer 2: target = G_out(A, G_in(B, C)).
-        std::optional< SubResult > Layer2(
+        std::optional< SignaturePayload > Layer2(
             const ProbeVals &target, const std::vector< Atom > &pool, const ValMap &vmap,
             uint64_t mask, const Evaluator &eval, uint32_t nv, uint32_t bw,
             const ExprCost *baseline
@@ -368,7 +368,7 @@ namespace cobra {
                 }
             }
 
-            std::optional< SubResult > best;
+            std::optional< SignaturePayload > best;
 
             auto make_inner = [&](const InnerComp &ic) {
                 return GateExpr(
@@ -423,7 +423,7 @@ namespace cobra {
 
     } // namespace
 
-    SolverResult< SubResult > TryTemplateDecomposition(
+    SolverResult< SignaturePayload > TryTemplateDecomposition(
         const SignatureContext &ctx, const Options &opts, uint32_t num_vars,
         const ExprCost *baseline_cost
     ) {
@@ -435,7 +435,7 @@ namespace cobra {
                                       template_decomposer::kNoEvaluator },
                         .message = "no evaluator available" }
             };
-            return SolverResult< SubResult >::Inapplicable(std::move(reason));
+            return SolverResult< SignaturePayload >::Inapplicable(std::move(reason));
         }
         if (num_vars > kMaxVars) {
             ReasonDetail reason{
@@ -444,7 +444,7 @@ namespace cobra {
                                       template_decomposer::kTooManyVars },
                         .message = "too many variables" }
             };
-            return SolverResult< SubResult >::Inapplicable(std::move(reason));
+            return SolverResult< SignaturePayload >::Inapplicable(std::move(reason));
         }
 
         // Zero real variables: the function is a constant.
@@ -459,13 +459,14 @@ namespace cobra {
                                           template_decomposer::kCostRejected },
                             .message = "constant result not cheaper than baseline" }
                 };
-                return SolverResult< SubResult >::Blocked(std::move(reason));
+                return SolverResult< SignaturePayload >::Blocked(std::move(reason));
             }
-            SubResult s;
-            s.expr     = std::move(e);
-            s.cost     = info.cost;
-            s.verified = true;
-            return SolverResult< SubResult >::Success(std::move(s));
+            SignaturePayload s{
+                .expr         = std::move(e),
+                .cost         = info.cost,
+                .verification = VerificationState::kVerified,
+            };
+            return SolverResult< SignaturePayload >::Success(std::move(s));
         }
 
         const uint64_t kMask =
@@ -497,11 +498,12 @@ namespace cobra {
                 if (chk.passed) {
                     auto info = ComputeCost(*e);
                     if ((baseline_cost == nullptr) || IsBetter(info.cost, *baseline_cost)) {
-                        SubResult s;
-                        s.expr     = std::move(e);
-                        s.cost     = info.cost;
-                        s.verified = true;
-                        return SolverResult< SubResult >::Success(std::move(s));
+                        SignaturePayload s{
+                            .expr         = std::move(e),
+                            .cost         = info.cost,
+                            .verification = VerificationState::kVerified,
+                        };
+                        return SolverResult< SignaturePayload >::Success(std::move(s));
                     }
                 }
             }
@@ -511,13 +513,17 @@ namespace cobra {
         auto r1 = Layer1(
             target, pool, vmap, kMask, *ctx.eval, num_vars, opts.bitwidth, baseline_cost
         );
-        if (r1.has_value()) { return SolverResult< SubResult >::Success(std::move(*r1)); }
+        if (r1.has_value()) {
+            return SolverResult< SignaturePayload >::Success(std::move(*r1));
+        }
 
         // Layer 2.
         auto r2 = Layer2(
             target, pool, vmap, kMask, *ctx.eval, num_vars, opts.bitwidth, baseline_cost
         );
-        if (r2.has_value()) { return SolverResult< SubResult >::Success(std::move(*r2)); }
+        if (r2.has_value()) {
+            return SolverResult< SignaturePayload >::Success(std::move(*r2));
+        }
 
         // Unary wrapping: check Neg(target) and Not(target)
         // against Layers 1 and 2.
@@ -531,7 +537,8 @@ namespace cobra {
                 }
             }
 
-            auto check_wrap = [&](std::unique_ptr< Expr > inner) -> std::optional< SubResult > {
+            auto check_wrap =
+                [&](std::unique_ptr< Expr > inner) -> std::optional< SignaturePayload > {
                 auto wrapped = (wrap == 0) ? Expr::Negate(std::move(inner))
                                            : Expr::BitwiseNot(std::move(inner));
                 auto chk     = FullWidthCheckEval(*ctx.eval, num_vars, *wrapped, opts.bitwidth);
@@ -540,10 +547,11 @@ namespace cobra {
                 if (baseline_cost && !IsBetter(info.cost, *baseline_cost)) {
                     return std::nullopt;
                 }
-                SubResult s;
-                s.expr     = std::move(wrapped);
-                s.cost     = info.cost;
-                s.verified = true;
+                SignaturePayload s{
+                    .expr         = std::move(wrapped),
+                    .cost         = info.cost,
+                    .verification = VerificationState::kVerified,
+                };
                 return s;
             };
 
@@ -553,7 +561,7 @@ namespace cobra {
                 if (it != vmap.end()) {
                     auto r = check_wrap(CloneExpr(*pool[it->second].expr));
                     if (r.has_value()) {
-                        return SolverResult< SubResult >::Success(std::move(*r));
+                        return SolverResult< SignaturePayload >::Success(std::move(*r));
                     }
                 }
             }
@@ -563,7 +571,9 @@ namespace cobra {
                 Layer1(lifted, pool, vmap, kMask, *ctx.eval, num_vars, opts.bitwidth, nullptr);
             if (w1.has_value()) {
                 auto r = check_wrap(std::move(w1->expr));
-                if (r.has_value()) { return SolverResult< SubResult >::Success(std::move(*r)); }
+                if (r.has_value()) {
+                    return SolverResult< SignaturePayload >::Success(std::move(*r));
+                }
             }
         }
 
@@ -630,11 +640,12 @@ namespace cobra {
                             {
                                 continue;
                             }
-                            SubResult s;
-                            s.expr     = std::move(e);
-                            s.cost     = info.cost;
-                            s.verified = true;
-                            return SolverResult< SubResult >::Success(std::move(s));
+                            SignaturePayload s{
+                                .expr         = std::move(e),
+                                .cost         = info.cost,
+                                .verification = VerificationState::kVerified,
+                            };
+                            return SolverResult< SignaturePayload >::Success(std::move(s));
                         }
                     }
                 }
@@ -648,7 +659,7 @@ namespace cobra {
                                   template_decomposer::kNoMatch },
                     .message = "no template match found" }
         };
-        return SolverResult< SubResult >::Blocked(std::move(reason));
+        return SolverResult< SignaturePayload >::Blocked(std::move(reason));
     }
 
 } // namespace cobra

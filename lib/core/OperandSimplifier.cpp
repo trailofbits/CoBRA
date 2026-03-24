@@ -154,8 +154,8 @@ namespace cobra {
 
             auto result = SimplifyFromSignature(sig, ctx, sub_opts, 0, &operand_cost);
 
-            if (!result.has_value()) { return std::nullopt; }
-            if (!IsBetter(result->cost, operand_cost)) { return std::nullopt; }
+            if (!result.Succeeded()) { return std::nullopt; }
+            if (!IsBetter(result.Payload().cost, operand_cost)) { return std::nullopt; }
 
             // Verify the simplified operand is FW-equivalent to
             // the original. Boolean-equivalent replacement can
@@ -169,11 +169,11 @@ namespace cobra {
             for (int p = 0; p < kProbes; ++p) {
                 for (uint32_t i = 0; i < num_vars; ++i) { pt[i] = rng() & kMask; }
                 uint64_t orig_val = EvalExpr(operand, pt, opts.bitwidth) & kMask;
-                uint64_t simp_val = EvalExpr(*result->expr, pt, opts.bitwidth) & kMask;
+                uint64_t simp_val = EvalExpr(*result.Payload().expr, pt, opts.bitwidth) & kMask;
                 if (orig_val != simp_val) { return std::nullopt; }
             }
 
-            return std::move(result->expr);
+            return std::move(result.TakePayload().expr);
         }
 
         // Try to simplify operands of a mixed Mul node. Returns the

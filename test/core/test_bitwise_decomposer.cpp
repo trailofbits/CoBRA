@@ -42,9 +42,9 @@ TEST(BitwiseDecomposerTest, DOrCA) {
     Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, nullptr);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->verified);
-    EXPECT_EQ(result->expr->kind, Expr::Kind::kOr);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_TRUE(result.Payload().verification == VerificationState::kVerified);
+    EXPECT_EQ(result.Payload().expr->kind, Expr::Kind::kOr);
 }
 
 TEST(BitwiseDecomposerTest, ESquaredAndD) {
@@ -55,9 +55,9 @@ TEST(BitwiseDecomposerTest, ESquaredAndD) {
     Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, nullptr);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->verified);
-    EXPECT_EQ(result->expr->kind, Expr::Kind::kAnd);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_TRUE(result.Payload().verification == VerificationState::kVerified);
+    EXPECT_EQ(result.Payload().expr->kind, Expr::Kind::kAnd);
 }
 
 TEST(BitwiseDecomposerTest, DSquaredXorA) {
@@ -68,9 +68,9 @@ TEST(BitwiseDecomposerTest, DSquaredXorA) {
     Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, nullptr);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->verified);
-    EXPECT_EQ(result->expr->kind, Expr::Kind::kXor);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_TRUE(result.Payload().verification == VerificationState::kVerified);
+    EXPECT_EQ(result.Payload().expr->kind, Expr::Kind::kXor);
 }
 
 TEST(BitwiseDecomposerTest, AddDecompXPlusY) {
@@ -81,9 +81,9 @@ TEST(BitwiseDecomposerTest, AddDecompXPlusY) {
     Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, nullptr);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->verified);
-    EXPECT_EQ(result->expr->kind, Expr::Kind::kAdd);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_TRUE(result.Payload().verification == VerificationState::kVerified);
+    EXPECT_EQ(result.Payload().expr->kind, Expr::Kind::kAdd);
 }
 
 TEST(BitwiseDecomposerTest, DepthCapReturnsNullopt) {
@@ -93,7 +93,7 @@ TEST(BitwiseDecomposerTest, DepthCapReturnsNullopt) {
     Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 2, nullptr);
-    EXPECT_FALSE(result.has_value());
+    EXPECT_FALSE(result.Succeeded());
 }
 
 TEST(BitwiseDecomposerTest, BaselineGateRejectsWorse) {
@@ -104,7 +104,7 @@ TEST(BitwiseDecomposerTest, BaselineGateRejectsWorse) {
 
     ExprCost baseline{ 1, 0, 1 };
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, &baseline);
-    EXPECT_FALSE(result.has_value());
+    EXPECT_FALSE(result.Succeeded());
 }
 
 TEST(BitwiseDecomposerTest, NoEvaluatorReturnsNullopt) {
@@ -116,7 +116,7 @@ TEST(BitwiseDecomposerTest, NoEvaluatorReturnsNullopt) {
     Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, nullptr);
-    EXPECT_FALSE(result.has_value());
+    EXPECT_FALSE(result.Succeeded());
 }
 
 TEST(BitwiseDecomposerTest, CofactorOrdering) {
@@ -140,9 +140,9 @@ TEST(BitwiseDecomposerTest, WordValuedOrAccepted) {
     opts.evaluator = f;
 
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, nullptr);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->verified);
-    EXPECT_EQ(result->expr->kind, Expr::Kind::kOr);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_TRUE(result.Payload().verification == VerificationState::kVerified);
+    EXPECT_EQ(result.Payload().expr->kind, Expr::Kind::kOr);
 }
 
 TEST(BitwiseDecomposerTest, MultiLevelPureBitwise) {
@@ -158,9 +158,9 @@ TEST(BitwiseDecomposerTest, MultiLevelPureBitwise) {
     Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, nullptr);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->verified);
-    EXPECT_EQ(result->expr->kind, Expr::Kind::kAnd);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_TRUE(result.Payload().verification == VerificationState::kVerified);
+    EXPECT_EQ(result.Payload().expr->kind, Expr::Kind::kAnd);
 }
 
 TEST(BitwiseDecomposerTest, VerifiedButNotBetterRejected) {
@@ -171,7 +171,7 @@ TEST(BitwiseDecomposerTest, VerifiedButNotBetterRejected) {
 
     ExprCost baseline{ 3, 0, 2 }; // cost of x & y itself
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, &baseline);
-    EXPECT_FALSE(result.has_value());
+    EXPECT_FALSE(result.Succeeded());
 }
 
 // --- Phase 2: Mul-based decomposition (polynomial cofactors) ---
@@ -184,9 +184,9 @@ TEST(BitwiseDecomposerTest, MulDecompBTimesAplusA) {
     Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, nullptr);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->verified);
-    EXPECT_EQ(result->expr->kind, Expr::Kind::kMul);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_TRUE(result.Payload().verification == VerificationState::kVerified);
+    EXPECT_EQ(result.Payload().expr->kind, Expr::Kind::kMul);
 }
 
 TEST(BitwiseDecomposerTest, MulDecompBTimesAplusOne) {
@@ -197,9 +197,9 @@ TEST(BitwiseDecomposerTest, MulDecompBTimesAplusOne) {
     Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, nullptr);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->verified);
-    EXPECT_EQ(result->expr->kind, Expr::Kind::kMul);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_TRUE(result.Payload().verification == VerificationState::kVerified);
+    EXPECT_EQ(result.Payload().expr->kind, Expr::Kind::kMul);
 }
 
 TEST(BitwiseDecomposerTest, MulDecompThreeVars) {
@@ -210,9 +210,9 @@ TEST(BitwiseDecomposerTest, MulDecompThreeVars) {
     Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, nullptr);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->verified);
-    EXPECT_EQ(result->expr->kind, Expr::Kind::kMul);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_TRUE(result.Payload().verification == VerificationState::kVerified);
+    EXPECT_EQ(result.Payload().expr->kind, Expr::Kind::kMul);
 }
 
 TEST(BitwiseDecomposerTest, MulRejectsNonZeroCof0ButAddMatches) {
@@ -224,9 +224,9 @@ TEST(BitwiseDecomposerTest, MulRejectsNonZeroCof0ButAddMatches) {
     Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
 
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, nullptr);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->verified);
-    EXPECT_EQ(result->expr->kind, Expr::Kind::kAdd);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_TRUE(result.Payload().verification == VerificationState::kVerified);
+    EXPECT_EQ(result.Payload().expr->kind, Expr::Kind::kAdd);
 }
 
 TEST(BitwiseDecomposerTest, ShapeMatchesButGFailsToImprove) {
@@ -237,7 +237,7 @@ TEST(BitwiseDecomposerTest, ShapeMatchesButGFailsToImprove) {
 
     ExprCost baseline{ 1, 0, 1 }; // impossible to beat
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, &baseline);
-    EXPECT_FALSE(result.has_value());
+    EXPECT_FALSE(result.Succeeded());
 }
 
 // --- Word-valued cofactor decomposition ---
@@ -253,9 +253,9 @@ TEST(BitwiseDecomposerTest, WordValuedXorDecomp) {
     opts.evaluator = f;
 
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, nullptr);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->verified);
-    EXPECT_EQ(result->expr->kind, Expr::Kind::kXor);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_TRUE(result.Payload().verification == VerificationState::kVerified);
+    EXPECT_EQ(result.Payload().expr->kind, Expr::Kind::kXor);
 }
 
 TEST(BitwiseDecomposerTest, WordValuedOrTwoVars) {
@@ -275,7 +275,7 @@ TEST(BitwiseDecomposerTest, WordValuedOrTwoVars) {
     opts.evaluator = f;
 
     auto result = TryBitwiseDecomposition(sig, ctx, opts, 0, nullptr);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->verified);
-    EXPECT_EQ(result->expr->kind, Expr::Kind::kOr);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_TRUE(result.Payload().verification == VerificationState::kVerified);
+    EXPECT_EQ(result.Payload().expr->kind, Expr::Kind::kOr);
 }

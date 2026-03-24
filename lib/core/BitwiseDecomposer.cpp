@@ -1,6 +1,7 @@
 #include "cobra/core/BitwiseDecomposer.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/ExprCost.h"
+#include "cobra/core/PassContract.h"
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/SignatureSimplifier.h"
 #include "cobra/core/Simplifier.h"
@@ -162,7 +163,19 @@ namespace cobra {
 
     } // namespace
 
-    std::optional< SubResult > TryBitwiseDecomposition(
+    namespace bitwise_decomposer {
+
+        enum Subcode : uint16_t {
+            kNoEvaluator  = 1,
+            kDepthLimit   = 2,
+            kTooFewVars   = 3,
+            kNoCandidates = 4,
+            kNoMatch      = 5,
+        };
+
+    } // namespace bitwise_decomposer
+
+    SolverResult< SignaturePayload > TryBitwiseDecomposition(
         const std::vector< uint64_t > &sig, const SignatureContext &ctx, const Options &opts,
         uint32_t depth, const ExprCost *baseline_cost
     ) {
@@ -170,9 +183,33 @@ namespace cobra {
             "BitwiseDecomp", "TryBitwiseDecomposition: vars={} depth={}", ctx.vars.size(), depth
         );
         // Early returns
-        if (!ctx.eval) { return std::nullopt; }
-        if (depth >= 2) { return std::nullopt; }
-        if (sig.size() < 2) { return std::nullopt; }
+        if (!ctx.eval) {
+            ReasonDetail reason{
+                .top = { .code    = { ReasonCategory::kGuardFailed,
+                                      ReasonDomain::kBitwiseDecomposer,
+                                      bitwise_decomposer::kNoEvaluator },
+                        .message = "no evaluator available" }
+            };
+            return SolverResult< SignaturePayload >::Inapplicable(std::move(reason));
+        }
+        if (depth >= 2) {
+            ReasonDetail reason{
+                .top = { .code    = { ReasonCategory::kResourceLimit,
+                                      ReasonDomain::kBitwiseDecomposer,
+                                      bitwise_decomposer::kDepthLimit },
+                        .message = "recursion depth limit reached" }
+            };
+            return SolverResult< SignaturePayload >::Blocked(std::move(reason));
+        }
+        if (sig.size() < 2) {
+            ReasonDetail reason{
+                .top = { .code    = { ReasonCategory::kGuardFailed,
+                                      ReasonDomain::kBitwiseDecomposer,
+                                      bitwise_decomposer::kTooFewVars },
+                        .message = "too few variables for decomposition" }
+            };
+            return SolverResult< SignaturePayload >::Inapplicable(std::move(reason));
+        }
 
         const auto kN      = static_cast< uint32_t >(ctx.vars.size());
         const size_t kHalf = sig.size() / 2;
@@ -282,7 +319,15 @@ namespace cobra {
             }
         }
 
-        if (candidates.empty()) { return std::nullopt; }
+        if (candidates.empty()) {
+            ReasonDetail reason{
+                .top = { .code    = { ReasonCategory::kNoSolution,
+                                      ReasonDomain::kBitwiseDecomposer,
+                                      bitwise_decomposer::kNoCandidates },
+                        .message = "no decomposition candidates found" }
+            };
+            return SolverResult< SignaturePayload >::Blocked(std::move(reason));
+        }
 
         // Sort by active variable count ascending (simpler first)
         std::sort(
@@ -291,7 +336,7 @@ namespace cobra {
             }
         );
 
-        std::optional< SubResult > best;
+        std::optional< SignaturePayload > best;
 
         for (const auto &cand : candidates) {
             // Build the variable list for g (all vars except k)
@@ -338,11 +383,11 @@ namespace cobra {
                 }
                 if (best.has_value() && !IsBetter(info.cost, best->cost)) { continue; }
 
-                SubResult sub;
-                sub.expr     = std::move(composed);
-                sub.cost     = info.cost;
-                sub.verified = true;
-                best         = std::move(sub);
+                best = SignaturePayload{
+                    .expr         = std::move(composed),
+                    .cost         = info.cost,
+                    .verification = VerificationState::kVerified,
+                };
                 continue;
             }
 
@@ -399,11 +444,11 @@ namespace cobra {
             auto sub_result =
                 SimplifyFromSignature(compacted_sig, g_ctx, opts, depth + 1, baseline_cost);
 
-            if (!sub_result.has_value()) { continue; }
+            if (!sub_result.Succeeded()) { continue; }
 
             // Remap the sub-expression variable indices back to
             // context-space indices
-            auto remapped = RemapVars(*sub_result->expr, active_context_indices);
+            auto remapped = RemapVars(*sub_result.Payload().expr, active_context_indices);
 
             // Compose with the split variable
             auto composed = Compose(cand.gate, cand.var_k, std::move(remapped), cand.add_coeff);
@@ -422,15 +467,23 @@ namespace cobra {
             }
             if (best.has_value() && !IsBetter(info.cost, best->cost)) { continue; }
 
-            SubResult sub;
-            sub.expr     = std::move(composed);
-            sub.cost     = info.cost;
-            sub.verified = true;
-            best         = std::move(sub);
+            best = SignaturePayload{
+                .expr         = std::move(composed),
+                .cost         = info.cost,
+                .verification = VerificationState::kVerified,
+            };
         }
 
         COBRA_TRACE("BitwiseDecomp", "TryBitwiseDecomposition: found={}", best.has_value());
-        return best;
+        if (best.has_value()) {
+            return SolverResult< SignaturePayload >::Success(std::move(*best));
+        }
+        ReasonDetail reason{
+            .top = { .code = { ReasonCategory::kSearchExhausted,
+                               ReasonDomain::kBitwiseDecomposer, bitwise_decomposer::kNoMatch },
+                    .message = "no decomposition matched" }
+        };
+        return SolverResult< SignaturePayload >::Blocked(std::move(reason));
     }
 
 } // namespace cobra

@@ -1,6 +1,7 @@
 #include "cobra/core/HybridDecomposer.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/ExprCost.h"
+#include "cobra/core/PassContract.h"
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/SignatureSimplifier.h"
 #include "cobra/core/Simplifier.h"
@@ -122,19 +123,55 @@ namespace cobra {
 
     } // namespace
 
-    std::optional< SubResult > TryHybridDecomposition(
+    namespace hybrid_decomposer {
+
+        enum Subcode : uint16_t {
+            kNoEvaluator  = 1,
+            kDepthLimit   = 2,
+            kTooFewVars   = 3,
+            kNoCandidates = 4,
+            kNoMatch      = 5,
+        };
+
+    } // namespace hybrid_decomposer
+
+    SolverResult< SignaturePayload > TryHybridDecomposition(
         const std::vector< uint64_t > &sig, const SignatureContext &ctx, const Options &opts,
         uint32_t depth, const ExprCost *baseline_cost
     ) {
         COBRA_TRACE(
             "HybridDecomp", "TryHybridDecomposition: vars={} depth={}", ctx.vars.size(), depth
         );
-        if (!ctx.eval) { return std::nullopt; }
+        if (!ctx.eval) {
+            ReasonDetail reason{
+                .top = { .code    = { ReasonCategory::kGuardFailed,
+                                      ReasonDomain::kHybridDecomposer,
+                                      hybrid_decomposer::kNoEvaluator },
+                        .message = "no evaluator available" }
+            };
+            return SolverResult< SignaturePayload >::Inapplicable(std::move(reason));
+        }
         // Only try extraction at the top level (depth 0) to limit
         // combinatorial blowup. The recursive call at depth 1 uses
         // the standard pipeline without further extraction.
-        if (depth >= 1) { return std::nullopt; }
-        if (sig.size() < 2) { return std::nullopt; }
+        if (depth >= 1) {
+            ReasonDetail reason{
+                .top = { .code    = { ReasonCategory::kResourceLimit,
+                                      ReasonDomain::kHybridDecomposer,
+                                      hybrid_decomposer::kDepthLimit },
+                        .message = "recursion depth limit reached" }
+            };
+            return SolverResult< SignaturePayload >::Blocked(std::move(reason));
+        }
+        if (sig.size() < 2) {
+            ReasonDetail reason{
+                .top = { .code    = { ReasonCategory::kGuardFailed,
+                                      ReasonDomain::kHybridDecomposer,
+                                      hybrid_decomposer::kTooFewVars },
+                        .message = "too few variables for extraction" }
+            };
+            return SolverResult< SignaturePayload >::Inapplicable(std::move(reason));
+        }
 
         const auto kN = static_cast< uint32_t >(ctx.vars.size());
 
@@ -159,7 +196,14 @@ namespace cobra {
             }
         }
 
-        if (candidates.empty()) { return std::nullopt; }
+        if (candidates.empty()) {
+            ReasonDetail reason{
+                .top = { .code = { ReasonCategory::kNoSolution, ReasonDomain::kHybridDecomposer,
+                                   hybrid_decomposer::kNoCandidates },
+                        .message = "no extraction candidates found" }
+            };
+            return SolverResult< SignaturePayload >::Blocked(std::move(reason));
+        }
 
         // Sort by active variable count (simpler first)
         std::sort(
@@ -169,7 +213,7 @@ namespace cobra {
             }
         );
 
-        std::optional< SubResult > best;
+        std::optional< SignaturePayload > best;
 
         for (const auto &cand : candidates) {
             // Build sub-evaluator: r_eval(vars) = f(vars) OP^{-1} v_k
@@ -193,12 +237,12 @@ namespace cobra {
             auto sub_result =
                 SimplifyFromSignature(cand.r_sig, r_ctx, opts, depth + 1, baseline_cost);
 
-            if (!sub_result.has_value()) { continue; }
+            if (!sub_result.Succeeded()) { continue; }
 
             // Compose in context-space (variable indices 0..n-1).
             // No remap needed: sub-result already uses context indices.
             auto composed =
-                ComposeExtraction(cand.op, cand.var_k, CloneExpr(*sub_result->expr));
+                ComposeExtraction(cand.op, cand.var_k, CloneExpr(*sub_result.Payload().expr));
 
             // Full-width verification
             auto check = FullWidthCheckEval(*ctx.eval, kN, *composed, opts.bitwidth);
@@ -210,15 +254,23 @@ namespace cobra {
             }
             if (best.has_value() && !IsBetter(info.cost, best->cost)) { continue; }
 
-            SubResult sub;
-            sub.expr     = std::move(composed);
-            sub.cost     = info.cost;
-            sub.verified = true;
-            best         = std::move(sub);
+            best = SignaturePayload{
+                .expr         = std::move(composed),
+                .cost         = info.cost,
+                .verification = VerificationState::kVerified,
+            };
         }
 
         COBRA_TRACE("HybridDecomp", "TryHybridDecomposition: found={}", best.has_value());
-        return best;
+        if (best.has_value()) {
+            return SolverResult< SignaturePayload >::Success(std::move(*best));
+        }
+        ReasonDetail reason{
+            .top = { .code = { ReasonCategory::kSearchExhausted,
+                               ReasonDomain::kHybridDecomposer, hybrid_decomposer::kNoMatch },
+                    .message = "no extraction matched" }
+        };
+        return SolverResult< SignaturePayload >::Blocked(std::move(reason));
     }
 
 } // namespace cobra

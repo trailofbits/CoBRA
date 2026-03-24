@@ -141,22 +141,24 @@ namespace cobra {
                 sub_opts.evaluator = Evaluator{};
 
                 auto x_res = SimplifyFromSignature(sig_x, ctx, sub_opts, 0);
-                if (!x_res.has_value()) {
+                if (!x_res.Succeeded()) {
                     COBRA_TRACE("ProductIdentity", "    x simplification failed");
                     continue;
                 }
-                auto xtxt = Render(*x_res->expr, vars, opts.bitwidth);
+                auto xtxt = Render(*x_res.Payload().expr, vars, opts.bitwidth);
                 COBRA_TRACE("ProductIdentity", "    x simplified to: {}", xtxt);
 
                 auto y_res = SimplifyFromSignature(sig_y, ctx, sub_opts, 0);
-                if (!y_res.has_value()) {
+                if (!y_res.Succeeded()) {
                     COBRA_TRACE("ProductIdentity", "    y simplification failed");
                     continue;
                 }
-                auto ytxt = Render(*y_res->expr, vars, opts.bitwidth);
+                auto ytxt = Render(*y_res.Payload().expr, vars, opts.bitwidth);
                 COBRA_TRACE("ProductIdentity", "    y simplified to: {}", ytxt);
 
-                auto candidate = Expr::Mul(std::move(x_res->expr), std::move(y_res->expr));
+                auto candidate = Expr::Mul(
+                    std::move(x_res.TakePayload().expr), std::move(y_res.TakePayload().expr)
+                );
 
                 // Full-width verification against the original
                 auto check = FullWidthCheck(add_node, num_vars, *candidate, {}, opts.bitwidth);

@@ -17,7 +17,7 @@ namespace cobra {
     // Layer 2: target = G_out(A, G_in(B, C)) for atoms A, B, C.
     //
     // All candidates are full-width verified via the evaluator.
-    SolverResult< SubResult > TryTemplateDecomposition(
+    SolverResult< SignaturePayload > TryTemplateDecomposition(
         const SignatureContext &ctx, const Options &opts, uint32_t num_vars,
         const ExprCost *baseline_cost
     );

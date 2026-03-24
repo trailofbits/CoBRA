@@ -36,7 +36,7 @@ TEST(TemplateDecomposer, DirectAtomMatch) {
 
     auto r = TryTemplateDecomposition(ctx, opts, 1, nullptr);
     ASSERT_TRUE(r.Succeeded());
-    EXPECT_TRUE(r.Payload().verified);
+    EXPECT_TRUE(r.Payload().verification == VerificationState::kVerified);
 }
 
 TEST(TemplateDecomposer, BinaryXor) {
@@ -47,7 +47,7 @@ TEST(TemplateDecomposer, BinaryXor) {
 
     auto r = TryTemplateDecomposition(ctx, opts, 2, nullptr);
     ASSERT_TRUE(r.Succeeded());
-    EXPECT_TRUE(r.Payload().verified);
+    EXPECT_TRUE(r.Payload().verification == VerificationState::kVerified);
 }
 
 TEST(TemplateDecomposer, BinaryMul) {
@@ -58,7 +58,7 @@ TEST(TemplateDecomposer, BinaryMul) {
 
     auto r = TryTemplateDecomposition(ctx, opts, 2, nullptr);
     ASSERT_TRUE(r.Succeeded());
-    EXPECT_TRUE(r.Payload().verified);
+    EXPECT_TRUE(r.Payload().verification == VerificationState::kVerified);
 }
 
 TEST(TemplateDecomposer, MulOrNested) {
@@ -72,7 +72,7 @@ TEST(TemplateDecomposer, MulOrNested) {
 
     auto r = TryTemplateDecomposition(ctx, opts, 2, nullptr);
     ASSERT_TRUE(r.Succeeded());
-    EXPECT_TRUE(r.Payload().verified);
+    EXPECT_TRUE(r.Payload().verification == VerificationState::kVerified);
 
     // Verify the result computes the same function
     auto check = FullWidthCheckEval(*ctx.eval, 2, *r.Payload().expr, 64);
@@ -121,5 +121,5 @@ TEST(TemplateDecomposer, NarrowBitwidth) {
 
     auto r = TryTemplateDecomposition(ctx, opts, 2, nullptr);
     ASSERT_TRUE(r.Succeeded());
-    EXPECT_TRUE(r.Payload().verified);
+    EXPECT_TRUE(r.Payload().verification == VerificationState::kVerified);
 }

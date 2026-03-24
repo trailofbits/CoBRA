@@ -50,9 +50,9 @@ TEST(HybridDecomposerTest, XorExtraction) {
     auto opts = default_opts();
 
     auto result = TryHybridDecomposition(sig, ctx, opts, 0, nullptr);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->verified);
-    EXPECT_EQ(result->expr->kind, Expr::Kind::kXor);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_TRUE(result.Payload().verification == VerificationState::kVerified);
+    EXPECT_EQ(result.Payload().expr->kind, Expr::Kind::kXor);
 }
 
 TEST(HybridDecomposerTest, AddExtraction) {
@@ -63,9 +63,9 @@ TEST(HybridDecomposerTest, AddExtraction) {
     auto opts = default_opts();
 
     auto result = TryHybridDecomposition(sig, ctx, opts, 0, nullptr);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->verified);
-    EXPECT_EQ(result->expr->kind, Expr::Kind::kAdd);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_TRUE(result.Payload().verification == VerificationState::kVerified);
+    EXPECT_EQ(result.Payload().expr->kind, Expr::Kind::kAdd);
 }
 
 TEST(HybridDecomposerTest, DepthGateBlocksAtDepth1) {
@@ -76,7 +76,7 @@ TEST(HybridDecomposerTest, DepthGateBlocksAtDepth1) {
     auto opts = default_opts();
 
     auto result = TryHybridDecomposition(sig, ctx, opts, 1, nullptr);
-    EXPECT_FALSE(result.has_value());
+    EXPECT_FALSE(result.Succeeded());
 }
 
 TEST(HybridDecomposerTest, NoEvaluatorReturnsNullopt) {
@@ -88,7 +88,7 @@ TEST(HybridDecomposerTest, NoEvaluatorReturnsNullopt) {
     auto opts            = default_opts();
 
     auto result = TryHybridDecomposition(sig, ctx, opts, 0, nullptr);
-    EXPECT_FALSE(result.has_value());
+    EXPECT_FALSE(result.Succeeded());
 }
 
 TEST(HybridDecomposerTest, BaselineCostRejectsWorse) {
@@ -100,7 +100,7 @@ TEST(HybridDecomposerTest, BaselineCostRejectsWorse) {
 
     ExprCost baseline{ 3, 0, 2 };
     auto result = TryHybridDecomposition(sig, ctx, opts, 0, &baseline);
-    EXPECT_FALSE(result.has_value());
+    EXPECT_FALSE(result.Succeeded());
 }
 
 TEST(HybridDecomposerTest, SkipsIdentityExtraction) {
@@ -116,5 +116,7 @@ TEST(HybridDecomposerTest, SkipsIdentityExtraction) {
     // The residual sig differs from the original for non-zero
     // constants, so it might still find a decomposition.
     // Just verify no crash and that any result is verified.
-    if (result.has_value()) { EXPECT_TRUE(result->verified); }
+    if (result.Succeeded()) {
+        EXPECT_TRUE(result.Payload().verification == VerificationState::kVerified);
+    }
 }

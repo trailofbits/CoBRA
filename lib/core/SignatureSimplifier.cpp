@@ -11,6 +11,7 @@
 #include "cobra/core/ExprCost.h"
 #include "cobra/core/HybridDecomposer.h"
 #include "cobra/core/MultivarPolyRecovery.h"
+#include "cobra/core/PassContract.h"
 #include "cobra/core/PatternMatcher.h"
 #include "cobra/core/PolyExprBuilder.h"
 #include "cobra/core/PolyNormalizer.h"
@@ -54,17 +55,17 @@ namespace cobra {
 
         // NOLINTNEXTLINE(readability-identifier-naming)
         void TryUpdateBest(
-            std::optional< SubResult > &best, std::unique_ptr< Expr > candidate, bool verified,
-            const ExprCost *baseline_cost
+            std::optional< SignaturePayload > &best, std::unique_ptr< Expr > candidate,
+            VerificationState verification, const ExprCost *baseline_cost
         ) {
             auto info = ComputeCost(*candidate);
             if ((baseline_cost != nullptr) && !IsBetter(info.cost, *baseline_cost)) { return; }
             if (best.has_value() && !IsBetter(info.cost, best->cost)) { return; }
-            SubResult sub;
-            sub.expr     = std::move(candidate);
-            sub.cost     = info.cost;
-            sub.verified = verified;
-            best         = std::move(sub);
+            best = SignaturePayload{
+                .expr         = std::move(candidate),
+                .cost         = info.cost,
+                .verification = verification,
+            };
         }
 
         /// Evaluate the singleton polynomial S_i(t) at t=2.
@@ -86,7 +87,15 @@ namespace cobra {
 
     } // namespace
 
-    std::optional< SubResult > SimplifyFromSignature(
+    namespace signature_simplifier {
+
+        enum Subcode : uint16_t {
+            kNoResult = 1,
+        };
+
+    } // namespace signature_simplifier
+
+    SolverResult< SignaturePayload > SimplifyFromSignature(
         const std::vector< uint64_t > &sig, const SignatureContext &ctx, const Options &opts,
         uint32_t depth, const ExprCost *baseline_cost
     ) {
@@ -96,7 +105,7 @@ namespace cobra {
             kNumVars, depth, baseline_cost != nullptr
         );
         COBRA_TRACE_SIG("SigSimplifier", "input sig", sig);
-        std::optional< SubResult > best;
+        std::optional< SignaturePayload > best;
 
         // Step 1: Fast-match canonical patterns on signature
         auto pm = MatchPattern(sig, kNumVars, opts.bitwidth);
@@ -108,17 +117,15 @@ namespace cobra {
             }
 
             if (pm_accepted) {
-                bool pm_verified = true;
+                auto pm_vs = VerificationState::kVerified;
                 if (opts.spot_check) {
                     auto check = SignatureCheck(sig, **pm, kNumVars, opts.bitwidth);
                     if (!check.passed) {
-                        pm_verified = false;
+                        pm_vs       = VerificationState::kRejected;
                         pm_accepted = false;
                     }
                 }
-                if (pm_accepted) {
-                    TryUpdateBest(best, std::move(*pm), pm_verified, baseline_cost);
-                }
+                if (pm_accepted) { TryUpdateBest(best, std::move(*pm), pm_vs, baseline_cost); }
             }
             COBRA_TRACE(
                 "SigSimplifier", "Stage1 PatternMatch: found={} accepted={}", pm.has_value(),
@@ -142,7 +149,9 @@ namespace cobra {
             }
 
             if (anf_accepted) {
-                TryUpdateBest(best, std::move(anf_expr), /*verified=*/true, baseline_cost);
+                TryUpdateBest(
+                    best, std::move(anf_expr), VerificationState::kVerified, baseline_cost
+                );
             }
             COBRA_TRACE(
                 "SigSimplifier", "Stage2 ANF: boolean_valued={} accepted={}",
@@ -247,7 +256,7 @@ namespace cobra {
             auto recovery = RecoverAndVerifyPoly(*ctx.eval, support, kNumVars, opts.bitwidth);
             if (recovery.Succeeded()) {
                 TryUpdateBest(
-                    best, std::move(recovery.TakePayload().expr), /*verified=*/true,
+                    best, std::move(recovery.TakePayload().expr), VerificationState::kVerified,
                     baseline_cost
                 );
             }
@@ -255,14 +264,16 @@ namespace cobra {
 
         // Step 5: Cofactor bitwise decomposition
         if (opts.enable_bitwise_decomposition && ctx.eval.has_value() && depth < 2) {
-            const ExprCost *bl = best.has_value() ? &best->cost : baseline_cost;
-            auto decomp        = TryBitwiseDecomposition(sig, ctx, opts, depth, bl);
-            if (decomp.has_value()) {
-                if (!best.has_value() || IsBetter(decomp->cost, best->cost)) {
-                    best = std::move(decomp);
+            const ExprCost *bl    = best.has_value() ? &best->cost : baseline_cost;
+            auto decomp           = TryBitwiseDecomposition(sig, ctx, opts, depth, bl);
+            const bool kDecompHit = decomp.Succeeded();
+            if (kDecompHit) {
+                auto dp = decomp.TakePayload();
+                if (!best.has_value() || IsBetter(dp.cost, best->cost)) {
+                    best = std::move(dp);
                 }
             }
-            COBRA_TRACE("SigSimplifier", "Stage5: bitwise_decomp found={}", decomp.has_value());
+            COBRA_TRACE("SigSimplifier", "Stage5: bitwise_decomp found={}", kDecompHit);
         }
 
         // Step 5b: Variable-extraction hybrid decomposition.
@@ -270,43 +281,56 @@ namespace cobra {
         // avoids expensive extraction for expressions already solved
         // by steps 1–5.
         if (opts.enable_bitwise_decomposition && ctx.eval.has_value() && depth < 2
-            && (!best.has_value() || !best->verified))
+            && (!best.has_value() || best->verification != VerificationState::kVerified))
         {
-            const ExprCost *bl = best.has_value() ? &best->cost : baseline_cost;
-            auto hybrid        = TryHybridDecomposition(sig, ctx, opts, depth, bl);
-            if (hybrid.has_value()) {
-                if (!best.has_value() || IsBetter(hybrid->cost, best->cost)) {
-                    best = std::move(hybrid);
+            const ExprCost *bl    = best.has_value() ? &best->cost : baseline_cost;
+            auto hybrid           = TryHybridDecomposition(sig, ctx, opts, depth, bl);
+            const bool kHybridHit = hybrid.Succeeded();
+            if (kHybridHit) {
+                auto hp = hybrid.TakePayload();
+                if (!best.has_value() || IsBetter(hp.cost, best->cost)) {
+                    best = std::move(hp);
                 }
             }
-            COBRA_TRACE("SigSimplifier", "Stage5b: hybrid_decomp found={}", hybrid.has_value());
+            COBRA_TRACE("SigSimplifier", "Stage5b: hybrid_decomp found={}", kHybridHit);
         }
 
         // Step 6: Accept CoB result as final candidate
         {
-            bool cob_verified = false;
+            auto cob_vs = VerificationState::kUnverified;
             if (opts.spot_check) {
-                auto check   = SignatureCheck(sig, *expr, kNumVars, opts.bitwidth);
-                cob_verified = check.passed;
+                auto check = SignatureCheck(sig, *expr, kNumVars, opts.bitwidth);
+                if (check.passed) { cob_vs = VerificationState::kVerified; }
             }
             if (ctx.eval.has_value()) {
                 auto check = FullWidthCheckEval(*ctx.eval, kNumVars, *expr, opts.bitwidth);
                 if (check.passed) {
-                    cob_verified = true;
-                } else if (best.has_value() && best->verified) {
+                    cob_vs = VerificationState::kVerified;
+                } else if (
+                    best.has_value() && best->verification == VerificationState::kVerified
+                )
+                {
                     // Don't let a full-width-incorrect CoB result
                     // override an already-verified candidate.
-                    return best;
+                    return SolverResult< SignaturePayload >::Success(std::move(*best));
                 }
             }
-            TryUpdateBest(best, std::move(expr), cob_verified, baseline_cost);
+            TryUpdateBest(best, std::move(expr), cob_vs, baseline_cost);
         }
 
         COBRA_TRACE(
             "SigSimplifier", "Final: has_result={} verified={}", best.has_value(),
-            best.has_value() && best->verified
+            best.has_value() && best->verification == VerificationState::kVerified
         );
-        return best;
+        if (best.has_value()) {
+            return SolverResult< SignaturePayload >::Success(std::move(*best));
+        }
+        ReasonDetail reason{
+            .top = { .code    = { ReasonCategory::kSearchExhausted, ReasonDomain::kSignature,
+                                  signature_simplifier::kNoResult },
+                    .message = "no viable candidate found" }
+        };
+        return SolverResult< SignaturePayload >::Blocked(std::move(reason));
     }
 
 } // namespace cobra
