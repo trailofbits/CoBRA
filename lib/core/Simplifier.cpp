@@ -1,4 +1,5 @@
 #include "cobra/core/Simplifier.h"
+#include "SimplifierInternal.h"
 #include "cobra/core/AtomSimplifier.h"
 #include "cobra/core/AuxVarEliminator.h"
 #include "cobra/core/BitPartitioner.h"
@@ -36,7 +37,7 @@
 
 namespace cobra {
 
-    namespace {
+    namespace internal {
 
         namespace semilinear_pass {
             enum Subcode : uint16_t {
@@ -48,10 +49,6 @@ namespace cobra {
             };
         } // namespace semilinear_pass
 
-        // Verify a reduced-variable result against the original evaluator
-        // with random values for ALL original variables (including eliminated).
-        // This catches cases where aux var elimination incorrectly dropped a
-        // variable that matters at full width (e.g., x*y == x&y on {0,1}).
         CheckResult VerifyInOriginalSpace(
             const Evaluator &eval, const std::vector< std::string > &all_vars,
             const std::vector< std::string > &real_vars, const Expr &reduced_expr,
@@ -74,30 +71,6 @@ namespace cobra {
             auto remapped = CloneExpr(reduced_expr);
             RemapVarIndices(*remapped, idx_map);
             return FullWidthCheckEval(eval, kAllCount, *remapped, bitwidth);
-        }
-
-        SimplifyOutcome MakeUnchanged(
-            const Expr *input_expr, const Classification &cls, const std::string &reason,
-            std::optional< ReasonCode > rc = std::nullopt
-        ) {
-            SimplifyOutcome outcome;
-            outcome.kind                 = SimplifyOutcome::Kind::kUnchangedUnsupported;
-            outcome.expr                 = CloneExpr(*input_expr);
-            outcome.diag.classification  = cls;
-            outcome.diag.attempted_route = cls.route;
-            outcome.diag.reason          = reason;
-            outcome.diag.reason_code     = rc;
-            return outcome;
-        }
-
-        SimplifyOutcome MakeUnchanged(
-            const Expr *input_expr, const Classification &cls, const RewriteResult &rw,
-            const std::string &reason, std::optional< ReasonCode > rc = std::nullopt
-        ) {
-            auto outcome                = MakeUnchanged(input_expr, cls, reason, rc);
-            outcome.diag.rewrite_rounds = rw.rounds_applied;
-            outcome.diag.rewrite_produced_candidate = rw.structure_changed;
-            return outcome;
         }
 
         bool IsPurelyArithmetic(const Expr &e) {
@@ -144,7 +117,7 @@ namespace cobra {
             return e;
         }
 
-        // Rewrite k + k*(c^x) → (-k)*(~c ^ x).
+        // Rewrite k + k*(c^x) -> (-k)*(~c ^ x).
         // The semilinear XOR recovery produces a negated coefficient
         // and an additive constant that cancel via this identity.
         std::unique_ptr< Expr >
@@ -317,6 +290,34 @@ namespace cobra {
             );
         }
 
+    } // namespace internal
+
+    namespace {
+
+        SimplifyOutcome MakeUnchanged(
+            const Expr *input_expr, const Classification &cls, const std::string &reason,
+            std::optional< ReasonCode > rc = std::nullopt
+        ) {
+            SimplifyOutcome outcome;
+            outcome.kind                 = SimplifyOutcome::Kind::kUnchangedUnsupported;
+            outcome.expr                 = CloneExpr(*input_expr);
+            outcome.diag.classification  = cls;
+            outcome.diag.attempted_route = cls.route;
+            outcome.diag.reason          = reason;
+            outcome.diag.reason_code     = rc;
+            return outcome;
+        }
+
+        SimplifyOutcome MakeUnchanged(
+            const Expr *input_expr, const Classification &cls, const RewriteResult &rw,
+            const std::string &reason, std::optional< ReasonCode > rc = std::nullopt
+        ) {
+            auto outcome                = MakeUnchanged(input_expr, cls, reason, rc);
+            outcome.diag.rewrite_rounds = rw.rounds_applied;
+            outcome.diag.rewrite_produced_candidate = rw.structure_changed;
+            return outcome;
+        }
+
     } // namespace
 
     Result< PassOutcome > RunSupportedPass(
@@ -466,11 +467,12 @@ namespace cobra {
         const Expr *working_expr = input_expr;
         auto working_sig         = sig;
 
-        if (HasNotOverArith(*input_expr)) {
+        if (internal::HasNotOverArith(*input_expr)) {
             COBRA_TRACE("Simplifier", "Simplify: lowering NOT-over-Arith patterns");
-            lowered_storage = LowerNotOverArith(CloneExpr(*input_expr), opts.bitwidth);
-            working_expr    = lowered_storage.get();
-            working_sig     = EvaluateBooleanSignature(
+            lowered_storage =
+                internal::LowerNotOverArith(CloneExpr(*input_expr), opts.bitwidth);
+            working_expr = lowered_storage.get();
+            working_sig  = EvaluateBooleanSignature(
                 *lowered_storage, static_cast< uint32_t >(vars.size()), opts.bitwidth
             );
         }
@@ -491,7 +493,7 @@ namespace cobra {
                 *working_expr, static_cast< uint32_t >(vars.size()), opts.bitwidth
             ))
         {
-            auto semi = TrySemilinearPipeline(*input_expr, vars, opts);
+            auto semi = internal::TrySemilinearPipeline(*input_expr, vars, opts);
             if (semi.Succeeded()) {
                 SimplifyOutcome outcome;
                 outcome.kind                 = SimplifyOutcome::Kind::kSimplified;
@@ -537,7 +539,7 @@ namespace cobra {
                 // VerifyInOriginalSpace call.
                 if (opts.evaluator && result.value().kind == SimplifyOutcome::Kind::kSimplified)
                 {
-                    auto check = VerifyInOriginalSpace(
+                    auto check = internal::VerifyInOriginalSpace(
                         opts.evaluator, vars, result.value().real_vars, *result.value().expr,
                         opts.bitwidth
                     );
@@ -587,7 +589,7 @@ namespace cobra {
                 if (result.has_value()
                     && result.value().kind == SimplifyOutcome::Kind::kSimplified)
                 {
-                    auto check = VerifyInOriginalSpace(
+                    auto check = internal::VerifyInOriginalSpace(
                         opts.evaluator, vars, result.value().real_vars, *result.value().expr,
                         opts.bitwidth
                     );
@@ -659,7 +661,7 @@ namespace cobra {
                     if (reentry.has_value()
                         && reentry.value().kind == SimplifyOutcome::Kind::kSimplified)
                     {
-                        auto check = VerifyInOriginalSpace(
+                        auto check = internal::VerifyInOriginalSpace(
                             opts.evaluator, vars, reentry.value().real_vars,
                             *reentry.value().expr, opts.bitwidth
                         );
@@ -693,7 +695,7 @@ namespace cobra {
                     if (reentry.has_value()
                         && reentry.value().kind == SimplifyOutcome::Kind::kSimplified)
                     {
-                        auto check = VerifyInOriginalSpace(
+                        auto check = internal::VerifyInOriginalSpace(
                             opts.evaluator, vars, reentry.value().real_vars,
                             *reentry.value().expr, opts.bitwidth
                         );
@@ -793,7 +795,7 @@ namespace cobra {
                 if (reentry.has_value()
                     && reentry.value().kind == SimplifyOutcome::Kind::kSimplified)
                 {
-                    auto check = VerifyInOriginalSpace(
+                    auto check = internal::VerifyInOriginalSpace(
                         opts.evaluator, vars, reentry.value().real_vars, *reentry.value().expr,
                         opts.bitwidth
                     );

@@ -88,7 +88,7 @@ namespace cobra {
     struct StateFeatures
     {
         std::optional< Classification > classification;
-        Provenance provenance;
+        Provenance provenance              = Provenance::kOriginal;
         bool needs_full_width_verification = true;
     };
 
