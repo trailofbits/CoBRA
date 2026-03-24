@@ -40,6 +40,52 @@ namespace cobra {
             for (const auto &child : e.children) { mix(HashExpr(*child)); }
             return h;
         }
+
+        WorkItem CloneWorkItem(const WorkItem &item) {
+            WorkItem clone;
+            std::visit(
+                [&clone](const auto &p) {
+                    using T = std::decay_t< decltype(p) >;
+                    if constexpr (std::is_same_v< T, AstPayload >) {
+                        clone.payload = AstPayload{
+                            .expr           = CloneExpr(*p.expr),
+                            .classification = p.classification,
+                            .provenance     = p.provenance,
+                        };
+                    } else if constexpr (std::is_same_v< T, SignatureStatePayload >) {
+                        clone.payload = p;
+                    } else {
+                        clone.payload = CandidatePayload{
+                            .expr           = CloneExpr(*p.expr),
+                            .real_vars      = p.real_vars,
+                            .cost           = p.cost,
+                            .producing_pass = p.producing_pass,
+                            .needs_original_space_verification =
+                                p.needs_original_space_verification,
+                        };
+                    }
+                },
+                item.payload
+            );
+            clone.features     = item.features;
+            clone.metadata     = item.metadata;
+            clone.depth        = item.depth;
+            clone.rewrite_gen  = item.rewrite_gen;
+            clone.stage_cursor = item.stage_cursor;
+            clone.history      = item.history;
+            return clone;
+        }
+
+        bool IsStrictMixedRewriteItem(const WorkItem &item, const OrchestratorPolicy &policy) {
+            if (!policy.strict_route_faithful) { return false; }
+            if (!std::holds_alternative< AstPayload >(item.payload)) { return false; }
+            auto prov = item.features.provenance;
+            if (prov != Provenance::kLowered && prov != Provenance::kRewritten) {
+                return false;
+            }
+            if (!item.features.classification) { return false; }
+            return item.features.classification->route == Route::kMixedRewrite;
+        }
     } // namespace
 
     StateFingerprint
@@ -223,12 +269,16 @@ namespace cobra {
                 return;
             }
 
-            // Strict: limited scheduling based on producing stage
-            if (item.stage_cursor <= 3) {
-                passes.push_back(PassId::kBuildSignatureState);
-            } else if (item.stage_cursor == 5) {
-                passes.push_back(PassId::kBuildSignatureState);
+            // Strict MixedRewrite: kRewritten items need a
+            // supported-solve reentry (BuildSignatureState) first.
+            // Beyond stage 5, no more passes are applicable.
+            if (policy.strict_route_faithful && route == Route::kMixedRewrite) {
+                if (item.stage_cursor <= 5) { passes.push_back(PassId::kBuildSignatureState); }
+                return;
             }
+
+            // Non-MixedRewrite kRewritten: supported solve only
+            passes.push_back(PassId::kBuildSignatureState);
         }
     } // namespace
 
@@ -382,21 +432,38 @@ namespace cobra {
             auto classified = std::move(cr.next[0]);
             auto cls        = classified.features.classification;
 
-            // Copy classification to the original seed
+            // Copy classification to the original seed and set
+            // attempted_route so unsupported outcomes carry the
+            // correct route in diagnostics.
             seed.features.classification = cls;
             if (auto *ast = std::get_if< AstPayload >(&seed.payload)) {
                 ast->classification = cls;
             }
+            if (cls) {
+                classified.metadata.attempted_route = cls->route;
+                seed.metadata.attempted_route       = cls->route;
+            }
 
-            // Push items to the worklist
+            // Push items to the worklist.
+            // Both branches ensure a kLowered item enters the worklist
+            // so the scheduler routes it into kBuildSignatureState.
             if (lowered_item) {
-                // Push the classified lowered item
+                // Lowering fired: classified item is already kLowered.
                 worklist.Push(std::move(classified));
-                // Push the original (for semilinear)
+                // Push the original for the semilinear path.
                 worklist.Push(std::move(seed));
             } else {
-                // Push the classified item (was the original, now classified)
+                // Lowering was a no-op: promote to kLowered so the
+                // scheduler treats it identically to the lowered case.
+                if (auto *ast = std::get_if< AstPayload >(&classified.payload)) {
+                    ast->provenance = Provenance::kLowered;
+                }
+                classified.features.provenance = Provenance::kLowered;
                 worklist.Push(std::move(classified));
+                // Push the original for semilinear if applicable.
+                if (cls && cls->semantic == SemanticClass::kSemilinear) {
+                    worklist.Push(std::move(seed));
+                }
             }
 
             return Ok(std::optional< OrchestratorResult >(std::nullopt));
@@ -440,6 +507,7 @@ namespace cobra {
         uint32_t expansions    = 0;
         uint32_t verifications = 0;
         std::optional< UnsupportedCandidate > best_unsupported;
+        std::vector< ReasonFrame > decomp_causes;
 
         // Main loop
         while (!worklist.Empty() && expansions < policy.max_expansions) {
@@ -478,6 +546,9 @@ namespace cobra {
             // Schedule and execute passes
             auto passes = SchedulePasses(item, policy, cache);
 
+            bool progressed         = false;
+            bool retained_for_stage = false;
+
             for (auto pass_id : passes) {
                 if (pass_id == PassId::kVerifyCandidate
                     && verifications >= policy.max_candidates)
@@ -504,6 +575,25 @@ namespace cobra {
                         next.history.push_back(pass_id);
                         worklist.Push(std::move(next));
                     }
+
+                    // Stage advancement: when a pass retains the source
+                    // item, re-push it at the next stage so the pipeline
+                    // continues if the emitted children fail. Depth is
+                    // set to item.depth+2 so the children (at depth+1)
+                    // are processed first — the fallback stage only runs
+                    // if no child solves the expression.
+                    if (pr.disposition == ItemDisposition::kRetainCurrent
+                        && IsStrictMixedRewriteItem(item, policy)
+                        && item.stage_cursor < static_cast< uint32_t >(kMixedRewriteMaxStage))
+                    {
+                        auto retained         = CloneWorkItem(item);
+                        retained.stage_cursor = item.stage_cursor + 1;
+                        retained.depth        = item.depth + 2;
+                        worklist.Push(std::move(retained));
+                        retained_for_stage = true;
+                    }
+
+                    progressed = true;
                     break; // first-progress-yields
                 }
 
@@ -514,7 +604,35 @@ namespace cobra {
                     if (!pr.reason.top.message.empty()) {
                         best_unsupported->metadata.last_failure = pr.reason;
                     }
+                    // Track XOR lowering terminal states for
+                    // MixedRewrite reason-code derivation.
+                    if (pass_id == PassId::kXorLowering) {
+                        auto cat = pr.reason.top.code.category;
+                        if (cat == ReasonCategory::kRepresentationGap) {
+                            best_unsupported->metadata.rewrite_produced_candidate = true;
+                        } else if (cat == ReasonCategory::kVerifyFailed) {
+                            best_unsupported->metadata.rewrite_produced_candidate    = true;
+                            best_unsupported->metadata.candidate_failed_verification = true;
+                        }
+                    }
+                    // Accumulate decomposition failure causes for
+                    // the cause chain, matching the legacy's
+                    // decomp_causes accumulation.
+                    if (pass_id == PassId::kDecompose) {
+                        decomp_causes.push_back(pr.reason.top);
+                        for (const auto &c : pr.reason.causes) { decomp_causes.push_back(c); }
+                    }
                 }
+            }
+
+            // All scheduled passes exhausted without progress:
+            // advance the stage cursor so the next MixedRewrite step
+            // fires on the next iteration.
+            if (!progressed && !retained_for_stage && IsStrictMixedRewriteItem(item, policy)
+                && item.stage_cursor < static_cast< uint32_t >(kMixedRewriteMaxStage))
+            {
+                item.stage_cursor++;
+                worklist.Push(std::move(item));
             }
         }
 
@@ -530,11 +648,57 @@ namespace cobra {
             };
         }
 
+        ItemMetadata final_meta =
+            best_unsupported ? std::move(best_unsupported->metadata) : ItemMetadata{};
+
+        // For MixedRewrite routes, derive the reason code from the
+        // pipeline terminal state to match legacy behavior.
+        bool is_mixed_route =
+            context.run_metadata.input_classification.route == Route::kMixedRewrite;
+        if (is_mixed_route && !final_meta.reason_code.has_value()) {
+            if (final_meta.candidate_failed_verification) {
+                final_meta.reason_code =
+                    ReasonCode{ ReasonCategory::kVerifyFailed, ReasonDomain::kMixedRewrite, 0 };
+            } else if (final_meta.rewrite_produced_candidate) {
+                final_meta.reason_code = ReasonCode{ ReasonCategory::kRepresentationGap,
+                                                     ReasonDomain::kMixedRewrite, 0 };
+            } else {
+                final_meta.reason_code = ReasonCode{ ReasonCategory::kSearchExhausted,
+                                                     ReasonDomain::kMixedRewrite, 0 };
+            }
+        }
+
+        // Propagate reason_code from the last failure if not already set
+        if (!final_meta.reason_code.has_value()
+            && exhaustion_reason.top.code.category != ReasonCategory::kNone)
+        {
+            final_meta.reason_code = exhaustion_reason.top.code;
+        }
+
+        // Propagate accumulated decomposition cause chain
+        if (final_meta.cause_chain.empty() && !decomp_causes.empty()) {
+            final_meta.cause_chain = std::move(decomp_causes);
+        }
+        // For non-MixedRewrite routes, propagate semilinear failure
+        // as the cause chain (matching legacy behavior where the
+        // supported pipeline's verification failure includes the
+        // semilinear pipeline's failure reason).
+        if (final_meta.cause_chain.empty() && !is_mixed_route
+            && context.run_metadata.semilinear_failure.has_value())
+        {
+            const auto &sf = *context.run_metadata.semilinear_failure;
+            final_meta.cause_chain.push_back(sf.top);
+            for (const auto &c : sf.causes) { final_meta.cause_chain.push_back(c); }
+        }
+        // Fallback: collect cause chain from exhaustion reason
+        if (final_meta.cause_chain.empty() && !exhaustion_reason.causes.empty()) {
+            final_meta.cause_chain = exhaustion_reason.causes;
+        }
+
         return Ok(
             OrchestratorResult{
-                .outcome = PassOutcome::Blocked(std::move(exhaustion_reason)),
-                .metadata =
-                    best_unsupported ? std::move(best_unsupported->metadata) : ItemMetadata{},
+                .outcome      = PassOutcome::Blocked(std::move(exhaustion_reason)),
+                .metadata     = std::move(final_meta),
                 .run_metadata = context.run_metadata,
             }
         );

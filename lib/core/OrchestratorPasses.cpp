@@ -29,6 +29,118 @@ namespace cobra {
             return std::holds_alternative< CandidatePayload >(item.payload);
         }
 
+        // Attempt supported-solve reentry on a rewritten AST.
+        // If the supported pipeline solves and verifies, emits
+        // a solved candidate. Otherwise emits a kLowered item at
+        // next_stage so the MixedRewrite pipeline continues with
+        // the rewritten AST.
+        PassResult TryReentryOrContinue(
+            std::unique_ptr< Expr > rewritten_expr, const WorkItem &source,
+            OrchestratorContext &ctx, uint32_t next_stage, PassId producing_pass
+        ) {
+            const auto num_vars = static_cast< uint32_t >(ctx.original_vars.size());
+            auto sig = EvaluateBooleanSignature(*rewritten_expr, num_vars, ctx.bitwidth);
+
+            auto elim                 = EliminateAuxVars(sig, ctx.original_vars);
+            const auto real_var_count = static_cast< uint32_t >(elim.real_vars.size());
+
+            if (real_var_count <= ctx.opts.max_vars) {
+                auto orig_idx = BuildVarSupport(ctx.original_vars, elim.real_vars);
+
+                SignatureContext sig_ctx;
+                sig_ctx.vars             = elim.real_vars;
+                sig_ctx.original_indices = orig_idx;
+
+                if (ctx.evaluator) {
+                    if (elim.real_vars.size() == ctx.original_vars.size()) {
+                        sig_ctx.eval = *ctx.evaluator;
+                    } else {
+                        sig_ctx.eval =
+                            [eval = *ctx.evaluator, idx_map = orig_idx,
+                             original_vals =
+                                 std::vector< uint64_t >(ctx.original_vars.size(), 0)](
+                                const std::vector< uint64_t > &reduced_vals
+                            ) mutable -> uint64_t {
+                            for (size_t i = 0; i < idx_map.size(); ++i) {
+                                original_vals[idx_map[i]] = reduced_vals[i];
+                            }
+                            uint64_t result = eval(original_vals);
+                            for (size_t i = 0; i < idx_map.size(); ++i) {
+                                original_vals[idx_map[i]] = 0;
+                            }
+                            return result;
+                        };
+                    }
+                }
+
+                auto sub = SimplifyFromSignature(elim.reduced_sig, sig_ctx, ctx.opts, 0);
+
+                if (sub.Succeeded()) {
+                    auto payload      = sub.TakePayload();
+                    bool needs_verify = ctx.evaluator.has_value();
+                    bool verified     = false;
+
+                    if (needs_verify) {
+                        auto check = internal::VerifyInOriginalSpace(
+                            *ctx.evaluator, ctx.original_vars, elim.real_vars, *payload.expr,
+                            ctx.bitwidth
+                        );
+                        verified = check.passed;
+                    }
+
+                    if (verified || !needs_verify) {
+                        WorkItem cand_item;
+                        cand_item.payload = CandidatePayload{
+                            .expr                              = std::move(payload.expr),
+                            .real_vars                         = elim.real_vars,
+                            .cost                              = payload.cost,
+                            .producing_pass                    = producing_pass,
+                            .needs_original_space_verification = false,
+                        };
+                        cand_item.features              = source.features;
+                        cand_item.metadata              = source.metadata;
+                        cand_item.metadata.sig_vector   = elim.reduced_sig;
+                        cand_item.metadata.verification = VerificationState::kVerified;
+                        cand_item.metadata.rewrite_produced_candidate = true;
+                        cand_item.depth                               = source.depth;
+                        cand_item.rewrite_gen                         = source.rewrite_gen;
+                        cand_item.stage_cursor                        = source.stage_cursor;
+                        cand_item.history                             = source.history;
+
+                        PassResult result;
+                        result.decision    = PassDecision::kSolvedCandidate;
+                        result.disposition = ItemDisposition::kReplaceCurrent;
+                        result.next.push_back(std::move(cand_item));
+                        return result;
+                    }
+                }
+            }
+
+            // Reentry failed: continue pipeline with rewritten AST
+            // at next_stage. Use kLowered provenance so the
+            // stage-gated scheduler picks the correct next pass.
+            auto cls = source.features.classification;
+            WorkItem cont;
+            cont.payload = AstPayload{
+                .expr           = std::move(rewritten_expr),
+                .classification = cls,
+                .provenance     = Provenance::kLowered,
+            };
+            cont.features            = source.features;
+            cont.features.provenance = Provenance::kLowered;
+            cont.metadata            = source.metadata;
+            cont.depth               = source.depth;
+            cont.rewrite_gen         = source.rewrite_gen + 1;
+            cont.stage_cursor        = next_stage;
+            cont.history             = source.history;
+
+            PassResult result;
+            result.decision    = PassDecision::kAdvance;
+            result.disposition = ItemDisposition::kReplaceCurrent;
+            result.next.push_back(std::move(cont));
+            return result;
+        }
+
     } // namespace
 
     // ---------------------------------------------------------------
@@ -136,13 +248,14 @@ namespace cobra {
                     .producing_pass                    = PassId::kBuildSignatureState,
                     .needs_original_space_verification = false,
                 };
-                cand_item.features            = item.features;
-                cand_item.metadata            = item.metadata;
-                cand_item.metadata.sig_vector = sig;
-                cand_item.depth               = item.depth;
-                cand_item.rewrite_gen         = item.rewrite_gen;
-                cand_item.stage_cursor        = item.stage_cursor;
-                cand_item.history             = item.history;
+                cand_item.features              = item.features;
+                cand_item.metadata              = item.metadata;
+                cand_item.metadata.sig_vector   = sig;
+                cand_item.metadata.verification = VerificationState::kVerified;
+                cand_item.depth                 = item.depth;
+                cand_item.rewrite_gen           = item.rewrite_gen;
+                cand_item.stage_cursor          = item.stage_cursor;
+                cand_item.history               = item.history;
 
                 PassResult result;
                 result.decision    = PassDecision::kSolvedCandidate;
@@ -240,7 +353,7 @@ namespace cobra {
             WorkItem cand_item;
             cand_item.payload = CandidatePayload{
                 .expr           = std::move(payload.expr),
-                .real_vars      = std::move(payload.real_vars),
+                .real_vars      = sig_payload.real_vars,
                 .cost           = payload.cost,
                 .producing_pass = PassId::kSupportedSolve,
                 .needs_original_space_verification =
@@ -320,12 +433,13 @@ namespace cobra {
                 .producing_pass                    = PassId::kTrySemilinearPass,
                 .needs_original_space_verification = false,
             };
-            cand_item.features     = item.features;
-            cand_item.metadata     = item.metadata;
-            cand_item.depth        = item.depth;
-            cand_item.rewrite_gen  = item.rewrite_gen;
-            cand_item.stage_cursor = item.stage_cursor;
-            cand_item.history      = item.history;
+            cand_item.features              = item.features;
+            cand_item.metadata              = item.metadata;
+            cand_item.metadata.verification = VerificationState::kVerified;
+            cand_item.depth                 = item.depth;
+            cand_item.rewrite_gen           = item.rewrite_gen;
+            cand_item.stage_cursor          = item.stage_cursor;
+            cand_item.history               = item.history;
 
             PassResult result;
             result.decision    = PassDecision::kSolvedCandidate;
@@ -334,11 +448,13 @@ namespace cobra {
             return Ok(std::move(result));
         }
 
+        auto failure_reason                 = semi.Reason();
+        ctx.run_metadata.semilinear_failure = failure_reason;
         return Ok(
             PassResult{
                 .decision    = PassDecision::kBlocked,
                 .disposition = ItemDisposition::kRetainCurrent,
-                .reason      = semi.Reason(),
+                .reason      = std::move(failure_reason),
             }
         );
     }
@@ -391,8 +507,9 @@ namespace cobra {
                 .producing_pass                    = PassId::kDecompose,
                 .needs_original_space_verification = false,
             };
-            cand_item.features = item.features;
-            cand_item.metadata = item.metadata;
+            cand_item.features              = item.features;
+            cand_item.metadata              = item.metadata;
+            cand_item.metadata.verification = VerificationState::kVerified;
             if (decomp.DecompositionMetadata()) {
                 cand_item.metadata.decomposition_meta = *decomp.DecompositionMetadata();
             }
@@ -437,25 +554,9 @@ namespace cobra {
             );
         }
 
-        WorkItem new_item;
-        new_item.payload = AstPayload{
-            .expr           = std::move(opsimpl.expr),
-            .classification = ast.classification,
-            .provenance     = Provenance::kRewritten,
-        };
-        new_item.features            = item.features;
-        new_item.features.provenance = Provenance::kRewritten;
-        new_item.metadata            = item.metadata;
-        new_item.depth               = item.depth;
-        new_item.rewrite_gen         = item.rewrite_gen + 1;
-        new_item.stage_cursor        = item.stage_cursor;
-        new_item.history             = item.history;
-
-        PassResult result;
-        result.decision    = PassDecision::kAdvance;
-        result.disposition = ItemDisposition::kReplaceCurrent;
-        result.next.push_back(std::move(new_item));
-        return Ok(std::move(result));
+        return Ok(TryReentryOrContinue(
+            std::move(opsimpl.expr), item, ctx, item.stage_cursor + 1, PassId::kOperandSimplify
+        ));
     }
 
     Result< PassResult >
@@ -477,25 +578,10 @@ namespace cobra {
             );
         }
 
-        WorkItem new_item;
-        new_item.payload = AstPayload{
-            .expr           = std::move(collapse.expr),
-            .classification = ast.classification,
-            .provenance     = Provenance::kRewritten,
-        };
-        new_item.features            = item.features;
-        new_item.features.provenance = Provenance::kRewritten;
-        new_item.metadata            = item.metadata;
-        new_item.depth               = item.depth;
-        new_item.rewrite_gen         = item.rewrite_gen + 1;
-        new_item.stage_cursor        = item.stage_cursor;
-        new_item.history             = item.history;
-
-        PassResult result;
-        result.decision    = PassDecision::kAdvance;
-        result.disposition = ItemDisposition::kReplaceCurrent;
-        result.next.push_back(std::move(new_item));
-        return Ok(std::move(result));
+        return Ok(TryReentryOrContinue(
+            std::move(collapse.expr), item, ctx, item.stage_cursor + 1,
+            PassId::kProductIdentityCollapse
+        ));
     }
 
     Result< PassResult > RunXorLowering(const WorkItem &item, OrchestratorContext &ctx) {
@@ -515,35 +601,61 @@ namespace cobra {
         if (!rw.structure_changed) {
             return Ok(
                 PassResult{
-                    .decision    = PassDecision::kNoProgress,
+                    .decision    = PassDecision::kBlocked,
                     .disposition = ItemDisposition::kRetainCurrent,
-                }
+                    .reason =
+                        ReasonDetail{
+                                     .top = { .code    = { ReasonCategory::kSearchExhausted,
+                                                  ReasonDomain::kMixedRewrite },
+                                     .message = "No rewrite applied" },
+                                     },
+            }
             );
         }
 
         auto new_cls = ClassifyStructural(*rw.expr);
 
-        WorkItem new_item;
-        new_item.payload = AstPayload{
-            .expr           = std::move(rw.expr),
-            .classification = new_cls,
-            .provenance     = Provenance::kRewritten,
-        };
-        new_item.features                = item.features;
-        new_item.features.provenance     = Provenance::kRewritten;
-        new_item.features.classification = new_cls;
-        new_item.metadata                = item.metadata;
-        new_item.metadata.rewrite_rounds = rw.rounds_applied;
-        new_item.depth                   = item.depth;
-        new_item.rewrite_gen             = item.rewrite_gen + 1;
-        new_item.stage_cursor            = item.stage_cursor;
-        new_item.history                 = item.history;
+        // If the reclassified route is still MixedRewrite or
+        // Unsupported, the rewrite cannot help — report kBlocked
+        // so the pipeline terminates with kRepresentationGap.
+        if (new_cls.route == Route::kMixedRewrite || new_cls.route == Route::kUnsupported) {
+            PassResult blocked;
+            blocked.decision = PassDecision::kBlocked;
+            blocked.reason   = ReasonDetail{
+                .top = { .code    = { ReasonCategory::kRepresentationGap,
+                                      ReasonDomain::kMixedRewrite },
+                        .message = "Rewrite did not reduce to supported structure" },
+            };
+            return Ok(std::move(blocked));
+        }
 
-        PassResult result;
-        result.decision    = PassDecision::kAdvance;
-        result.disposition = ItemDisposition::kReplaceCurrent;
-        result.next.push_back(std::move(new_item));
-        return Ok(std::move(result));
+        // XOR lowering reduced to a supported route. Try inline
+        // reentry; if it fails, produce kVerifyFailed outcome.
+        auto reentry_result = TryReentryOrContinue(
+            std::move(rw.expr), item, ctx, item.stage_cursor + 1, PassId::kXorLowering
+        );
+
+        // Propagate rewrite metadata
+        if (reentry_result.decision == PassDecision::kSolvedCandidate
+            && !reentry_result.next.empty())
+        {
+            reentry_result.next[0].metadata.rewrite_rounds             = rw.rounds_applied;
+            reentry_result.next[0].metadata.rewrite_produced_candidate = true;
+        }
+
+        // If reentry failed (kAdvance with kLowered continuation),
+        // the legacy code would report kVerifyFailed.
+        if (reentry_result.decision == PassDecision::kAdvance) {
+            PassResult blocked;
+            blocked.decision = PassDecision::kBlocked;
+            blocked.reason   = ReasonDetail{
+                .top = { .code = { ReasonCategory::kVerifyFailed, ReasonDomain::kMixedRewrite },
+                        .message = "Rewritten candidate failed verification" },
+            };
+            return Ok(std::move(blocked));
+        }
+
+        return Ok(std::move(reentry_result));
     }
 
     Result< PassResult > RunVerifyCandidate(const WorkItem &item, OrchestratorContext &ctx) {
@@ -602,7 +714,7 @@ namespace cobra {
         result.decision    = PassDecision::kNoProgress;
         result.disposition = ItemDisposition::kRetainCurrent;
         result.reason      = ReasonDetail{
-            .top = { .code    = { ReasonCategory::kVerifyFailed, ReasonDomain::kVerifier },
+            .top = { .code    = { ReasonCategory::kVerifyFailed, ReasonDomain::kOrchestrator },
                     .message = "Full-width verification failed" },
         };
 

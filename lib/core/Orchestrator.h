@@ -165,6 +165,7 @@ namespace cobra {
     struct RunMetadata
     {
         Classification input_classification;
+        std::optional< ReasonDetail > semilinear_failure;
     };
 
     struct OrchestratorContext
