@@ -508,6 +508,9 @@ namespace cobra {
         uint32_t verifications = 0;
         std::optional< UnsupportedCandidate > best_unsupported;
         std::vector< ReasonFrame > decomp_causes;
+        // XOR lowering terminal state tracked independently so a
+        // later best_unsupported replacement cannot erase it.
+        std::optional< ReasonCategory > xor_lowering_terminal;
 
         // Main loop
         while (!worklist.Empty() && expansions < policy.max_expansions) {
@@ -602,15 +605,22 @@ namespace cobra {
                     || pr.decision == PassDecision::kNoProgress)
                 {
                     if (!pr.reason.top.message.empty()) {
+                        item.metadata.last_failure              = pr.reason;
                         best_unsupported->metadata.last_failure = pr.reason;
                     }
                     // Track XOR lowering terminal states for
-                    // MixedRewrite reason-code derivation.
+                    // MixedRewrite reason-code derivation. Stored
+                    // in a loop-scoped variable so a later
+                    // best_unsupported replacement cannot erase it.
                     if (pass_id == PassId::kXorLowering) {
-                        auto cat = pr.reason.top.code.category;
+                        auto cat              = pr.reason.top.code.category;
+                        xor_lowering_terminal = cat;
                         if (cat == ReasonCategory::kRepresentationGap) {
+                            item.metadata.rewrite_produced_candidate              = true;
                             best_unsupported->metadata.rewrite_produced_candidate = true;
                         } else if (cat == ReasonCategory::kVerifyFailed) {
+                            item.metadata.rewrite_produced_candidate                 = true;
+                            item.metadata.candidate_failed_verification              = true;
                             best_unsupported->metadata.rewrite_produced_candidate    = true;
                             best_unsupported->metadata.candidate_failed_verification = true;
                         }
@@ -652,15 +662,24 @@ namespace cobra {
             best_unsupported ? std::move(best_unsupported->metadata) : ItemMetadata{};
 
         // For MixedRewrite routes, derive the reason code from the
-        // pipeline terminal state to match legacy behavior.
+        // pipeline terminal state to match legacy behavior. The
+        // xor_lowering_terminal variable is authoritative — it
+        // survives best_unsupported replacements that could erase
+        // the per-item metadata flags.
         bool is_mixed_route =
             context.run_metadata.input_classification.route == Route::kMixedRewrite;
         if (is_mixed_route && !final_meta.reason_code.has_value()) {
-            if (final_meta.candidate_failed_verification) {
+            if (xor_lowering_terminal == ReasonCategory::kVerifyFailed) {
                 final_meta.reason_code =
                     ReasonCode{ ReasonCategory::kVerifyFailed, ReasonDomain::kMixedRewrite, 0 };
-            } else if (final_meta.rewrite_produced_candidate) {
+                final_meta.candidate_failed_verification = true;
+                final_meta.rewrite_produced_candidate    = true;
+            } else if (xor_lowering_terminal == ReasonCategory::kRepresentationGap) {
                 final_meta.reason_code = ReasonCode{ ReasonCategory::kRepresentationGap,
+                                                     ReasonDomain::kMixedRewrite, 0 };
+                final_meta.rewrite_produced_candidate = true;
+            } else if (xor_lowering_terminal == ReasonCategory::kSearchExhausted) {
+                final_meta.reason_code = ReasonCode{ ReasonCategory::kSearchExhausted,
                                                      ReasonDomain::kMixedRewrite, 0 };
             } else {
                 final_meta.reason_code = ReasonCode{ ReasonCategory::kSearchExhausted,
