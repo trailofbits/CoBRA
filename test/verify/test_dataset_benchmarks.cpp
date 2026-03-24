@@ -2,11 +2,13 @@
 #include "cobra/core/Classifier.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/ExprCost.h"
+#include "cobra/core/PassContract.h"
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/Simplifier.h"
 #include <fstream>
 #include <gtest/gtest.h>
 #include <iostream>
+#include <map>
 #include <string>
 
 using namespace cobra;
@@ -53,6 +55,10 @@ namespace {
         int cost_equal      = 0;
         int cost_worse      = 0;
         int gt_parse_failed = 0;
+
+        int has_structured_reason = 0;
+        std::map< ReasonCategory, int > by_category;
+        std::map< ReasonDomain, int > by_domain;
     };
 
     DatasetStats run_dataset(const std::string &path) {
@@ -144,6 +150,11 @@ namespace {
                 }
                 case SimplifyOutcome::Kind::kUnchangedUnsupported:
                     stats.unsupported++;
+                    if (result.value().diag.reason_code.has_value()) {
+                        stats.has_structured_reason++;
+                        stats.by_category[result.value().diag.reason_code->category]++;
+                        stats.by_domain[result.value().diag.reason_code->domain]++;
+                    }
                     break;
                 case SimplifyOutcome::Kind::kError:
                     ADD_FAILURE() << "BugOrGap on line " << line_num << ": "
@@ -353,6 +364,10 @@ TEST(GAMBADataset, Syntia) {
     EXPECT_EQ(stats.simplified, 480);
     EXPECT_EQ(stats.unsupported, 20);
     EXPECT_EQ(stats.failed_simplify, 0);
+
+    // Every unsupported result carries a structured reason code.
+    EXPECT_EQ(stats.has_structured_reason, stats.unsupported);
+    EXPECT_EQ(stats.by_category[ReasonCategory::kVerifyFailed], 20);
 }
 
 TEST(GAMBADataset, QSynthEA) {
@@ -363,6 +378,12 @@ TEST(GAMBADataset, QSynthEA) {
     EXPECT_EQ(stats.simplified, 288);
     EXPECT_EQ(stats.unsupported, 212);
     EXPECT_EQ(stats.failed_simplify, 0);
+
+    // Every unsupported result carries a structured reason code.
+    EXPECT_EQ(stats.has_structured_reason, stats.unsupported);
+    EXPECT_EQ(stats.by_category[ReasonCategory::kVerifyFailed], 119);
+    EXPECT_EQ(stats.by_category[ReasonCategory::kRepresentationGap], 63);
+    EXPECT_EQ(stats.by_category[ReasonCategory::kSearchExhausted], 30);
 }
 
 TEST(GAMBADataset, LokiTiny) {
@@ -389,6 +410,13 @@ TEST(OSESDataset, Fast) {
     EXPECT_EQ(stats.simplified, 390);
     EXPECT_EQ(stats.unsupported, 68);
     EXPECT_EQ(stats.failed_simplify, 0);
+
+    // Every unsupported result carries a structured reason code.
+    EXPECT_EQ(stats.has_structured_reason, stats.unsupported);
+    // FW verification failures dominate.
+    EXPECT_EQ(stats.by_category[ReasonCategory::kVerifyFailed], 40);
+    EXPECT_EQ(stats.by_category[ReasonCategory::kRepresentationGap], 23);
+    EXPECT_EQ(stats.by_category[ReasonCategory::kSearchExhausted], 5);
 }
 
 TEST(OSESDataset, DISABLED_Slow) {
