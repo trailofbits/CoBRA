@@ -162,6 +162,15 @@ namespace cobra {
         bool strict_route_faithful = false;
     };
 
+    struct OrchestratorTelemetry
+    {
+        uint32_t total_expansions    = 0;
+        uint32_t max_depth_reached   = 0;
+        uint32_t candidates_verified = 0;
+        uint32_t queue_high_water    = 0;
+        std::vector< PassId > passes_attempted;
+    };
+
     struct RunMetadata
     {
         Classification input_classification;
@@ -205,6 +214,7 @@ namespace cobra {
         PassOutcome outcome;
         ItemMetadata metadata;
         RunMetadata run_metadata;
+        OrchestratorTelemetry telemetry;
     };
 
     // ---------------------------------------------------------------

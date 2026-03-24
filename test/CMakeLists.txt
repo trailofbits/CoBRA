@@ -72,6 +72,9 @@ target_compile_definitions(test_orchestrator_parity PRIVATE
 )
 gtest_discover_tests(test_orchestrator_parity)
 
+cobra_add_test(test_orchestrator_telemetry core/test_orchestrator_telemetry.cpp)
+target_include_directories(test_orchestrator_telemetry PRIVATE ${PROJECT_SOURCE_DIR}/lib/core)
+
 # ProductIdentityRecoverer diagnostic against real datasets.
 # Not registered with gtest_discover_tests — run manually:
 #   ./test/test_product_identity_diagnostic

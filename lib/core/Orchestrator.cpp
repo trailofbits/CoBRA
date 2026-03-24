@@ -488,23 +488,31 @@ namespace cobra {
         };
 
         Worklist worklist;
+        OrchestratorTelemetry telemetry;
 
         // Seeding
         if (input_expr == nullptr) {
             auto seed_result = SeedNoAst(sig, vars, context, worklist);
             if (!seed_result.has_value()) { return std::unexpected(seed_result.error()); }
-            if (seed_result.value().has_value()) { return Ok(std::move(*seed_result.value())); }
+            if (seed_result.value().has_value()) {
+                auto early      = std::move(*seed_result.value());
+                early.telemetry = std::move(telemetry);
+                return Ok(std::move(early));
+            }
         } else {
             auto seed_result = SeedWithAst(*input_expr, context, worklist);
             if (!seed_result.has_value()) { return std::unexpected(seed_result.error()); }
-            if (seed_result.value().has_value()) { return Ok(std::move(*seed_result.value())); }
+            if (seed_result.value().has_value()) {
+                auto early      = std::move(*seed_result.value());
+                early.telemetry = std::move(telemetry);
+                return Ok(std::move(early));
+            }
         }
 
         // Build registry lookup map
         const auto &registry = GetPassRegistry();
         std::unordered_map< PassId, const PassDescriptor *, PassIdHash > registry_map;
         for (const auto &desc : registry) { registry_map[desc.id] = &desc; }
-
         PassAttemptCache cache;
         uint32_t expansions    = 0;
         uint32_t verifications = 0;
@@ -518,6 +526,8 @@ namespace cobra {
         while (!worklist.Empty() && expansions < policy.max_expansions) {
             auto item = worklist.Pop();
             ++expansions;
+            telemetry.total_expansions  = expansions;
+            telemetry.max_depth_reached = std::max(telemetry.max_depth_reached, item.depth);
 
             // Track best unsupported
             UnsupportedCandidate current{
@@ -535,6 +545,7 @@ namespace cobra {
             // Candidate acceptance: verified candidates are immediately returned
             if (auto *cand = std::get_if< CandidatePayload >(&item.payload)) {
                 if (!cand->needs_original_space_verification) {
+                    telemetry.queue_high_water = worklist.HighWaterMark();
                     return Ok(
                         OrchestratorResult{
                             .outcome = PassOutcome::Success(
@@ -543,6 +554,7 @@ namespace cobra {
                             ),
                             .metadata     = std::move(item.metadata),
                             .run_metadata = context.run_metadata,
+                            .telemetry    = std::move(telemetry),
                         }
                     );
                 }
@@ -564,8 +576,12 @@ namespace cobra {
                 auto it = registry_map.find(pass_id);
                 if (it == registry_map.end()) { continue; }
 
+                telemetry.passes_attempted.push_back(pass_id);
                 auto result = it->second->run(item, context);
-                if (pass_id == PassId::kVerifyCandidate) { ++verifications; }
+                if (pass_id == PassId::kVerifyCandidate) {
+                    ++verifications;
+                    telemetry.candidates_verified = verifications;
+                }
                 if (!result.has_value()) { return std::unexpected(result.error()); }
 
                 auto fp = ComputeFingerprint(item, context.bitwidth, policy.allow_reroute);
@@ -716,11 +732,13 @@ namespace cobra {
             final_meta.cause_chain = exhaustion_reason.causes;
         }
 
+        telemetry.queue_high_water = worklist.HighWaterMark();
         return Ok(
             OrchestratorResult{
                 .outcome      = PassOutcome::Blocked(std::move(exhaustion_reason)),
                 .metadata     = std::move(final_meta),
                 .run_metadata = context.run_metadata,
+                .telemetry    = std::move(telemetry),
             }
         );
     }
