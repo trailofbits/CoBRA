@@ -874,6 +874,9 @@ TEST(SimplifierTest, MixedRewrite_TopLevelXorSucceeds) {
 }
 
 TEST(SimplifierTest, MixedRewrite_NoEvaluatorShortCircuit) {
+    // The orchestrator tries the supported pipeline for MixedRewrite
+    // expressions even without an evaluator.  The boolean signature
+    // is sufficient for the supported solve to succeed.
     std::vector< uint64_t > sig(8);
     for (uint32_t i = 0; i < 8; ++i) {
         uint64_t x = (i >> 0) & 1;
@@ -887,11 +890,10 @@ TEST(SimplifierTest, MixedRewrite_NoEvaluatorShortCircuit) {
         Expr::Mul(Expr::BitwiseXor(Expr::Variable(0), Expr::Variable(1)), Expr::Variable(2));
 
     Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
-    // No evaluator
 
     auto result = Simplify(sig, vars, input.get(), opts);
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kUnchangedUnsupported);
+    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
 }
 
 TEST(SimplifierTest, MixedRewrite_DiagnosticPayload) {
