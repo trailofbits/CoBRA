@@ -48,9 +48,9 @@ TEST(SolveGhostResidualTest, SolvesMulSubAnd) {
     };
     std::vector< uint32_t > support = { 0, 1 };
     auto result                     = SolveGhostResidual(eval, support, 2, 64);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->num_terms, 1);
-    auto check = FullWidthCheckEval(eval, 2, *result->expr, 64);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_EQ(result.Payload().num_terms, 1);
+    auto check = FullWidthCheckEval(eval, 2, *result.Payload().expr, 64);
     EXPECT_TRUE(check.passed);
 }
 
@@ -60,8 +60,8 @@ TEST(SolveGhostResidualTest, SolvesScaledGhost) {
     };
     std::vector< uint32_t > support = { 0, 1 };
     auto result                     = SolveGhostResidual(eval, support, 2, 64);
-    ASSERT_TRUE(result.has_value());
-    auto check = FullWidthCheckEval(eval, 2, *result->expr, 64);
+    ASSERT_TRUE(result.Succeeded());
+    auto check = FullWidthCheckEval(eval, 2, *result.Payload().expr, 64);
     EXPECT_TRUE(check.passed);
 }
 
@@ -71,8 +71,8 @@ TEST(SolveGhostResidualTest, SolvesNegatedGhost) {
     };
     std::vector< uint32_t > support = { 0, 1 };
     auto result                     = SolveGhostResidual(eval, support, 2, 64);
-    ASSERT_TRUE(result.has_value());
-    auto check = FullWidthCheckEval(eval, 2, *result->expr, 64);
+    ASSERT_TRUE(result.Succeeded());
+    auto check = FullWidthCheckEval(eval, 2, *result.Payload().expr, 64);
     EXPECT_TRUE(check.passed);
 }
 
@@ -82,8 +82,8 @@ TEST(SolveGhostResidualTest, SolvesArity3Ghost) {
     };
     std::vector< uint32_t > support = { 0, 1, 2 };
     auto result                     = SolveGhostResidual(eval, support, 3, 64);
-    ASSERT_TRUE(result.has_value());
-    auto check = FullWidthCheckEval(eval, 3, *result->expr, 64);
+    ASSERT_TRUE(result.Succeeded());
+    auto check = FullWidthCheckEval(eval, 3, *result.Payload().expr, 64);
     EXPECT_TRUE(check.passed);
 }
 
@@ -93,8 +93,8 @@ TEST(SolveGhostResidualTest, TwoAdicPrecisionSelection) {
     };
     std::vector< uint32_t > support = { 0, 1 };
     auto result                     = SolveGhostResidual(eval, support, 2, 64);
-    ASSERT_TRUE(result.has_value());
-    auto check = FullWidthCheckEval(eval, 2, *result->expr, 64);
+    ASSERT_TRUE(result.Succeeded());
+    auto check = FullWidthCheckEval(eval, 2, *result.Payload().expr, 64);
     EXPECT_TRUE(check.passed);
 }
 
@@ -104,7 +104,7 @@ TEST(SolveGhostResidualTest, ReturnsNulloptForPolynomialNull) {
     };
     std::vector< uint32_t > support = { 0 };
     auto result                     = SolveGhostResidual(eval, support, 1, 64);
-    EXPECT_FALSE(result.has_value());
+    EXPECT_FALSE(result.Succeeded());
 }
 
 TEST(SolveGhostResidualTest, ReturnsNulloptForMultiTermGhost) {
@@ -113,7 +113,7 @@ TEST(SolveGhostResidualTest, ReturnsNulloptForMultiTermGhost) {
     };
     std::vector< uint32_t > support = { 0, 1, 2 };
     auto result                     = SolveGhostResidual(eval, support, 3, 64);
-    EXPECT_FALSE(result.has_value());
+    EXPECT_FALSE(result.Succeeded());
 }
 
 // --- SolveFactoredGhostResidual tests ---
@@ -125,9 +125,9 @@ TEST(SolveFactoredGhostResidualTest, SolvesConstantQuotient) {
     };
     std::vector< uint32_t > support = { 0, 1 };
     auto result                     = SolveFactoredGhostResidual(eval, support, 2, 64);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->num_terms, 1);
-    auto check = FullWidthCheckEval(eval, 2, *result->expr, 64);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_EQ(result.Payload().num_terms, 1);
+    auto check = FullWidthCheckEval(eval, 2, *result.Payload().expr, 64);
     EXPECT_TRUE(check.passed);
 }
 
@@ -138,8 +138,8 @@ TEST(SolveFactoredGhostResidualTest, SolvesWithPrunedSupport) {
     };
     std::vector< uint32_t > support = { 1, 3 };
     auto result                     = SolveFactoredGhostResidual(eval, support, 4, 64);
-    ASSERT_TRUE(result.has_value());
-    auto check = FullWidthCheckEval(eval, 4, *result->expr, 64);
+    ASSERT_TRUE(result.Succeeded());
+    auto check = FullWidthCheckEval(eval, 4, *result.Payload().expr, 64);
     EXPECT_TRUE(check.passed);
 }
 
@@ -150,8 +150,8 @@ TEST(SolveFactoredGhostResidualTest, Solves3VarWithMulSubAnd) {
     };
     std::vector< uint32_t > support = { 0, 1, 2 };
     auto result                     = SolveFactoredGhostResidual(eval, support, 3, 64);
-    ASSERT_TRUE(result.has_value());
-    auto check = FullWidthCheckEval(eval, 3, *result->expr, 64);
+    ASSERT_TRUE(result.Succeeded());
+    auto check = FullWidthCheckEval(eval, 3, *result.Payload().expr, 64);
     EXPECT_TRUE(check.passed);
 }
 
@@ -160,7 +160,7 @@ TEST(SolveFactoredGhostResidualTest, NulloptForXor) {
     Evaluator eval = [](const std::vector< uint64_t > &v) -> uint64_t { return v[0] ^ v[1]; };
     std::vector< uint32_t > support = { 0, 1 };
     auto result                     = SolveFactoredGhostResidual(eval, support, 2, 64);
-    EXPECT_FALSE(result.has_value());
+    EXPECT_FALSE(result.Succeeded());
 }
 
 TEST(SolveFactoredGhostResidualTest, NulloptForSingleVarSupport) {
@@ -170,5 +170,5 @@ TEST(SolveFactoredGhostResidualTest, NulloptForSingleVarSupport) {
     };
     std::vector< uint32_t > support = { 0 };
     auto result                     = SolveFactoredGhostResidual(eval, support, 1, 64);
-    EXPECT_FALSE(result.has_value());
+    EXPECT_FALSE(result.Succeeded());
 }

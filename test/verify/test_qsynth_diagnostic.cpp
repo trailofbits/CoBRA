@@ -472,9 +472,11 @@ TEST(QSynthDiagnostic, DecompEngineTelemetry) {
             bool ghost_recombine = false;
             if (res_count <= 6) {
                 auto ghost = SolveGhostResidual(residual_eval, res_sup, kNv, kBw);
-                if (ghost.has_value()) {
-                    ghost_solved    = true;
-                    auto combined   = Expr::Add(CloneExpr(*core.expr), std::move(ghost->expr));
+                if (ghost.Succeeded()) {
+                    ghost_solved       = true;
+                    auto ghost_payload = ghost.TakePayload();
+                    auto combined =
+                        Expr::Add(CloneExpr(*core.expr), std::move(ghost_payload.expr));
                     auto fwc        = FullWidthCheckEval(opts.evaluator, kNv, *combined, kBw);
                     ghost_recombine = fwc.passed;
                 }
@@ -487,20 +489,24 @@ TEST(QSynthDiagnostic, DecompEngineTelemetry) {
             bool fd2_verified  = false;
             if (bn && res_count <= 6) {
                 auto fd0 = SolveFactoredGhostResidual(residual_eval, res_sup, kNv, kBw);
-                if (fd0.has_value()) {
-                    fd0_candidate = true;
-                    auto combined = Expr::Add(CloneExpr(*core.expr), std::move(fd0->expr));
-                    auto fwc      = FullWidthCheckEval(opts.evaluator, kNv, *combined, kBw);
-                    fd0_verified  = fwc.passed;
+                if (fd0.Succeeded()) {
+                    fd0_candidate    = true;
+                    auto fd0_payload = fd0.TakePayload();
+                    auto combined =
+                        Expr::Add(CloneExpr(*core.expr), std::move(fd0_payload.expr));
+                    auto fwc     = FullWidthCheckEval(opts.evaluator, kNv, *combined, kBw);
+                    fd0_verified = fwc.passed;
                 }
                 uint8_t grid = (res_count <= 2) ? 3 : 2;
                 auto fd2 =
                     SolveFactoredGhostResidual(residual_eval, res_sup, kNv, kBw, 2, grid);
-                if (fd2.has_value()) {
-                    fd2_candidate = true;
-                    auto combined = Expr::Add(CloneExpr(*core.expr), std::move(fd2->expr));
-                    auto fwc      = FullWidthCheckEval(opts.evaluator, kNv, *combined, kBw);
-                    fd2_verified  = fwc.passed;
+                if (fd2.Succeeded()) {
+                    fd2_candidate    = true;
+                    auto fd2_payload = fd2.TakePayload();
+                    auto combined =
+                        Expr::Add(CloneExpr(*core.expr), std::move(fd2_payload.expr));
+                    auto fwc     = FullWidthCheckEval(opts.evaluator, kNv, *combined, kBw);
+                    fd2_verified = fwc.passed;
                 }
             }
 

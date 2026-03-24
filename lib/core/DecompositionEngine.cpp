@@ -265,12 +265,14 @@ namespace cobra {
                 );
 
                 auto ghost = SolveGhostResidual(ctx.opts.evaluator, fw_support, kNv, kBw);
-                if (ghost.has_value()) {
-                    auto check = FullWidthCheckEval(ctx.opts.evaluator, kNv, *ghost->expr, kBw);
+                if (ghost.Succeeded()) {
+                    auto ghost_payload = ghost.TakePayload();
+                    auto check =
+                        FullWidthCheckEval(ctx.opts.evaluator, kNv, *ghost_payload.expr, kBw);
                     if (check.passed) {
                         COBRA_TRACE("DecompEngine", "Boolean-null: GhostResidual succeeded");
                         DecompositionResult result;
-                        result.expr           = std::move(ghost->expr);
+                        result.expr           = std::move(ghost_payload.expr);
                         result.extractor_kind = ExtractorKind::kBooleanNullDirect;
                         result.solver_kind    = ResidualSolverKind::kGhostResidual;
                         return result;
@@ -279,15 +281,17 @@ namespace cobra {
 
                 auto factored =
                     SolveFactoredGhostResidual(ctx.opts.evaluator, fw_support, kNv, kBw);
-                if (factored.has_value()) {
-                    auto check =
-                        FullWidthCheckEval(ctx.opts.evaluator, kNv, *factored->expr, kBw);
+                if (factored.Succeeded()) {
+                    auto factored_payload = factored.TakePayload();
+                    auto check            = FullWidthCheckEval(
+                        ctx.opts.evaluator, kNv, *factored_payload.expr, kBw
+                    );
                     if (check.passed) {
                         COBRA_TRACE(
                             "DecompEngine", "Boolean-null: FactoredGhost(d=0) succeeded"
                         );
                         DecompositionResult result;
-                        result.expr           = std::move(factored->expr);
+                        result.expr           = std::move(factored_payload.expr);
                         result.extractor_kind = ExtractorKind::kBooleanNullDirect;
                         result.solver_kind    = ResidualSolverKind::kGhostResidual;
                         return result;
@@ -299,15 +303,17 @@ namespace cobra {
                 auto factored2 = SolveFactoredGhostResidual(
                     ctx.opts.evaluator, fw_support, kNv, kBw, 2, grid
                 );
-                if (factored2.has_value()) {
-                    auto check =
-                        FullWidthCheckEval(ctx.opts.evaluator, kNv, *factored2->expr, kBw);
+                if (factored2.Succeeded()) {
+                    auto factored2_payload = factored2.TakePayload();
+                    auto check             = FullWidthCheckEval(
+                        ctx.opts.evaluator, kNv, *factored2_payload.expr, kBw
+                    );
                     if (check.passed) {
                         COBRA_TRACE(
                             "DecompEngine", "Boolean-null: FactoredGhost(d=2) succeeded"
                         );
                         DecompositionResult result;
-                        result.expr           = std::move(factored2->expr);
+                        result.expr           = std::move(factored2_payload.expr);
                         result.extractor_kind = ExtractorKind::kBooleanNullDirect;
                         result.solver_kind    = ResidualSolverKind::kGhostResidual;
                         return result;
@@ -412,9 +418,10 @@ namespace cobra {
                 // Ghost solver 2: Ghost residual solver (6-var cap)
                 if (kResRealCount <= 6) {
                     auto ghost = SolveGhostResidual(residual_eval, res_support, kNv, kBw);
-                    if (ghost.has_value()) {
+                    if (ghost.Succeeded()) {
+                        auto ghost_payload = ghost.TakePayload();
                         auto combined =
-                            Expr::Add(CloneExpr(*core.expr), std::move(ghost->expr));
+                            Expr::Add(CloneExpr(*core.expr), std::move(ghost_payload.expr));
                         auto check =
                             FullWidthCheckEval(ctx.opts.evaluator, kNv, *combined, kBw);
                         if (check.passed) {
@@ -438,9 +445,10 @@ namespace cobra {
                 if (kResRealCount <= 6) {
                     auto factored =
                         SolveFactoredGhostResidual(residual_eval, res_support, kNv, kBw);
-                    if (factored.has_value()) {
+                    if (factored.Succeeded()) {
+                        auto factored_payload = factored.TakePayload();
                         auto combined =
-                            Expr::Add(CloneExpr(*core.expr), std::move(factored->expr));
+                            Expr::Add(CloneExpr(*core.expr), std::move(factored_payload.expr));
                         auto check =
                             FullWidthCheckEval(ctx.opts.evaluator, kNv, *combined, kBw);
                         if (check.passed) {

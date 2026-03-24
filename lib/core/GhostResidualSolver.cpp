@@ -2,6 +2,7 @@
 #include "cobra/core/BitWidth.h"
 #include "cobra/core/GhostBasis.h"
 #include "cobra/core/MathUtils.h"
+#include "cobra/core/PassContract.h"
 #include "cobra/core/PolyExprBuilder.h"
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/WeightedPolyFit.h"
@@ -12,6 +13,13 @@
 #include <span>
 
 namespace cobra {
+
+    namespace ghost_residual {
+        enum Subcode : uint16_t {
+            kSingleBasisExhausted   = 1,
+            kFactoredBasisExhausted = 2,
+        };
+    } // namespace ghost_residual
 
     namespace {
 
@@ -96,7 +104,7 @@ namespace cobra {
         return false;
     }
 
-    std::optional< GhostSolveResult > SolveGhostResidual(
+    SolverResult< GhostSolveResult > SolveGhostResidual(
         const Evaluator &residual_eval, const std::vector< uint32_t > &support,
         uint32_t num_vars, uint32_t bitwidth
     ) {
@@ -202,15 +210,22 @@ namespace cobra {
                     res.expr = std::move(result_expr);
                     res.primitives_used.push_back(prim.name);
                     res.num_terms = 1;
-                    return res;
+                    return SolverResult< GhostSolveResult >::Success(std::move(res));
                 }
             } while (NextCombo(combo_span, kSupportSize));
         }
 
-        return std::nullopt;
+        ReasonDetail reason{
+            .top = {
+                .code = {ReasonCategory::kSearchExhausted, ReasonDomain::kGhostResidual,
+                         ghost_residual::kSingleBasisExhausted},
+                .message = "no single ghost primitive matched",
+            },
+        };
+        return SolverResult< GhostSolveResult >::Blocked(std::move(reason));
     }
 
-    std::optional< GhostSolveResult > SolveFactoredGhostResidual(
+    SolverResult< GhostSolveResult > SolveFactoredGhostResidual(
         const Evaluator &residual_eval, const std::vector< uint32_t > &support,
         uint32_t num_vars, uint32_t bitwidth, uint8_t max_degree, uint8_t grid_degree
     ) {
@@ -258,12 +273,19 @@ namespace cobra {
                     res.expr = std::move(combined);
                     res.primitives_used.push_back(prim.name);
                     res.num_terms = 1;
-                    return res;
+                    return SolverResult< GhostSolveResult >::Success(std::move(res));
                 }
             } while (NextCombo(combo_span, kSupportSize));
         }
 
-        return std::nullopt;
+        ReasonDetail reason{
+            .top = {
+                .code = {ReasonCategory::kSearchExhausted, ReasonDomain::kGhostResidual,
+                         ghost_residual::kFactoredBasisExhausted},
+                .message = "no factored ghost primitive matched",
+            },
+        };
+        return SolverResult< GhostSolveResult >::Blocked(std::move(reason));
     }
 
 } // namespace cobra
