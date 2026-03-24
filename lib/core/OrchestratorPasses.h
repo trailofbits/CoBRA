@@ -1,0 +1,79 @@
+#pragma once
+
+#include "Orchestrator.h"
+#include "cobra/core/Result.h"
+
+#include <vector>
+
+namespace cobra {
+
+    // ---------------------------------------------------------------
+    // PassId — identifies each pass in the registry
+    // ---------------------------------------------------------------
+
+    enum class PassId : uint8_t {
+        kLowerNotOverArith,
+        kClassifyAst,
+        kBuildSignatureState,
+        kSupportedSolve,
+        kTrySemilinearPass,
+        kDecompose,
+        kOperandSimplify,
+        kProductIdentityCollapse,
+        kXorLowering,
+        kVerifyCandidate,
+    };
+
+    // ---------------------------------------------------------------
+    // PassTag — broad category for each pass
+    // ---------------------------------------------------------------
+
+    enum class PassTag {
+        kAnalysis,
+        kRewrite,
+        kSolver,
+        kVerifier,
+    };
+
+    // ---------------------------------------------------------------
+    // Function pointer types for pass dispatch
+    // ---------------------------------------------------------------
+
+    using ApplicabilityFn = bool (*)(const WorkItem &, const OrchestratorContext &);
+    using PassFn          = Result< PassResult > (*)(const WorkItem &, OrchestratorContext &);
+
+    // ---------------------------------------------------------------
+    // PassDescriptor — static metadata for one pass
+    // ---------------------------------------------------------------
+
+    struct PassDescriptor
+    {
+        PassId id;
+        StateKind consumes;
+        PassTag tag;
+        ApplicabilityFn applicable;
+        PassFn run;
+    };
+
+    // ---------------------------------------------------------------
+    // Registry
+    // ---------------------------------------------------------------
+
+    const std::vector< PassDescriptor > &GetPassRegistry();
+
+    // ---------------------------------------------------------------
+    // Pass adapter declarations
+    // ---------------------------------------------------------------
+
+    Result< PassResult > RunLowerNotOverArith(const WorkItem &, OrchestratorContext &);
+    Result< PassResult > RunClassifyAst(const WorkItem &, OrchestratorContext &);
+    Result< PassResult > RunBuildSignatureState(const WorkItem &, OrchestratorContext &);
+    Result< PassResult > RunSupportedSolve(const WorkItem &, OrchestratorContext &);
+    Result< PassResult > RunTrySemilinearPass(const WorkItem &, OrchestratorContext &);
+    Result< PassResult > RunDecompose(const WorkItem &, OrchestratorContext &);
+    Result< PassResult > RunOperandSimplify(const WorkItem &, OrchestratorContext &);
+    Result< PassResult > RunProductIdentityCollapse(const WorkItem &, OrchestratorContext &);
+    Result< PassResult > RunXorLowering(const WorkItem &, OrchestratorContext &);
+    Result< PassResult > RunVerifyCandidate(const WorkItem &, OrchestratorContext &);
+
+} // namespace cobra
