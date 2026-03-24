@@ -415,17 +415,18 @@ TEST(TryDecompositionTest, ResidualFalsePositiveRejection) {
     }
     EXPECT_FALSE(all_zero);
 
-    // RunSupportedPipeline returns a "simplified" residual that is
+    // RunSupportedPass returns a "simplified" residual that is
     // only boolean-correct (its internal 8-probe FW check is a
     // false positive).
     Options res_opts   = opts;
     res_opts.evaluator = residual_eval;
-    auto res_result    = RunSupportedPipeline(residual_sig, vars, res_opts);
+    auto res_result    = RunSupportedPass(residual_sig, vars, res_opts);
     ASSERT_TRUE(res_result.has_value());
-    EXPECT_EQ(res_result.value().kind, SimplifyOutcome::Kind::kSimplified);
+    ASSERT_TRUE(res_result.value().Succeeded());
 
     // Stronger FW check catches the mismatch
-    auto strong_check = FullWidthCheckEval(residual_eval, 2, *res_result.value().expr, 64, 64);
+    auto strong_check =
+        FullWidthCheckEval(residual_eval, 2, res_result.value().GetExpr(), 64, 64);
     EXPECT_FALSE(strong_check.passed) << "Residual solution should fail stronger FW check";
 
     // TryDecomposition must not return an incorrect result.

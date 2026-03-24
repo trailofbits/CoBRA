@@ -2,6 +2,7 @@
 
 #include "cobra/core/Classification.h"
 #include "cobra/core/Expr.h"
+#include "cobra/core/PassContract.h"
 #include "cobra/core/Result.h"
 #include "cobra/core/SimplifyOutcome.h"
 #include <cstdint>
@@ -33,6 +34,13 @@ namespace cobra {
     // Exposed for use by the decomposition engine's residual solver.
     // Not part of the public API — use Simplify() for external callers.
     Result< SimplifyOutcome > RunSupportedPipeline(
+        const std::vector< uint64_t > &sig, const std::vector< std::string > &vars,
+        const Options &opts
+    );
+
+    // Internal: typed pass boundary for the supported-fragment pipeline.
+    // Exposes structured non-success to migrated internal callers.
+    Result< PassOutcome > RunSupportedPass(
         const std::vector< uint64_t > &sig, const std::vector< std::string > &vars,
         const Options &opts
     );

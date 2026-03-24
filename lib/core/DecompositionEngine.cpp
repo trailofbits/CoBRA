@@ -531,23 +531,18 @@ namespace cobra {
 
                 // Residual solver 1: Supported pipeline
                 {
-                    auto res_result =
-                        RunSupportedPipeline(residual_sig, ctx.vars, residual_opts);
-                    if (res_result.has_value()
-                        && res_result.value().kind == SimplifyOutcome::Kind::kSimplified)
-                    {
-                        auto solved_expr = std::move(res_result.value().expr);
-                        if (!res_result.value().real_vars.empty()
-                            && res_result.value().real_vars.size() < ctx.vars.size())
-                        {
-                            auto idx_map =
-                                BuildVarSupport(ctx.vars, res_result.value().real_vars);
+                    auto res_pass = RunSupportedPass(residual_sig, ctx.vars, residual_opts);
+                    if (res_pass.has_value() && res_pass.value().Succeeded()) {
+                        auto solved_expr      = res_pass.value().TakeExpr();
+                        const auto &real_vars = res_pass.value().RealVars();
+                        if (!real_vars.empty() && real_vars.size() < ctx.vars.size()) {
+                            auto idx_map = BuildVarSupport(ctx.vars, real_vars);
                             RemapVarIndices(*solved_expr, idx_map);
                         }
 
                         // Verify solved_expr against residual evaluator
                         // with stronger probing before recombination.
-                        // RunSupportedPipeline's internal FW check uses
+                        // RunSupportedPass's internal FW check uses
                         // only 8 deterministic probes, which can false-
                         // positive on boolean-correct but FW-incorrect
                         // expressions.

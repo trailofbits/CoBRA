@@ -273,30 +273,27 @@ namespace cobra {
 
     } // namespace
 
-    Result< SimplifyOutcome > RunSupportedPipeline(
+    Result< PassOutcome > RunSupportedPass(
         const std::vector< uint64_t > &sig, const std::vector< std::string > &vars,
         const Options &opts
     ) {
         const auto kNumVars = static_cast< uint32_t >(vars.size());
         COBRA_TRACE(
-            "Simplifier", "RunSupportedPipeline: vars={} bitwidth={} max_vars={}", vars.size(),
+            "Simplifier", "RunSupportedPass: vars={} bitwidth={} max_vars={}", vars.size(),
             opts.bitwidth, opts.max_vars
         );
-        COBRA_TRACE_SIG("Simplifier", "RunSupportedPipeline input sig", sig);
+        COBRA_TRACE_SIG("Simplifier", "RunSupportedPass input sig", sig);
 
         // Step 1: Prune constants
         {
             auto pm = MatchPattern(sig, kNumVars, opts.bitwidth);
             if (pm && (*pm)->kind == Expr::Kind::kConstant) {
                 COBRA_TRACE(
-                    "Simplifier", "RunSupportedPipeline: constant match val={}",
-                    (*pm)->constant_val
+                    "Simplifier", "RunSupportedPass: constant match val={}", (*pm)->constant_val
                 );
-                SimplifyOutcome outcome;
-                outcome.kind       = SimplifyOutcome::Kind::kSimplified;
-                outcome.expr       = std::move(*pm);
-                outcome.sig_vector = sig;
-                outcome.verified   = true;
+                auto outcome =
+                    PassOutcome::Success(std::move(*pm), {}, VerificationState::kVerified);
+                outcome.SetSigVector(sig);
                 return Ok(std::move(outcome));
             }
         }
@@ -305,12 +302,12 @@ namespace cobra {
         auto elim                = EliminateAuxVars(sig, vars);
         const auto kRealVarCount = static_cast< uint32_t >(elim.real_vars.size());
         COBRA_TRACE(
-            "Simplifier", "RunSupportedPipeline: after EliminateAuxVars real={} eliminated={}",
+            "Simplifier", "RunSupportedPass: after EliminateAuxVars real={} eliminated={}",
             elim.real_vars.size(), elim.spurious_vars.size()
         );
 
         if (kRealVarCount > opts.max_vars) {
-            return Err< SimplifyOutcome >(
+            return Err< PassOutcome >(
                 CobraError::kTooManyVariables,
                 "Variable count after elimination (" + std::to_string(kRealVarCount)
                     + ") exceeds max_vars (" + std::to_string(opts.max_vars) + ")"
@@ -346,23 +343,53 @@ namespace cobra {
         // Delegate to SignatureSimplifier
         auto sub = SimplifyFromSignature(elim.reduced_sig, ctx, opts, 0);
         COBRA_TRACE(
-            "Simplifier", "RunSupportedPipeline: SignatureSimplifier returned succeeded={}",
+            "Simplifier", "RunSupportedPass: SignatureSimplifier returned succeeded={}",
             sub.Succeeded()
         );
 
         if (sub.Succeeded()) {
-            auto payload = sub.TakePayload();
-            SimplifyOutcome outcome;
-            outcome.kind       = SimplifyOutcome::Kind::kSimplified;
-            outcome.expr       = std::move(payload.expr);
-            outcome.sig_vector = elim.reduced_sig;
-            outcome.real_vars  = std::move(elim.real_vars);
-            outcome.verified   = payload.verification == VerificationState::kVerified;
+            auto payload      = sub.TakePayload();
+            auto verification = payload.verification == VerificationState::kVerified
+                ? VerificationState::kVerified
+                : VerificationState::kUnverified;
+            auto outcome      = PassOutcome::Success(
+                std::move(payload.expr), std::move(elim.real_vars), verification
+            );
+            outcome.SetSigVector(elim.reduced_sig);
             return Ok(std::move(outcome));
         }
 
-        // Fallback: should not normally reach here since
-        // simplify_from_signature always produces a CoB result.
+        // Translate solver non-success into PassOutcome
+        ReasonDetail reason = sub.Reason();
+        if (sub.Kind() == OutcomeKind::kInapplicable) {
+            return Ok(PassOutcome::Inapplicable(std::move(reason)));
+        }
+        return Ok(PassOutcome::Blocked(std::move(reason)));
+    }
+
+    Result< SimplifyOutcome > RunSupportedPipeline(
+        const std::vector< uint64_t > &sig, const std::vector< std::string > &vars,
+        const Options &opts
+    ) {
+        auto pass = RunSupportedPass(sig, vars, opts);
+        if (!pass.has_value()) { return std::unexpected(pass.error()); }
+
+        auto &outcome = pass.value();
+        if (outcome.Succeeded()) {
+            SimplifyOutcome legacy;
+            legacy.kind       = SimplifyOutcome::Kind::kSimplified;
+            legacy.expr       = outcome.TakeExpr();
+            legacy.sig_vector = outcome.SigVector();
+            legacy.real_vars  = outcome.RealVars();
+            legacy.verified   = outcome.Verification() == VerificationState::kVerified;
+            return Ok(std::move(legacy));
+        }
+
+        if (outcome.Kind() == OutcomeKind::kVerifyFailed) {
+            return Err< SimplifyOutcome >(
+                CobraError::kVerificationFailed, outcome.Reason().top.message
+            );
+        }
         return Err< SimplifyOutcome >(
             CobraError::kVerificationFailed, "SignatureSimplifier produced no result"
         );
