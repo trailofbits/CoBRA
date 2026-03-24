@@ -454,9 +454,10 @@ TEST(QSynthDiagnostic, DecompEngineTelemetry) {
             if (res_count <= 6) {
                 auto rpoly =
                     RecoverAndVerifyPoly(residual_eval, res_sup, kNv, kBw, 4, deg_floor);
-                if (rpoly.has_value()) {
-                    poly_solved    = true;
-                    auto combined  = Expr::Add(CloneExpr(*core.expr), std::move(rpoly->expr));
+                if (rpoly.Succeeded()) {
+                    poly_solved = true;
+                    auto combined =
+                        Expr::Add(CloneExpr(*core.expr), std::move(rpoly.TakePayload().expr));
                     auto fwc       = FullWidthCheckEval(opts.evaluator, kNv, *combined, kBw);
                     poly_recombine = fwc.passed;
                 }
@@ -2265,9 +2266,10 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
         bool poly_recombine = false;
         if (res_count <= 6) {
             auto rpoly = RecoverAndVerifyPoly(residual_eval, res_sup, kNv, 64, 4, deg_floor);
-            if (rpoly.has_value()) {
-                poly_solved    = true;
-                auto combined  = Expr::Add(CloneExpr(*core->expr), std::move(rpoly->expr));
+            if (rpoly.Succeeded()) {
+                poly_solved = true;
+                auto combined =
+                    Expr::Add(CloneExpr(*core->expr), std::move(rpoly.TakePayload().expr));
                 auto fwc       = FullWidthCheckEval(opts.evaluator, kNv, *combined, 64);
                 poly_recombine = fwc.passed;
             }
@@ -2563,10 +2565,10 @@ TEST(QSynthDiagnostic, NonBnResidualCharacterization) {
         for (uint8_t deg : { 2, 3, 4 }) {
             if (res_nv > 6) { continue; }
             auto poly      = RecoverMultivarPoly(residual_eval, res_sup, kNv, 64, deg);
-            bool recovered = poly.has_value();
+            bool recovered = poly.Succeeded();
             bool fw_ok     = false;
             if (recovered) {
-                auto expr = BuildPolyExpr(*poly);
+                auto expr = BuildPolyExpr(poly.Payload());
                 if (expr.has_value()) {
                     auto check = FullWidthCheckEval(residual_eval, kNv, **expr, 64, 64);
                     fw_ok      = check.passed;
@@ -2590,7 +2592,7 @@ TEST(QSynthDiagnostic, NonBnResidualCharacterization) {
         if (res_nv <= 6) {
             auto rpoly = RecoverAndVerifyPoly(residual_eval, res_sup, kNv, 64, 4, 2);
             std::cerr << "    recover_and_verify(d=2..4): "
-                      << (rpoly.has_value() ? "OK" : "FAIL") << "\n";
+                      << (rpoly.Succeeded() ? "OK" : "FAIL") << "\n";
         }
 
         // --- Structural residual probe ---
@@ -2829,8 +2831,8 @@ TEST(QSynthDiagnostic, NoCoreCharacterization) {
         bool p2fw = false, p3fw = false, p4fw = false;
         for (uint8_t deg : { 2, 3, 4 }) {
             auto poly = RecoverMultivarPoly(opts.evaluator, support, kNv, 64, deg);
-            if (!poly.has_value()) { continue; }
-            auto pexpr = BuildPolyExpr(*poly);
+            if (!poly.Succeeded()) { continue; }
+            auto pexpr = BuildPolyExpr(poly.Payload());
             if (!pexpr.has_value()) { continue; }
             auto check = FullWidthCheckEval(opts.evaluator, kNv, *pexpr.value(), 64, 64);
             if (check.passed) {

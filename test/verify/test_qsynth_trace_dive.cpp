@@ -354,11 +354,11 @@ namespace {
                 auto all_vars = static_cast< uint32_t >(vars.size());
                 auto poly = RecoverMultivarPoly(opts.evaluator, support, all_vars, bitwidth);
                 std::print(
-                    stderr, "    poly recovery: {}\n", poly.has_value() ? "FOUND" : "none"
+                    stderr, "    poly recovery: {}\n", poly.Succeeded() ? "FOUND" : "none"
                 );
 
-                if (poly.has_value()) {
-                    auto poly_expr = BuildPolyExpr(*poly);
+                if (poly.Succeeded()) {
+                    auto poly_expr = BuildPolyExpr(poly.Payload());
                     if (poly_expr.has_value()) {
                         std::print(stderr, "    candidate: {}\n", expr_str(*poly_expr.value()));
                         auto check = FullWidthCheckEval(

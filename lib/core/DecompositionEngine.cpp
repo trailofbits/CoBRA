@@ -160,9 +160,9 @@ namespace cobra {
         auto support = BuildVarSupport(ctx.vars, fw_elim.real_vars);
 
         auto poly = RecoverMultivarPoly(ctx.opts.evaluator, support, kNv, kBw, degree);
-        if (!poly.has_value()) { return std::nullopt; }
+        if (!poly.Succeeded()) { return std::nullopt; }
 
-        auto expr = BuildPolyExpr(*poly);
+        auto expr = BuildPolyExpr(poly.TakePayload());
         if (!expr.has_value()) { return std::nullopt; }
 
         CoreCandidate core;
@@ -384,9 +384,10 @@ namespace cobra {
                     auto res_poly = RecoverAndVerifyPoly(
                         residual_eval, res_support, kNv, kBw, 4, degree_floor
                     );
-                    if (res_poly.has_value()) {
-                        auto combined =
-                            Expr::Add(CloneExpr(*core.expr), std::move(res_poly->expr));
+                    if (res_poly.Succeeded()) {
+                        auto combined = Expr::Add(
+                            CloneExpr(*core.expr), std::move(res_poly.TakePayload().expr)
+                        );
                         auto check =
                             FullWidthCheckEval(ctx.opts.evaluator, kNv, *combined, kBw);
                         if (check.passed) {
@@ -584,15 +585,16 @@ namespace cobra {
                     auto res_poly = RecoverAndVerifyPoly(
                         residual_eval, res_support, kNv, kBw, 4, degree_floor
                     );
-                    if (res_poly.has_value()) {
+                    if (res_poly.Succeeded()) {
+                        auto poly_payload = res_poly.TakePayload();
                         auto combined =
-                            Expr::Add(CloneExpr(*core.expr), std::move(res_poly->expr));
+                            Expr::Add(CloneExpr(*core.expr), std::move(poly_payload.expr));
                         auto check =
                             FullWidthCheckEval(ctx.opts.evaluator, kNv, *combined, kBw);
                         if (check.passed) {
                             COBRA_TRACE(
                                 "DecompEngine", "Decomposed: kind={} + PolyRecovery(d={})",
-                                static_cast< int >(core.kind), res_poly->degree_used
+                                static_cast< int >(core.kind), poly_payload.degree_used
                             );
                             DecompositionResult result;
                             result.expr           = std::move(combined);

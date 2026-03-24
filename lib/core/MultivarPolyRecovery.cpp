@@ -2,27 +2,76 @@
 #include "cobra/core/BitWidth.h"
 #include "cobra/core/MathUtils.h"
 #include "cobra/core/MonomialKey.h"
+#include "cobra/core/PassContract.h"
 #include "cobra/core/PolyExprBuilder.h"
 #include "cobra/core/PolyIR.h"
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/Simplifier.h"
 #include <array>
 #include <cstdint>
-#include <optional>
 #include <vector>
 
 namespace cobra {
 
-    std::optional< NormalizedPoly > RecoverMultivarPoly(
+    namespace multivar_poly {
+        enum Subcode : uint16_t {
+            kEmptySupport     = 1,
+            kTooManyVars      = 2,
+            kBitwidthRange    = 3,
+            kMaxDegreeZero    = 4,
+            kBadSupportIndex  = 5,
+            kDivisibilityFail = 6,
+            kCapBelowMin      = 10,
+            kNoVerifiedDegree = 11,
+        };
+    } // namespace multivar_poly
+
+    SolverResult< NormalizedPoly > RecoverMultivarPoly(
         const Evaluator &eval, const std::vector< uint32_t > &support_vars,
         uint32_t total_num_vars, uint32_t bitwidth, uint8_t max_degree
     ) {
-        if (support_vars.empty()) { return std::nullopt; }
-        if (total_num_vars > kMaxPolyVars) { return std::nullopt; }
-        if (bitwidth < 2 || bitwidth > 64) { return std::nullopt; }
-        if (max_degree < 1) { return std::nullopt; }
+        if (support_vars.empty()) {
+            ReasonDetail reason{
+                .top = { .code    = { ReasonCategory::kGuardFailed, ReasonDomain::kMultivarPoly,
+                                      multivar_poly::kEmptySupport },
+                        .message = "empty support variable set" }
+            };
+            return SolverResult< NormalizedPoly >::Inapplicable(std::move(reason));
+        }
+        if (total_num_vars > kMaxPolyVars) {
+            ReasonDetail reason{
+                .top = { .code    = { ReasonCategory::kGuardFailed, ReasonDomain::kMultivarPoly,
+                                      multivar_poly::kTooManyVars },
+                        .message = "total_num_vars exceeds kMaxPolyVars" }
+            };
+            return SolverResult< NormalizedPoly >::Inapplicable(std::move(reason));
+        }
+        if (bitwidth < 2 || bitwidth > 64) {
+            ReasonDetail reason{
+                .top = { .code    = { ReasonCategory::kGuardFailed, ReasonDomain::kMultivarPoly,
+                                      multivar_poly::kBitwidthRange },
+                        .message = "bitwidth out of range [2, 64]" }
+            };
+            return SolverResult< NormalizedPoly >::Inapplicable(std::move(reason));
+        }
+        if (max_degree < 1) {
+            ReasonDetail reason{
+                .top = { .code    = { ReasonCategory::kGuardFailed, ReasonDomain::kMultivarPoly,
+                                      multivar_poly::kMaxDegreeZero },
+                        .message = "max_degree must be >= 1" }
+            };
+            return SolverResult< NormalizedPoly >::Inapplicable(std::move(reason));
+        }
         for (auto idx : support_vars) {
-            if (idx >= total_num_vars) { return std::nullopt; }
+            if (idx >= total_num_vars) {
+                ReasonDetail reason{
+                    .top = { .code    = { ReasonCategory::kGuardFailed,
+                                          ReasonDomain::kMultivarPoly,
+                                          multivar_poly::kBadSupportIndex },
+                            .message = "support index >= total_num_vars" }
+                };
+                return SolverResult< NormalizedPoly >::Inapplicable(std::move(reason));
+            }
         }
 
         const auto kK        = static_cast< uint32_t >(support_vars.size());
@@ -90,7 +139,16 @@ namespace cobra {
             // Divisibility gate: alpha must be divisible by 2^q
             if (q > 0) {
                 const uint64_t kLowBits = kAlpha & ((1ULL << q) - 1);
-                if (kLowBits != 0) { return std::nullopt; }
+                if (kLowBits != 0) {
+                    ReasonDetail reason{
+                        .top = { .code    = { ReasonCategory::kNoSolution,
+                                              ReasonDomain::kMultivarPoly,
+                                              multivar_poly::kDivisibilityFail },
+                                .message = "falling-factorial coefficient fails divisibility "
+                                            "gate" }
+                    };
+                    return SolverResult< NormalizedPoly >::Blocked(std::move(reason));
+                }
             }
 
             const uint32_t kPrecBits = bitwidth - q;
@@ -118,29 +176,43 @@ namespace cobra {
             result.coeffs[key] = h;
         }
 
-        return result;
+        return SolverResult< NormalizedPoly >::Success(std::move(result));
     }
 
-    std::optional< PolyRecoveryResult > RecoverAndVerifyPoly(
+    SolverResult< PolyRecoveryResult > RecoverAndVerifyPoly(
         const Evaluator &eval, const std::vector< uint32_t > &support_vars,
         uint32_t total_num_vars, uint32_t bitwidth, uint8_t max_degree_cap, uint8_t min_degree
     ) {
-        if (max_degree_cap < min_degree) { return std::nullopt; }
+        if (max_degree_cap < min_degree) {
+            ReasonDetail reason{
+                .top = { .code    = { ReasonCategory::kGuardFailed, ReasonDomain::kMultivarPoly,
+                                      multivar_poly::kCapBelowMin },
+                        .message = "max_degree_cap < min_degree" }
+            };
+            return SolverResult< PolyRecoveryResult >::Inapplicable(std::move(reason));
+        }
 
         // Each degree is recovered independently (no incremental reuse).
         for (uint8_t d = min_degree; d <= max_degree_cap; ++d) {
             auto poly = RecoverMultivarPoly(eval, support_vars, total_num_vars, bitwidth, d);
-            if (!poly.has_value()) { continue; }
+            if (!poly.Succeeded()) { continue; }
 
-            auto expr = BuildPolyExpr(*poly);
+            auto expr = BuildPolyExpr(poly.TakePayload());
             if (!expr.has_value()) { continue; }
 
             auto check = FullWidthCheckEval(eval, total_num_vars, *expr.value(), bitwidth);
             if (!check.passed) { continue; }
 
-            return PolyRecoveryResult{ std::move(expr.value()), d };
+            return SolverResult< PolyRecoveryResult >::Success(
+                PolyRecoveryResult{ std::move(expr.value()), d }
+            );
         }
-        return std::nullopt;
+        ReasonDetail reason{
+            .top = { .code    = { ReasonCategory::kSearchExhausted, ReasonDomain::kMultivarPoly,
+                                  multivar_poly::kNoVerifiedDegree },
+                    .message = "no degree produced a verified polynomial" }
+        };
+        return SolverResult< PolyRecoveryResult >::Blocked(std::move(reason));
     }
 
 } // namespace cobra

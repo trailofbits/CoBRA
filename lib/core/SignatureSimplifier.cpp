@@ -245,9 +245,10 @@ namespace cobra {
             std::vector< uint32_t > support(kNumVars);
             std::iota(support.begin(), support.end(), 0U);
             auto recovery = RecoverAndVerifyPoly(*ctx.eval, support, kNumVars, opts.bitwidth);
-            if (recovery.has_value()) {
+            if (recovery.Succeeded()) {
                 TryUpdateBest(
-                    best, std::move(recovery->expr), /*verified=*/true, baseline_cost
+                    best, std::move(recovery.TakePayload().expr), /*verified=*/true,
+                    baseline_cost
                 );
             }
         }
