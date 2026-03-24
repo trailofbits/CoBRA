@@ -48,6 +48,7 @@ target_sources(cobra-core PRIVATE
     PassContract.cpp
     Orchestrator.cpp
     OrchestratorPasses.cpp
+    VerifyCandidate.cpp
 )
 
 target_include_directories(cobra-core PUBLIC
