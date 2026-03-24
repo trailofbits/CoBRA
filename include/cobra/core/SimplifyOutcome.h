@@ -2,8 +2,10 @@
 
 #include "cobra/core/Classification.h"
 #include "cobra/core/Expr.h"
+#include "cobra/core/PassContract.h"
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -19,6 +21,9 @@ namespace cobra {
         bool rewrite_produced_candidate    = false;
         bool candidate_failed_verification = false;
         std::string reason;
+
+        std::optional< ReasonCode > reason_code;
+        std::vector< ReasonFrame > cause_chain;
     };
 
     struct SimplifyOutcome

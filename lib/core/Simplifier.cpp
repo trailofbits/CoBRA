@@ -77,7 +77,8 @@ namespace cobra {
         }
 
         SimplifyOutcome MakeUnchanged(
-            const Expr *input_expr, const Classification &cls, const std::string &reason
+            const Expr *input_expr, const Classification &cls, const std::string &reason,
+            std::optional< ReasonCode > rc = std::nullopt
         ) {
             SimplifyOutcome outcome;
             outcome.kind                 = SimplifyOutcome::Kind::kUnchangedUnsupported;
@@ -85,15 +86,16 @@ namespace cobra {
             outcome.diag.classification  = cls;
             outcome.diag.attempted_route = cls.route;
             outcome.diag.reason          = reason;
+            outcome.diag.reason_code     = rc;
             return outcome;
         }
 
         SimplifyOutcome MakeUnchanged(
             const Expr *input_expr, const Classification &cls, const RewriteResult &rw,
-            const std::string &reason
+            const std::string &reason, std::optional< ReasonCode > rc = std::nullopt
         ) {
-            auto outcome                            = MakeUnchanged(input_expr, cls, reason);
-            outcome.diag.rewrite_rounds             = rw.rounds_applied;
+            auto outcome                = MakeUnchanged(input_expr, cls, reason, rc);
+            outcome.diag.rewrite_rounds = rw.rounds_applied;
             outcome.diag.rewrite_produced_candidate = rw.structure_changed;
             return outcome;
         }
@@ -475,6 +477,7 @@ namespace cobra {
         // boolean-signature simplification. Try it before routing.
         // Use input_expr (pre-lowering) — LowerNotOverArith converts
         // ~(const) into Add(Neg(const), mask) which inflates the IR.
+        std::optional< ReasonDetail > semi_failure_reason;
         if (cls.semantic == SemanticClass::kSemilinear
             && !IsLinearShortcut(
                 *working_expr, static_cast< uint32_t >(vars.size()), opts.bitwidth
@@ -491,6 +494,7 @@ namespace cobra {
                 outcome.diag.attempted_route = cls.route;
                 return Ok(std::move(outcome));
             }
+            semi_failure_reason = semi.Reason();
             COBRA_TRACE(
                 "Simplifier", "Semilinear pipeline failed, falling back to supported pipeline"
             );
@@ -530,11 +534,17 @@ namespace cobra {
                         opts.bitwidth
                     );
                     if (!check.passed) {
-                        return Ok(MakeUnchanged(
+                        auto outcome = MakeUnchanged(
                             working_expr, cls,
                             "Supported pipeline result failed"
-                            " full-width verification"
-                        ));
+                            " full-width verification",
+                            ReasonCode{ ReasonCategory::kVerifyFailed,
+                                        ReasonDomain::kOrchestrator, 0 }
+                        );
+                        if (semi_failure_reason.has_value()) {
+                            outcome.diag.cause_chain.push_back(semi_failure_reason->top);
+                        }
+                        return Ok(std::move(outcome));
                     }
                     result.value().verified = true;
                 }
@@ -550,7 +560,9 @@ namespace cobra {
                     return Ok(MakeUnchanged(
                         working_expr, cls,
                         "MixedRewrite requires evaluator for "
-                        "verification"
+                        "verification",
+                        ReasonCode{ ReasonCategory::kGuardFailed, ReasonDomain::kOrchestrator,
+                                    0 }
                     ));
                 }
 
@@ -719,9 +731,11 @@ namespace cobra {
                 );
 
                 if (!rewritten.structure_changed) {
-                    return Ok(
-                        MakeUnchanged(working_expr, cls, rewritten, "No rewrite applied")
-                    );
+                    return Ok(MakeUnchanged(
+                        working_expr, cls, rewritten, "No rewrite applied",
+                        ReasonCode{ ReasonCategory::kSearchExhausted,
+                                    ReasonDomain::kMixedRewrite, 0 }
+                    ));
                 }
 
                 auto new_cls = ClassifyStructural(*rewritten.expr);
@@ -735,7 +749,9 @@ namespace cobra {
                     return Ok(MakeUnchanged(
                         working_expr, cls, rewritten,
                         "Rewrite did not reduce to supported"
-                        " structure"
+                        " structure",
+                        ReasonCode{ ReasonCategory::kRepresentationGap,
+                                    ReasonDomain::kMixedRewrite, 0 }
                     ));
                 }
 
@@ -765,7 +781,8 @@ namespace cobra {
                 }
 
                 auto outcome = MakeUnchanged(
-                    working_expr, cls, rewritten, "Rewritten candidate failed verification"
+                    working_expr, cls, rewritten, "Rewritten candidate failed verification",
+                    ReasonCode{ ReasonCategory::kVerifyFailed, ReasonDomain::kMixedRewrite, 0 }
                 );
                 outcome.diag.candidate_failed_verification = true;
                 return Ok(std::move(outcome));
@@ -775,7 +792,8 @@ namespace cobra {
                 return Ok(MakeUnchanged(
                     working_expr, cls,
                     "Expression structure is outside supported"
-                    " scope"
+                    " scope",
+                    ReasonCode{ ReasonCategory::kInapplicable, ReasonDomain::kOrchestrator, 0 }
                 ));
         }
 
