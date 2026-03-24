@@ -243,9 +243,9 @@ namespace cobra {
                 auto fit = RecoverWeightedPoly(
                     residual_eval, weight, support, num_vars, bitwidth, max_degree, grid_degree
                 );
-                if (!fit.has_value()) { continue; }
+                if (!fit.Succeeded()) { continue; }
 
-                auto q_expr = BuildPolyExpr(fit->poly);
+                auto q_expr = BuildPolyExpr(fit.Payload().poly);
                 if (!q_expr.has_value()) { continue; }
 
                 auto g_expr =

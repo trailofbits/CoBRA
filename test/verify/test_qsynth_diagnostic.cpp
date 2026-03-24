@@ -985,7 +985,7 @@ TEST(QSynthDiagnostic, FactoredGhostTelemetry) {
                 for (uint8_t deg = 0; deg <= 2; ++deg) {
                     auto fit =
                         RecoverWeightedPoly(residual_eval, weight, res_sup, kNv, kBw, deg, 2);
-                    if (!fit.has_value()) { continue; }
+                    if (!fit.Succeeded()) { continue; }
 
                     int d = static_cast< int >(deg);
 
@@ -1398,7 +1398,7 @@ TEST(QSynthDiagnostic, NullFactorTelemetry) {
                 auto g = static_cast< uint8_t >(std::max(4, d + 4));
 
                 auto fit = RecoverWeightedPoly(target_eval, wfn, support, kNv, kBw, d, g);
-                if (!fit.has_value()) { continue; }
+                if (!fit.Succeeded()) { continue; }
 
                 // Track: fit found (even if FW fails)
                 if (family == "unary") {
@@ -1407,7 +1407,7 @@ TEST(QSynthDiagnostic, NullFactorTelemetry) {
                     case_gfit[d] = true;
                 }
 
-                auto q_expr = BuildPolyExpr(fit->poly);
+                auto q_expr = BuildPolyExpr(fit.Payload().poly);
                 if (!q_expr.has_value()) { continue; }
 
                 auto w_expr   = build();

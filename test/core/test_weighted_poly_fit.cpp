@@ -20,10 +20,10 @@ TEST(WeightedPolyFitTest, ConstantQuotientMulSubAnd) {
     };
     std::vector< uint32_t > support = { 0, 1 };
     auto result                     = RecoverWeightedPoly(target, weight, support, 2, 64, 0, 2);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->poly.IsValid());
-    EXPECT_EQ(result->degree_used, 0);
-    auto q_expr = BuildPolyExpr(result->poly);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_TRUE(result.Payload().poly.IsValid());
+    EXPECT_EQ(result.Payload().degree_used, 0);
+    auto q_expr = BuildPolyExpr(result.Payload().poly);
     ASSERT_TRUE(q_expr.has_value());
     auto g_expr   = basis[0].build(support);
     auto combined = Expr::Mul(std::move(*q_expr), std::move(g_expr));
@@ -39,10 +39,10 @@ TEST(WeightedPolyFitTest, AffineQuotientMulSubAnd) {
     };
     std::vector< uint32_t > support = { 0, 1 };
     auto result                     = RecoverWeightedPoly(target, weight, support, 2, 64, 1, 2);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->poly.IsValid());
-    EXPECT_LE(result->degree_used, 1);
-    auto q_expr = BuildPolyExpr(result->poly);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_TRUE(result.Payload().poly.IsValid());
+    EXPECT_LE(result.Payload().degree_used, 1);
+    auto q_expr = BuildPolyExpr(result.Payload().poly);
     ASSERT_TRUE(q_expr.has_value());
     auto g_expr   = basis[0].build(support);
     auto combined = Expr::Mul(std::move(*q_expr), std::move(g_expr));
@@ -60,10 +60,10 @@ TEST(WeightedPolyFitTest, QuadraticQuotientMulSubAnd) {
     // grid_degree=3: C(4,2)=6 unknowns need >5 non-zero-weight rows;
     // grid_degree=2 only provides 5 (9 total minus 4 boolean-zeroed).
     auto result                     = RecoverWeightedPoly(target, weight, support, 2, 64, 2, 3);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->poly.IsValid());
-    EXPECT_LE(result->degree_used, 2);
-    auto q_expr = BuildPolyExpr(result->poly);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_TRUE(result.Payload().poly.IsValid());
+    EXPECT_LE(result.Payload().degree_used, 2);
+    auto q_expr = BuildPolyExpr(result.Payload().poly);
     ASSERT_TRUE(q_expr.has_value());
     auto g_expr   = basis[0].build(support);
     auto combined = Expr::Mul(std::move(*q_expr), std::move(g_expr));
@@ -79,9 +79,9 @@ TEST(WeightedPolyFitTest, Arity3GhostMul3SubAnd3) {
     };
     std::vector< uint32_t > support = { 0, 1, 2 };
     auto result                     = RecoverWeightedPoly(target, weight, support, 3, 64, 1, 2);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->poly.IsValid());
-    auto q_expr = BuildPolyExpr(result->poly);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_TRUE(result.Payload().poly.IsValid());
+    auto q_expr = BuildPolyExpr(result.Payload().poly);
     ASSERT_TRUE(q_expr.has_value());
     auto g_expr   = basis[1].build(support);
     auto combined = Expr::Mul(std::move(*q_expr), std::move(g_expr));
@@ -98,9 +98,9 @@ TEST(WeightedPolyFitTest, MultiVarQuotientMulSubAnd) {
     };
     std::vector< uint32_t > support = { 0, 1 };
     auto result                     = RecoverWeightedPoly(target, weight, support, 2, 64, 1, 2);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->poly.IsValid());
-    auto q_expr = BuildPolyExpr(result->poly);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_TRUE(result.Payload().poly.IsValid());
+    auto q_expr = BuildPolyExpr(result.Payload().poly);
     ASSERT_TRUE(q_expr.has_value());
     auto g_expr   = basis[0].build(support);
     auto combined = Expr::Mul(std::move(*q_expr), std::move(g_expr));
@@ -121,9 +121,9 @@ TEST(WeightedPolyFitTest, OddWeightCleanInvertibility) {
     };
     std::vector< uint32_t > support = { 0 };
     auto result                     = RecoverWeightedPoly(target, weight, support, 1, 64, 1, 2);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->poly.IsValid());
-    auto q_expr = BuildPolyExpr(result->poly);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_TRUE(result.Payload().poly.IsValid());
+    auto q_expr = BuildPolyExpr(result.Payload().poly);
     ASSERT_TRUE(q_expr.has_value());
     // w_expr = 2*x + 1
     auto w_expr = Expr::Add(Expr::Mul(Expr::Constant(2), Expr::Variable(0)), Expr::Constant(1));
@@ -143,7 +143,7 @@ TEST(WeightedPolyFitTest, NulloptQuotientExceedsMaxDegree) {
     };
     std::vector< uint32_t > support = { 0, 1 };
     auto result                     = RecoverWeightedPoly(target, weight, support, 2, 64, 0, 2);
-    EXPECT_FALSE(result.has_value());
+    EXPECT_FALSE(result.Succeeded());
 }
 
 TEST(WeightedPolyFitTest, NulloptIncompatibleTarget) {
@@ -153,14 +153,14 @@ TEST(WeightedPolyFitTest, NulloptIncompatibleTarget) {
     Evaluator target = [](const std::vector< uint64_t > &v) -> uint64_t { return v[0] ^ v[1]; };
     std::vector< uint32_t > support = { 0, 1 };
     auto result                     = RecoverWeightedPoly(target, weight, support, 2, 64, 2, 2);
-    EXPECT_FALSE(result.has_value());
+    EXPECT_FALSE(result.Succeeded());
 }
 
 TEST(WeightedPolyFitTest, NulloptEmptySupport) {
     WeightFn weight  = [](std::span< const uint64_t >, uint32_t) -> uint64_t { return 1; };
     Evaluator target = [](const std::vector< uint64_t > &) -> uint64_t { return 42; };
     auto result      = RecoverWeightedPoly(target, weight, {}, 0, 64, 0, 2);
-    EXPECT_FALSE(result.has_value());
+    EXPECT_FALSE(result.Succeeded());
 }
 
 TEST(WeightedPolyFitTest, PrunedSupportRemapsVariables) {
@@ -173,10 +173,10 @@ TEST(WeightedPolyFitTest, PrunedSupportRemapsVariables) {
     };
     std::vector< uint32_t > support = { 1, 3 };
     auto result                     = RecoverWeightedPoly(target, weight, support, 4, 64, 1, 2);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->poly.IsValid());
-    EXPECT_EQ(result->poly.num_vars, 4);
-    auto q_expr = BuildPolyExpr(result->poly);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_TRUE(result.Payload().poly.IsValid());
+    EXPECT_EQ(result.Payload().poly.num_vars, 4);
+    auto q_expr = BuildPolyExpr(result.Payload().poly);
     ASSERT_TRUE(q_expr.has_value());
     auto g_expr   = basis[0].build(support);
     auto combined = Expr::Mul(std::move(*q_expr), std::move(g_expr));
@@ -193,9 +193,9 @@ TEST(WeightedPolyFitTest, NarrowBitwidth8Bit) {
     };
     std::vector< uint32_t > support = { 0, 1 };
     auto result                     = RecoverWeightedPoly(target, weight, support, 2, bw, 0, 2);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->poly.IsValid());
-    auto q_expr = BuildPolyExpr(result->poly);
+    ASSERT_TRUE(result.Succeeded());
+    EXPECT_TRUE(result.Payload().poly.IsValid());
+    auto q_expr = BuildPolyExpr(result.Payload().poly);
     ASSERT_TRUE(q_expr.has_value());
     auto g_expr   = basis[0].build(support);
     auto combined = Expr::Mul(std::move(*q_expr), std::move(g_expr));
