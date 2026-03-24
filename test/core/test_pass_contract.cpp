@@ -126,6 +126,30 @@ TEST(PassOutcomeTest, SigVectorThreadsThrough) {
     EXPECT_EQ(o.SigVector()[3], 4);
 }
 
+TEST(PassOutcomeTest, PartialCarriesExprAndPending) {
+    auto residual = Expr::Variable(0);
+    Classification residual_cls{ .semantic = SemanticClass::kLinear,
+                                 .flags    = kSfNone,
+                                 .route    = Route::kBitwiseOnly };
+    PendingWork pw{ .residual = std::move(residual), .residual_classification = residual_cls };
+    ReasonDetail reason{
+        .top = { .code    = { .category = ReasonCategory::kRepresentationGap,
+                              .domain   = ReasonDomain::kDecomposition },
+                .message = "partial decomposition" }
+    };
+    auto o = PassOutcome::Partial(
+        Expr::Constant(7), { "x" }, VerificationState::kUnverified, std::move(pw),
+        std::move(reason)
+    );
+    EXPECT_FALSE(o.Succeeded());
+    EXPECT_EQ(o.Kind(), OutcomeKind::kPartial);
+    EXPECT_EQ(o.GetExpr().constant_val, 7);
+    EXPECT_EQ(o.RealVars().size(), 1);
+    EXPECT_EQ(o.Verification(), VerificationState::kUnverified);
+    EXPECT_EQ(o.Pending().residual->kind, Expr::Kind::kVariable);
+    EXPECT_EQ(o.Reason().top.code.category, ReasonCategory::kRepresentationGap);
+}
+
 // --- PassOutcome death tests (assert-guarded, debug builds only) ---
 
 #ifdef NDEBUG

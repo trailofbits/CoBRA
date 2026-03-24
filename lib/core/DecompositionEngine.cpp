@@ -18,16 +18,32 @@
 
 namespace cobra {
 
+    // DecompositionMeta stores enum values as uint8_t to avoid pulling
+    // DecompositionEngine.h types into PassContract.h. Guard against
+    // enum growth silently overflowing the uint8_t storage.
+    static_assert(
+        static_cast< int >(ExtractorKind::kBooleanNullDirect) <= 255,
+        "ExtractorKind exceeds uint8_t range in DecompositionMeta"
+    );
+    static_assert(
+        static_cast< int >(ResidualSolverKind::kTemplateDecomposition) <= 255,
+        "ResidualSolverKind exceeds uint8_t range in DecompositionMeta"
+    );
+
     namespace decomposition {
         enum Subcode : uint16_t {
-            kNoExpr          = 1,
-            kNoProducts      = 2,
-            kNoEvaluator     = 3,
-            kTooManyVars     = 4,
-            kPolyRecovFailed = 5,
-            kExprBuildFailed = 6,
-            kNoTemplateMatch = 7,
-            kLoopExhausted   = 20,
+            kNoExpr           = 1,
+            kNoProducts       = 2,
+            kNoEvaluator      = 3,
+            kTooManyVars      = 4,
+            kPolyRecovFailed  = 5,
+            kExprBuildFailed  = 6,
+            kNoTemplateMatch  = 7,
+            kCoreRejected     = 10,
+            kDirectFwFailed   = 11,
+            kResidualFailed   = 12,
+            kAllSolversFailed = 13,
+            kLoopExhausted    = 20,
         };
     } // namespace decomposition
 
@@ -78,6 +94,23 @@ namespace cobra {
             } else {
                 residual.push_back(CloneExpr(e));
             }
+        }
+
+        void AppendReasonFrames(std::vector< ReasonFrame > &out, const ReasonDetail &detail) {
+            out.push_back(detail.top);
+            for (const auto &cause : detail.causes) { out.push_back(cause); }
+        }
+
+        void AppendLocalCause(
+            std::vector< ReasonFrame > &out, ReasonCategory category, uint16_t subcode,
+            const char *message
+        ) {
+            out.push_back(
+                ReasonFrame{
+                    .code    = { category, ReasonDomain::kDecomposition, subcode },
+                    .message = message,
+            }
+            );
         }
 
     } // namespace
@@ -356,6 +389,10 @@ namespace cobra {
 
         COBRA_TRACE("DecompEngine", "TryDecomposition: vars={} bitwidth={}", kNv, kBw);
 
+        // Accumulated cause frames from failed extractors/solvers.
+        // Each TryCore invocation appends its solver failures here.
+        std::vector< ReasonFrame > all_causes;
+
         // Boolean-null direct path: when f(x) is zero on all {0,1}^k
         // but non-zero at full width, try ghost solvers directly without
         // requiring a non-trivial polynomial core first.
@@ -389,6 +426,13 @@ namespace cobra {
                         dr.solver_kind    = ResidualSolverKind::kGhostResidual;
                         return MakeDecompSuccess(ctx, std::move(dr));
                     }
+                    AppendLocalCause(
+                        all_causes, ReasonCategory::kVerifyFailed,
+                        decomposition::kDirectFwFailed,
+                        "boolean-null ghost direct candidate failed full-width verification"
+                    );
+                } else {
+                    AppendReasonFrames(all_causes, ghost.Reason());
                 }
 
                 auto factored =
@@ -408,6 +452,13 @@ namespace cobra {
                         dr.solver_kind    = ResidualSolverKind::kGhostResidual;
                         return MakeDecompSuccess(ctx, std::move(dr));
                     }
+                    AppendLocalCause(
+                        all_causes, ReasonCategory::kVerifyFailed,
+                        decomposition::kDirectFwFailed,
+                        "boolean-null factored ghost candidate failed full-width verification"
+                    );
+                } else {
+                    AppendReasonFrames(all_causes, factored.Reason());
                 }
 
                 // Escalate: higher-degree polynomial weights
@@ -430,6 +481,13 @@ namespace cobra {
                         dr.solver_kind    = ResidualSolverKind::kGhostResidual;
                         return MakeDecompSuccess(ctx, std::move(dr));
                     }
+                    AppendLocalCause(
+                        all_causes, ReasonCategory::kVerifyFailed,
+                        decomposition::kDirectFwFailed,
+                        "boolean-null escalated ghost candidate failed full-width verification"
+                    );
+                } else {
+                    AppendReasonFrames(all_causes, factored2.Reason());
                 }
 
                 COBRA_TRACE(
@@ -438,10 +496,6 @@ namespace cobra {
                 );
             }
         }
-
-        // Accumulated cause frames from failed extractors/solvers.
-        // Each TryCore invocation appends its solver failures here.
-        std::vector< ReasonFrame > all_causes;
 
         // Helper: try a core candidate through the decomposition pipeline.
         // On failure, pushes solver cause frames into all_causes.
@@ -468,6 +522,10 @@ namespace cobra {
             // Accept screen (polynomial extractors only)
             if (core.kind == ExtractorKind::kPolynomial && !AcceptCore(ctx, core)) {
                 COBRA_TRACE("DecompEngine", "AcceptCore rejected polynomial core");
+                AppendLocalCause(
+                    all_causes, ReasonCategory::kInapplicable, decomposition::kCoreRejected,
+                    "polynomial core rejected by acceptance gate"
+                );
                 return std::nullopt;
             }
 
@@ -523,8 +581,13 @@ namespace cobra {
                             return result;
                         }
                         COBRA_TRACE("DecompEngine", "Ghost PolyRecovery: recombination failed");
+                        AppendLocalCause(
+                            all_causes, ReasonCategory::kVerifyFailed,
+                            decomposition::kResidualFailed,
+                            "ghost polynomial recombination failed full-width verification"
+                        );
                     } else {
-                        all_causes.push_back(res_poly.Reason().top);
+                        AppendReasonFrames(all_causes, res_poly.Reason());
                         COBRA_TRACE(
                             "DecompEngine",
                             "Ghost PolyRecovery: no polynomial recovered (dfloor={})",
@@ -554,8 +617,13 @@ namespace cobra {
                         COBRA_TRACE(
                             "DecompEngine", "Ghost GhostResidual: recombination failed"
                         );
+                        AppendLocalCause(
+                            all_causes, ReasonCategory::kVerifyFailed,
+                            decomposition::kResidualFailed,
+                            "ghost residual recombination failed full-width verification"
+                        );
                     } else {
-                        all_causes.push_back(ghost.Reason().top);
+                        AppendReasonFrames(all_causes, ghost.Reason());
                         COBRA_TRACE("DecompEngine", "Ghost GhostResidual: no solution");
                     }
                 }
@@ -584,8 +652,13 @@ namespace cobra {
                         COBRA_TRACE(
                             "DecompEngine", "Ghost FactoredGhost: recombination failed"
                         );
+                        AppendLocalCause(
+                            all_causes, ReasonCategory::kVerifyFailed,
+                            decomposition::kResidualFailed,
+                            "factored ghost recombination failed full-width verification"
+                        );
                     } else {
-                        all_causes.push_back(factored.Reason().top);
+                        AppendReasonFrames(all_causes, factored.Reason());
                         COBRA_TRACE("DecompEngine", "Ghost FactoredGhost: no solution");
                     }
                 }
@@ -636,8 +709,13 @@ namespace cobra {
                         COBRA_TRACE(
                             "DecompEngine", "Ghost TemplateDecomp: recombination failed"
                         );
+                        AppendLocalCause(
+                            all_causes, ReasonCategory::kVerifyFailed,
+                            decomposition::kResidualFailed,
+                            "ghost template recombination failed full-width verification"
+                        );
                     } else {
-                        all_causes.push_back(td.Reason().top);
+                        AppendReasonFrames(all_causes, td.Reason());
                         COBRA_TRACE("DecompEngine", "Ghost TemplateDecomp: no solution");
                     }
                 }
@@ -674,6 +752,11 @@ namespace cobra {
                                 "SupportedPipeline: residual FW "
                                 "recheck failed (false positive)"
                             );
+                            AppendLocalCause(
+                                all_causes, ReasonCategory::kVerifyFailed,
+                                decomposition::kResidualFailed,
+                                "supported residual candidate failed strengthened verification"
+                            );
                         } else {
                             auto combined =
                                 Expr::Add(CloneExpr(*core.expr), std::move(solved_expr));
@@ -698,10 +781,16 @@ namespace cobra {
                                 "SupportedPipeline: solved but "
                                 "recombination failed"
                             );
+                            AppendLocalCause(
+                                all_causes, ReasonCategory::kVerifyFailed,
+                                decomposition::kResidualFailed,
+                                "supported residual recombination failed full-width "
+                                "verification"
+                            );
                         }
                     } else {
                         if (res_pass.has_value() && !res_pass.value().Succeeded()) {
-                            all_causes.push_back(res_pass.value().Reason().top);
+                            AppendReasonFrames(all_causes, res_pass.value().Reason());
                         }
                         COBRA_TRACE("DecompEngine", "SupportedPipeline: residual unsupported");
                     }
@@ -731,8 +820,13 @@ namespace cobra {
                             return result;
                         }
                         COBRA_TRACE("DecompEngine", "PolyRecovery: recombination failed");
+                        AppendLocalCause(
+                            all_causes, ReasonCategory::kVerifyFailed,
+                            decomposition::kResidualFailed,
+                            "polynomial residual recombination failed full-width verification"
+                        );
                     } else {
-                        all_causes.push_back(res_poly.Reason().top);
+                        AppendReasonFrames(all_causes, res_poly.Reason());
                         COBRA_TRACE(
                             "DecompEngine", "PolyRecovery: no polynomial recovered (dfloor={})",
                             degree_floor
@@ -789,8 +883,13 @@ namespace cobra {
                             return result;
                         }
                         COBRA_TRACE("DecompEngine", "TemplateDecomp: recombination failed");
+                        AppendLocalCause(
+                            all_causes, ReasonCategory::kVerifyFailed,
+                            decomposition::kResidualFailed,
+                            "template residual recombination failed full-width verification"
+                        );
                     } else {
-                        all_causes.push_back(td.Reason().top);
+                        AppendReasonFrames(all_causes, td.Reason());
                         COBRA_TRACE("DecompEngine", "TemplateDecomp: no solution");
                     }
                 }
@@ -800,6 +899,10 @@ namespace cobra {
                 );
             }
 
+            AppendLocalCause(
+                all_causes, ReasonCategory::kSearchExhausted, decomposition::kAllSolversFailed,
+                "all residual solvers failed for core"
+            );
             return std::nullopt;
         };
 
@@ -814,7 +917,7 @@ namespace cobra {
                 }
                 COBRA_TRACE("DecompEngine", "ProductAST core: all solvers exhausted");
             } else {
-                all_causes.push_back(core.Reason().top);
+                AppendReasonFrames(all_causes, core.Reason());
                 COBRA_TRACE("DecompEngine", "ProductAST: no core extracted");
             }
         }
@@ -830,7 +933,7 @@ namespace cobra {
                 }
                 COBRA_TRACE("DecompEngine", "Polynomial D=2 core: all solvers exhausted");
             } else {
-                all_causes.push_back(core.Reason().top);
+                AppendReasonFrames(all_causes, core.Reason());
                 COBRA_TRACE("DecompEngine", "Polynomial D=2: no core extracted");
             }
         }
@@ -846,7 +949,7 @@ namespace cobra {
                 }
                 COBRA_TRACE("DecompEngine", "Template core: all solvers exhausted");
             } else {
-                all_causes.push_back(core.Reason().top);
+                AppendReasonFrames(all_causes, core.Reason());
                 COBRA_TRACE("DecompEngine", "Template: no core extracted");
             }
         }
@@ -862,7 +965,7 @@ namespace cobra {
                 }
                 COBRA_TRACE("DecompEngine", "Polynomial D=3 core: all solvers exhausted");
             } else {
-                all_causes.push_back(core.Reason().top);
+                AppendReasonFrames(all_causes, core.Reason());
                 COBRA_TRACE("DecompEngine", "Polynomial D=3: no core extracted");
             }
         }
@@ -878,7 +981,7 @@ namespace cobra {
                 }
                 COBRA_TRACE("DecompEngine", "Polynomial D=4 core: all solvers exhausted");
             } else {
-                all_causes.push_back(core.Reason().top);
+                AppendReasonFrames(all_causes, core.Reason());
                 COBRA_TRACE("DecompEngine", "Polynomial D=4: no core extracted");
             }
         }
