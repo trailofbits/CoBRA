@@ -439,7 +439,12 @@ namespace cobra {
             }
         }
 
-        // Helper: try a core candidate through the decomposition pipeline
+        // Accumulated cause frames from failed extractors/solvers.
+        // Each TryCore invocation appends its solver failures here.
+        std::vector< ReasonFrame > all_causes;
+
+        // Helper: try a core candidate through the decomposition pipeline.
+        // On failure, pushes solver cause frames into all_causes.
         auto TryCore = [&](CoreCandidate core) -> std::optional< DecompositionResult > {
             // Direct-success path
             auto direct_check = FullWidthCheckEval(ctx.opts.evaluator, kNv, *core.expr, kBw);
@@ -519,6 +524,7 @@ namespace cobra {
                         }
                         COBRA_TRACE("DecompEngine", "Ghost PolyRecovery: recombination failed");
                     } else {
+                        all_causes.push_back(res_poly.Reason().top);
                         COBRA_TRACE(
                             "DecompEngine",
                             "Ghost PolyRecovery: no polynomial recovered (dfloor={})",
@@ -549,6 +555,7 @@ namespace cobra {
                             "DecompEngine", "Ghost GhostResidual: recombination failed"
                         );
                     } else {
+                        all_causes.push_back(ghost.Reason().top);
                         COBRA_TRACE("DecompEngine", "Ghost GhostResidual: no solution");
                     }
                 }
@@ -578,6 +585,7 @@ namespace cobra {
                             "DecompEngine", "Ghost FactoredGhost: recombination failed"
                         );
                     } else {
+                        all_causes.push_back(factored.Reason().top);
                         COBRA_TRACE("DecompEngine", "Ghost FactoredGhost: no solution");
                     }
                 }
@@ -629,6 +637,7 @@ namespace cobra {
                             "DecompEngine", "Ghost TemplateDecomp: recombination failed"
                         );
                     } else {
+                        all_causes.push_back(td.Reason().top);
                         COBRA_TRACE("DecompEngine", "Ghost TemplateDecomp: no solution");
                     }
                 }
@@ -691,6 +700,9 @@ namespace cobra {
                             );
                         }
                     } else {
+                        if (res_pass.has_value() && !res_pass.value().Succeeded()) {
+                            all_causes.push_back(res_pass.value().Reason().top);
+                        }
                         COBRA_TRACE("DecompEngine", "SupportedPipeline: residual unsupported");
                     }
                 }
@@ -720,6 +732,7 @@ namespace cobra {
                         }
                         COBRA_TRACE("DecompEngine", "PolyRecovery: recombination failed");
                     } else {
+                        all_causes.push_back(res_poly.Reason().top);
                         COBRA_TRACE(
                             "DecompEngine", "PolyRecovery: no polynomial recovered (dfloor={})",
                             degree_floor
@@ -777,6 +790,7 @@ namespace cobra {
                         }
                         COBRA_TRACE("DecompEngine", "TemplateDecomp: recombination failed");
                     } else {
+                        all_causes.push_back(td.Reason().top);
                         COBRA_TRACE("DecompEngine", "TemplateDecomp: no solution");
                     }
                 }
@@ -800,6 +814,7 @@ namespace cobra {
                 }
                 COBRA_TRACE("DecompEngine", "ProductAST core: all solvers exhausted");
             } else {
+                all_causes.push_back(core.Reason().top);
                 COBRA_TRACE("DecompEngine", "ProductAST: no core extracted");
             }
         }
@@ -815,6 +830,7 @@ namespace cobra {
                 }
                 COBRA_TRACE("DecompEngine", "Polynomial D=2 core: all solvers exhausted");
             } else {
+                all_causes.push_back(core.Reason().top);
                 COBRA_TRACE("DecompEngine", "Polynomial D=2: no core extracted");
             }
         }
@@ -830,6 +846,7 @@ namespace cobra {
                 }
                 COBRA_TRACE("DecompEngine", "Template core: all solvers exhausted");
             } else {
+                all_causes.push_back(core.Reason().top);
                 COBRA_TRACE("DecompEngine", "Template: no core extracted");
             }
         }
@@ -845,6 +862,7 @@ namespace cobra {
                 }
                 COBRA_TRACE("DecompEngine", "Polynomial D=3 core: all solvers exhausted");
             } else {
+                all_causes.push_back(core.Reason().top);
                 COBRA_TRACE("DecompEngine", "Polynomial D=3: no core extracted");
             }
         }
@@ -860,6 +878,7 @@ namespace cobra {
                 }
                 COBRA_TRACE("DecompEngine", "Polynomial D=4 core: all solvers exhausted");
             } else {
+                all_causes.push_back(core.Reason().top);
                 COBRA_TRACE("DecompEngine", "Polynomial D=4: no core extracted");
             }
         }
@@ -867,10 +886,11 @@ namespace cobra {
         COBRA_TRACE("DecompEngine", "All extractors exhausted");
         return PassOutcome::Blocked(
             ReasonDetail{
-                .top = { .code    = { ReasonCategory::kSearchExhausted,
-                                      ReasonDomain::kDecomposition,
-                                      decomposition::kLoopExhausted },
-                        .message = "all extractors exhausted" }
+                .top    = { .code    = { ReasonCategory::kSearchExhausted,
+                                         ReasonDomain::kDecomposition,
+                                         decomposition::kLoopExhausted },
+                           .message = "all extractors exhausted" },
+                .causes = std::move(all_causes),
         }
         );
     }

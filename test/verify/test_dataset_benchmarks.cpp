@@ -59,6 +59,10 @@ namespace {
         int has_structured_reason = 0;
         std::map< ReasonCategory, int > by_category;
         std::map< ReasonDomain, int > by_domain;
+
+        using Triple = std::tuple< ReasonCategory, ReasonDomain, uint16_t >;
+        std::map< Triple, int > by_triple;
+        int decomp_cause_frames = 0;
     };
 
     DatasetStats run_dataset(const std::string &path) {
@@ -152,8 +156,15 @@ namespace {
                     stats.unsupported++;
                     if (result.value().diag.reason_code.has_value()) {
                         stats.has_structured_reason++;
-                        stats.by_category[result.value().diag.reason_code->category]++;
-                        stats.by_domain[result.value().diag.reason_code->domain]++;
+                        const auto &rc = *result.value().diag.reason_code;
+                        stats.by_category[rc.category]++;
+                        stats.by_domain[rc.domain]++;
+                        stats.by_triple[{ rc.category, rc.domain, rc.subcode }]++;
+                    }
+                    for (const auto &frame : result.value().diag.cause_chain) {
+                        if (frame.code.domain == ReasonDomain::kDecomposition) {
+                            stats.decomp_cause_frames++;
+                        }
                     }
                     break;
                 case SimplifyOutcome::Kind::kError:
@@ -384,6 +395,11 @@ TEST(GAMBADataset, QSynthEA) {
     EXPECT_EQ(stats.by_category[ReasonCategory::kVerifyFailed], 119);
     EXPECT_EQ(stats.by_category[ReasonCategory::kRepresentationGap], 63);
     EXPECT_EQ(stats.by_category[ReasonCategory::kSearchExhausted], 30);
+
+    // Decomposition cause frames propagated into cause_chain.
+    // MixedRewrite unsupported outcomes should carry delegated
+    // decomposition causes (not just top-level reason_code).
+    EXPECT_GT(stats.decomp_cause_frames, 0) << "No decomposition causes found in cause chains";
 }
 
 TEST(GAMBADataset, LokiTiny) {

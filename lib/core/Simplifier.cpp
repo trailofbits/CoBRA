@@ -410,6 +410,14 @@ namespace cobra {
         if (sub.Kind() == OutcomeKind::kInapplicable) {
             return Ok(PassOutcome::Inapplicable(std::move(reason)));
         }
+        if (sub.Kind() == OutcomeKind::kVerifyFailed) {
+            auto payload = sub.TakePayload();
+            return Ok(
+                PassOutcome::VerifyFailed(
+                    std::move(payload.expr), std::move(elim.real_vars), std::move(reason)
+                )
+            );
+        }
         return Ok(PassOutcome::Blocked(std::move(reason)));
     }
 
@@ -543,6 +551,9 @@ namespace cobra {
                         );
                         if (semi_failure_reason.has_value()) {
                             outcome.diag.cause_chain.push_back(semi_failure_reason->top);
+                            for (const auto &c : semi_failure_reason->causes) {
+                                outcome.diag.cause_chain.push_back(c);
+                            }
                         }
                         return Ok(std::move(outcome));
                     }
@@ -586,6 +597,10 @@ namespace cobra {
                     }
                 }
 
+                // Accumulated decomposition failure reasons for cause-chain
+                // propagation into unsupported outcomes.
+                std::vector< ReasonFrame > decomp_causes;
+
                 // Step 1.5: Early decomposition on original AST
                 // Product cores that directly equal f(x) exist in the
                 // original obfuscated form but are destroyed by operand
@@ -612,6 +627,10 @@ namespace cobra {
                         outcome.verified            = true;
                         outcome.diag.classification = cls;
                         return Ok(std::move(outcome));
+                    }
+                    decomp_causes.push_back(early_decomp.Reason().top);
+                    for (const auto &c : early_decomp.Reason().causes) {
+                        decomp_causes.push_back(c);
                     }
                 }
 
@@ -716,6 +735,8 @@ namespace cobra {
                         outcome.diag.classification = cls;
                         return Ok(std::move(outcome));
                     }
+                    decomp_causes.push_back(decomp.Reason().top);
+                    for (const auto &c : decomp.Reason().causes) { decomp_causes.push_back(c); }
                 }
 
                 // Step 3: XOR lowering on the best current expression
@@ -731,11 +752,13 @@ namespace cobra {
                 );
 
                 if (!rewritten.structure_changed) {
-                    return Ok(MakeUnchanged(
+                    auto outcome = MakeUnchanged(
                         working_expr, cls, rewritten, "No rewrite applied",
                         ReasonCode{ ReasonCategory::kSearchExhausted,
                                     ReasonDomain::kMixedRewrite, 0 }
-                    ));
+                    );
+                    outcome.diag.cause_chain = std::move(decomp_causes);
+                    return Ok(std::move(outcome));
                 }
 
                 auto new_cls = ClassifyStructural(*rewritten.expr);
@@ -746,13 +769,15 @@ namespace cobra {
                 if (new_cls.route == Route::kMixedRewrite
                     || new_cls.route == Route::kUnsupported)
                 {
-                    return Ok(MakeUnchanged(
+                    auto outcome = MakeUnchanged(
                         working_expr, cls, rewritten,
                         "Rewrite did not reduce to supported"
                         " structure",
                         ReasonCode{ ReasonCategory::kRepresentationGap,
                                     ReasonDomain::kMixedRewrite, 0 }
-                    ));
+                    );
+                    outcome.diag.cause_chain = std::move(decomp_causes);
+                    return Ok(std::move(outcome));
                 }
 
                 auto new_sig = EvaluateBooleanSignature(
@@ -785,6 +810,7 @@ namespace cobra {
                     ReasonCode{ ReasonCategory::kVerifyFailed, ReasonDomain::kMixedRewrite, 0 }
                 );
                 outcome.diag.candidate_failed_verification = true;
+                outcome.diag.cause_chain                   = std::move(decomp_causes);
                 return Ok(std::move(outcome));
             }
 
