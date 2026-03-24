@@ -136,6 +136,124 @@ namespace cobra {
 
     size_t Worklist::HighWaterMark() const { return high_water_; }
 
+    // ---------------------------------------------------------------
+    // Scheduler
+    // ---------------------------------------------------------------
+
+    namespace {
+        // Stage-gated passes for strict MixedRewrite pipeline.
+        // Maps stage_cursor -> PassId for stages 0..6.
+        constexpr int kMixedRewriteMaxStage = 6;
+
+        PassId MixedRewriteStagePass(uint32_t stage) {
+            switch (stage) {
+                case 0:
+                    return PassId::kBuildSignatureState;
+                case 1:
+                    return PassId::kDecompose;
+                case 2:
+                    return PassId::kOperandSimplify;
+                case 3:
+                    return PassId::kProductIdentityCollapse;
+                case 4:
+                    return PassId::kDecompose;
+                case 5:
+                    return PassId::kXorLowering;
+                case 6:
+                    return PassId::kBuildSignatureState;
+                default:
+                    return PassId::kBuildSignatureState;
+            }
+        }
+
+        std::vector< PassId > FullBand1Passes() {
+            return {
+                PassId::kBuildSignatureState, PassId::kDecompose,
+                PassId::kOperandSimplify,     PassId::kProductIdentityCollapse,
+                PassId::kXorLowering,
+            };
+        }
+
+        void ScheduleFoldedAst(
+            const WorkItem &item, const OrchestratorPolicy &policy,
+            std::vector< PassId > &passes
+        ) {
+            auto prov  = item.features.provenance;
+            auto route = item.features.classification ? item.features.classification->route
+                                                      : Route::kBitwiseOnly;
+
+            if (prov == Provenance::kOriginal) {
+                if (item.features.classification
+                    && item.features.classification->semantic == SemanticClass::kSemilinear)
+                {
+                    passes.push_back(PassId::kTrySemilinearPass);
+                }
+                return;
+            }
+
+            if (prov == Provenance::kLowered) {
+                if (route == Route::kUnsupported) { return; }
+
+                if (route != Route::kMixedRewrite || !policy.strict_route_faithful) {
+                    if (policy.allow_reroute && route == Route::kMixedRewrite) {
+                        passes = FullBand1Passes();
+                    } else {
+                        passes.push_back(PassId::kBuildSignatureState);
+                    }
+                    return;
+                }
+
+                // Strict MixedRewrite: stage cursor gates
+                if (item.stage_cursor <= static_cast< uint32_t >(kMixedRewriteMaxStage)) {
+                    passes.push_back(MixedRewriteStagePass(item.stage_cursor));
+                }
+                return;
+            }
+
+            // Provenance::kRewritten
+            if (policy.allow_reroute) {
+                passes = FullBand1Passes();
+                return;
+            }
+
+            // Strict: limited scheduling based on producing stage
+            if (item.stage_cursor <= 3) {
+                passes.push_back(PassId::kBuildSignatureState);
+            } else if (item.stage_cursor == 5) {
+                passes.push_back(PassId::kBuildSignatureState);
+            }
+        }
+    } // namespace
+
+    std::vector< PassId > SchedulePasses(
+        const WorkItem &item, const OrchestratorPolicy &policy,
+        const PassAttemptCache &attempted
+    ) {
+        std::vector< PassId > passes;
+        auto kind = GetStateKind(item.payload);
+
+        switch (kind) {
+            case StateKind::kCandidateExpr: {
+                const auto &cand = std::get< CandidatePayload >(item.payload);
+                if (cand.needs_original_space_verification) {
+                    passes.push_back(PassId::kVerifyCandidate);
+                }
+                break;
+            }
+            case StateKind::kSignatureState:
+                passes.push_back(PassId::kSupportedSolve);
+                break;
+            case StateKind::kFoldedAst:
+                ScheduleFoldedAst(item, policy, passes);
+                break;
+        }
+
+        auto fp = ComputeFingerprint(item, 64, policy.allow_reroute);
+        std::erase_if(passes, [&](PassId id) { return attempted.HasAttempted(fp, id); });
+
+        return passes;
+    }
+
     bool UnsupportedRankBetter(const UnsupportedCandidate &a, const UnsupportedCandidate &b) {
         // 1. Candidates (verification-failed) rank highest
         if (a.is_candidate_state != b.is_candidate_state) { return a.is_candidate_state; }

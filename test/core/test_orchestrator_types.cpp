@@ -164,3 +164,486 @@ TEST(PassAttemptCache, RecordAndQuery) {
     EXPECT_TRUE(cache.HasAttempted(fp, PassId::kDecompose));
     EXPECT_FALSE(cache.HasAttempted(fp, PassId::kSupportedSolve));
 }
+
+// --- Scheduler tests ---
+
+TEST(Scheduler, CandidateGetsVerify) {
+    WorkItem item;
+    item.payload = CandidatePayload{
+        .expr                              = Expr::Constant(1),
+        .needs_original_space_verification = true,
+    };
+    item.features.provenance = Provenance::kOriginal;
+    OrchestratorPolicy strict{
+        .allow_reroute         = false,
+        .strict_route_faithful = true,
+    };
+    PassAttemptCache cache;
+    auto passes = SchedulePasses(item, strict, cache);
+    ASSERT_EQ(passes.size(), 1);
+    EXPECT_EQ(passes[0], PassId::kVerifyCandidate);
+}
+
+TEST(Scheduler, VerifiedCandidateGetsNothing) {
+    WorkItem item;
+    item.payload = CandidatePayload{
+        .expr                              = Expr::Constant(1),
+        .needs_original_space_verification = false,
+    };
+    item.features.provenance = Provenance::kOriginal;
+    OrchestratorPolicy strict{
+        .allow_reroute         = false,
+        .strict_route_faithful = true,
+    };
+    PassAttemptCache cache;
+    auto passes = SchedulePasses(item, strict, cache);
+    EXPECT_TRUE(passes.empty());
+}
+
+TEST(Scheduler, SignatureGetsSupported) {
+    WorkItem item;
+    item.payload             = SignatureStatePayload{};
+    item.features.provenance = Provenance::kOriginal;
+    OrchestratorPolicy strict{
+        .allow_reroute         = false,
+        .strict_route_faithful = true,
+    };
+    PassAttemptCache cache;
+    auto passes = SchedulePasses(item, strict, cache);
+    ASSERT_EQ(passes.size(), 1);
+    EXPECT_EQ(passes[0], PassId::kSupportedSolve);
+}
+
+TEST(Scheduler, OriginalAstSemilinearGetsSemilinear) {
+    WorkItem item;
+    Classification cls{
+        .semantic = SemanticClass::kSemilinear,
+        .flags    = kSfNone,
+        .route    = Route::kBitwiseOnly,
+    };
+    item.payload = AstPayload{
+        .expr           = Expr::Constant(0),
+        .classification = cls,
+        .provenance     = Provenance::kOriginal,
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kOriginal;
+    OrchestratorPolicy strict{
+        .allow_reroute         = false,
+        .strict_route_faithful = true,
+    };
+    PassAttemptCache cache;
+    auto passes = SchedulePasses(item, strict, cache);
+    ASSERT_EQ(passes.size(), 1);
+    EXPECT_EQ(passes[0], PassId::kTrySemilinearPass);
+}
+
+TEST(Scheduler, OriginalAstNonSemilinearGetsNothing) {
+    WorkItem item;
+    Classification cls{
+        .semantic = SemanticClass::kLinear,
+        .flags    = kSfNone,
+        .route    = Route::kBitwiseOnly,
+    };
+    item.payload = AstPayload{
+        .expr           = Expr::Constant(0),
+        .classification = cls,
+        .provenance     = Provenance::kOriginal,
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kOriginal;
+    OrchestratorPolicy strict{
+        .allow_reroute         = false,
+        .strict_route_faithful = true,
+    };
+    PassAttemptCache cache;
+    auto passes = SchedulePasses(item, strict, cache);
+    EXPECT_TRUE(passes.empty());
+}
+
+TEST(Scheduler, StrictMixedStage0GetsSignatureBuild) {
+    WorkItem item;
+    Classification cls{
+        .semantic = SemanticClass::kNonPolynomial,
+        .flags    = kSfHasMixedProduct,
+        .route    = Route::kMixedRewrite,
+    };
+    item.payload = AstPayload{
+        .expr           = Expr::Constant(0),
+        .classification = cls,
+        .provenance     = Provenance::kLowered,
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kLowered;
+    item.stage_cursor            = 0;
+    OrchestratorPolicy strict{
+        .allow_reroute         = false,
+        .strict_route_faithful = true,
+    };
+    PassAttemptCache cache;
+    auto passes = SchedulePasses(item, strict, cache);
+    ASSERT_FALSE(passes.empty());
+    EXPECT_EQ(passes[0], PassId::kBuildSignatureState);
+}
+
+TEST(Scheduler, StrictMixedStage1GetsDecompose) {
+    WorkItem item;
+    Classification cls{
+        .semantic = SemanticClass::kNonPolynomial,
+        .flags    = kSfHasMixedProduct,
+        .route    = Route::kMixedRewrite,
+    };
+    item.payload = AstPayload{
+        .expr           = Expr::Constant(0),
+        .classification = cls,
+        .provenance     = Provenance::kLowered,
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kLowered;
+    item.stage_cursor            = 1;
+    OrchestratorPolicy strict{
+        .allow_reroute         = false,
+        .strict_route_faithful = true,
+    };
+    PassAttemptCache cache;
+    auto passes = SchedulePasses(item, strict, cache);
+    ASSERT_EQ(passes.size(), 1);
+    EXPECT_EQ(passes[0], PassId::kDecompose);
+}
+
+TEST(Scheduler, StrictMixedStage2GetsOperandSimplify) {
+    WorkItem item;
+    Classification cls{
+        .semantic = SemanticClass::kNonPolynomial,
+        .flags    = kSfHasMixedProduct,
+        .route    = Route::kMixedRewrite,
+    };
+    item.payload = AstPayload{
+        .expr           = Expr::Constant(0),
+        .classification = cls,
+        .provenance     = Provenance::kLowered,
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kLowered;
+    item.stage_cursor            = 2;
+    OrchestratorPolicy strict{
+        .allow_reroute         = false,
+        .strict_route_faithful = true,
+    };
+    PassAttemptCache cache;
+    auto passes = SchedulePasses(item, strict, cache);
+    ASSERT_EQ(passes.size(), 1);
+    EXPECT_EQ(passes[0], PassId::kOperandSimplify);
+}
+
+TEST(Scheduler, StrictMixedStage3GetsProductIdentity) {
+    WorkItem item;
+    Classification cls{
+        .semantic = SemanticClass::kNonPolynomial,
+        .flags    = kSfHasMixedProduct,
+        .route    = Route::kMixedRewrite,
+    };
+    item.payload = AstPayload{
+        .expr           = Expr::Constant(0),
+        .classification = cls,
+        .provenance     = Provenance::kLowered,
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kLowered;
+    item.stage_cursor            = 3;
+    OrchestratorPolicy strict{
+        .allow_reroute         = false,
+        .strict_route_faithful = true,
+    };
+    PassAttemptCache cache;
+    auto passes = SchedulePasses(item, strict, cache);
+    ASSERT_EQ(passes.size(), 1);
+    EXPECT_EQ(passes[0], PassId::kProductIdentityCollapse);
+}
+
+TEST(Scheduler, StrictMixedStage4GetsDecompose) {
+    WorkItem item;
+    Classification cls{
+        .semantic = SemanticClass::kNonPolynomial,
+        .flags    = kSfHasMixedProduct,
+        .route    = Route::kMixedRewrite,
+    };
+    item.payload = AstPayload{
+        .expr           = Expr::Constant(0),
+        .classification = cls,
+        .provenance     = Provenance::kLowered,
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kLowered;
+    item.stage_cursor            = 4;
+    OrchestratorPolicy strict{
+        .allow_reroute         = false,
+        .strict_route_faithful = true,
+    };
+    PassAttemptCache cache;
+    auto passes = SchedulePasses(item, strict, cache);
+    ASSERT_EQ(passes.size(), 1);
+    EXPECT_EQ(passes[0], PassId::kDecompose);
+}
+
+TEST(Scheduler, StrictMixedStage5GetsXorLowering) {
+    WorkItem item;
+    Classification cls{
+        .semantic = SemanticClass::kNonPolynomial,
+        .flags    = kSfHasMixedProduct,
+        .route    = Route::kMixedRewrite,
+    };
+    item.payload = AstPayload{
+        .expr           = Expr::Constant(0),
+        .classification = cls,
+        .provenance     = Provenance::kLowered,
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kLowered;
+    item.stage_cursor            = 5;
+    OrchestratorPolicy strict{
+        .allow_reroute         = false,
+        .strict_route_faithful = true,
+    };
+    PassAttemptCache cache;
+    auto passes = SchedulePasses(item, strict, cache);
+    ASSERT_EQ(passes.size(), 1);
+    EXPECT_EQ(passes[0], PassId::kXorLowering);
+}
+
+TEST(Scheduler, StrictMixedStage6GetsSignatureBuild) {
+    WorkItem item;
+    Classification cls{
+        .semantic = SemanticClass::kNonPolynomial,
+        .flags    = kSfHasMixedProduct,
+        .route    = Route::kMixedRewrite,
+    };
+    item.payload = AstPayload{
+        .expr           = Expr::Constant(0),
+        .classification = cls,
+        .provenance     = Provenance::kLowered,
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kLowered;
+    item.stage_cursor            = 6;
+    OrchestratorPolicy strict{
+        .allow_reroute         = false,
+        .strict_route_faithful = true,
+    };
+    PassAttemptCache cache;
+    auto passes = SchedulePasses(item, strict, cache);
+    ASSERT_EQ(passes.size(), 1);
+    EXPECT_EQ(passes[0], PassId::kBuildSignatureState);
+}
+
+TEST(Scheduler, StrictMixedBeyondStage6GetsNothing) {
+    WorkItem item;
+    Classification cls{
+        .semantic = SemanticClass::kNonPolynomial,
+        .flags    = kSfHasMixedProduct,
+        .route    = Route::kMixedRewrite,
+    };
+    item.payload = AstPayload{
+        .expr           = Expr::Constant(0),
+        .classification = cls,
+        .provenance     = Provenance::kLowered,
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kLowered;
+    item.stage_cursor            = 7;
+    OrchestratorPolicy strict{
+        .allow_reroute         = false,
+        .strict_route_faithful = true,
+    };
+    PassAttemptCache cache;
+    auto passes = SchedulePasses(item, strict, cache);
+    EXPECT_TRUE(passes.empty());
+}
+
+TEST(Scheduler, LoweredNonMixedGetsSignatureBuild) {
+    WorkItem item;
+    Classification cls{
+        .semantic = SemanticClass::kLinear,
+        .flags    = kSfNone,
+        .route    = Route::kBitwiseOnly,
+    };
+    item.payload = AstPayload{
+        .expr           = Expr::Constant(0),
+        .classification = cls,
+        .provenance     = Provenance::kLowered,
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kLowered;
+    OrchestratorPolicy strict{
+        .allow_reroute         = false,
+        .strict_route_faithful = true,
+    };
+    PassAttemptCache cache;
+    auto passes = SchedulePasses(item, strict, cache);
+    ASSERT_EQ(passes.size(), 1);
+    EXPECT_EQ(passes[0], PassId::kBuildSignatureState);
+}
+
+TEST(Scheduler, UnsupportedRouteGetsNothing) {
+    WorkItem item;
+    Classification cls{
+        .semantic = SemanticClass::kNonPolynomial,
+        .flags    = kSfHasUnknownShape,
+        .route    = Route::kUnsupported,
+    };
+    item.payload = AstPayload{
+        .expr           = Expr::Constant(0),
+        .classification = cls,
+        .provenance     = Provenance::kLowered,
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kLowered;
+    OrchestratorPolicy strict{
+        .allow_reroute         = false,
+        .strict_route_faithful = true,
+    };
+    PassAttemptCache cache;
+    auto passes = SchedulePasses(item, strict, cache);
+    EXPECT_TRUE(passes.empty());
+}
+
+TEST(Scheduler, AttemptedPassesFiltered) {
+    WorkItem item;
+    item.payload             = SignatureStatePayload{};
+    item.features.provenance = Provenance::kOriginal;
+    OrchestratorPolicy strict{
+        .allow_reroute         = false,
+        .strict_route_faithful = true,
+    };
+    PassAttemptCache cache;
+    auto fp = ComputeFingerprint(item, 64, false);
+    cache.Record(fp, PassId::kSupportedSolve);
+    auto passes = SchedulePasses(item, strict, cache);
+    EXPECT_TRUE(passes.empty());
+}
+
+TEST(Scheduler, RerouteRewrittenGetsFullBand) {
+    WorkItem item;
+    Classification cls{
+        .semantic = SemanticClass::kNonPolynomial,
+        .flags    = kSfHasMixedProduct,
+        .route    = Route::kMixedRewrite,
+    };
+    item.payload = AstPayload{
+        .expr           = Expr::Constant(0),
+        .classification = cls,
+        .provenance     = Provenance::kRewritten,
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kRewritten;
+    OrchestratorPolicy reroute{
+        .allow_reroute         = true,
+        .strict_route_faithful = false,
+    };
+    PassAttemptCache cache;
+    auto passes = SchedulePasses(item, reroute, cache);
+    EXPECT_GE(passes.size(), 3);
+    EXPECT_EQ(passes[0], PassId::kBuildSignatureState);
+}
+
+TEST(Scheduler, RerouteLoweredMixedGetsFullBand) {
+    WorkItem item;
+    Classification cls{
+        .semantic = SemanticClass::kNonPolynomial,
+        .flags    = kSfHasMixedProduct,
+        .route    = Route::kMixedRewrite,
+    };
+    item.payload = AstPayload{
+        .expr           = Expr::Constant(0),
+        .classification = cls,
+        .provenance     = Provenance::kLowered,
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kLowered;
+    OrchestratorPolicy reroute{
+        .allow_reroute         = true,
+        .strict_route_faithful = false,
+    };
+    PassAttemptCache cache;
+    auto passes = SchedulePasses(item, reroute, cache);
+    EXPECT_EQ(passes.size(), 5);
+    EXPECT_EQ(passes[0], PassId::kBuildSignatureState);
+    EXPECT_EQ(passes[1], PassId::kDecompose);
+    EXPECT_EQ(passes[2], PassId::kOperandSimplify);
+    EXPECT_EQ(passes[3], PassId::kProductIdentityCollapse);
+    EXPECT_EQ(passes[4], PassId::kXorLowering);
+}
+
+TEST(Scheduler, StrictRewrittenAfterOperandGetsSigBuild) {
+    WorkItem item;
+    Classification cls{
+        .semantic = SemanticClass::kNonPolynomial,
+        .flags    = kSfHasMixedProduct,
+        .route    = Route::kMixedRewrite,
+    };
+    item.payload = AstPayload{
+        .expr           = Expr::Constant(0),
+        .classification = cls,
+        .provenance     = Provenance::kRewritten,
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kRewritten;
+    item.stage_cursor            = 2;
+    OrchestratorPolicy strict{
+        .allow_reroute         = false,
+        .strict_route_faithful = true,
+    };
+    PassAttemptCache cache;
+    auto passes = SchedulePasses(item, strict, cache);
+    ASSERT_EQ(passes.size(), 1);
+    EXPECT_EQ(passes[0], PassId::kBuildSignatureState);
+}
+
+TEST(Scheduler, StrictRewrittenAfterXorGetsSigBuild) {
+    WorkItem item;
+    Classification cls{
+        .semantic = SemanticClass::kNonPolynomial,
+        .flags    = kSfHasMixedProduct,
+        .route    = Route::kMixedRewrite,
+    };
+    item.payload = AstPayload{
+        .expr           = Expr::Constant(0),
+        .classification = cls,
+        .provenance     = Provenance::kRewritten,
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kRewritten;
+    item.stage_cursor            = 5;
+    OrchestratorPolicy strict{
+        .allow_reroute         = false,
+        .strict_route_faithful = true,
+    };
+    PassAttemptCache cache;
+    auto passes = SchedulePasses(item, strict, cache);
+    ASSERT_EQ(passes.size(), 1);
+    EXPECT_EQ(passes[0], PassId::kBuildSignatureState);
+}
+
+TEST(Scheduler, StrictRewrittenBeyondStage5GetsNothing) {
+    WorkItem item;
+    Classification cls{
+        .semantic = SemanticClass::kNonPolynomial,
+        .flags    = kSfHasMixedProduct,
+        .route    = Route::kMixedRewrite,
+    };
+    item.payload = AstPayload{
+        .expr           = Expr::Constant(0),
+        .classification = cls,
+        .provenance     = Provenance::kRewritten,
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kRewritten;
+    item.stage_cursor            = 6;
+    OrchestratorPolicy strict{
+        .allow_reroute         = false,
+        .strict_route_faithful = true,
+    };
+    PassAttemptCache cache;
+    auto passes = SchedulePasses(item, strict, cache);
+    EXPECT_TRUE(passes.empty());
+}

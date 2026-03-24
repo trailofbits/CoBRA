@@ -256,4 +256,13 @@ namespace cobra {
         size_t high_water_ = 0;
     };
 
+    // ---------------------------------------------------------------
+    // Scheduler — determines which passes to try for a WorkItem
+    // ---------------------------------------------------------------
+
+    std::vector< PassId > SchedulePasses(
+        const WorkItem &item, const OrchestratorPolicy &policy,
+        const PassAttemptCache &attempted
+    );
+
 } // namespace cobra
