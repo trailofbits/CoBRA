@@ -1,10 +1,12 @@
 #include "ExprParser.h"
 #include "cobra/core/Classifier.h"
 #include "cobra/core/Expr.h"
+#include "cobra/core/ExprCost.h"
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/Simplifier.h"
 #include <fstream>
 #include <gtest/gtest.h>
+#include <iostream>
 #include <string>
 
 using namespace cobra;
@@ -45,6 +47,12 @@ namespace {
         int unsupported     = 0;
         int skipped_parse   = 0;
         int failed_simplify = 0;
+
+        int cost_compared   = 0;
+        int cost_better     = 0;
+        int cost_equal      = 0;
+        int cost_worse      = 0;
+        int gt_parse_failed = 0;
     };
 
     DatasetStats run_dataset(const std::string &path) {
@@ -67,6 +75,7 @@ namespace {
             }
 
             std::string obfuscated = trim(line.substr(0, sep));
+            std::string gt_str     = trim(line.substr(sep + 1));
             if (obfuscated.empty()) {
                 stats.skipped_parse++;
                 continue;
@@ -105,9 +114,34 @@ namespace {
             }
 
             switch (result.value().kind) {
-                case SimplifyOutcome::Kind::kSimplified:
+                case SimplifyOutcome::Kind::kSimplified: {
                     stats.simplified++;
+
+                    if (gt_str.empty()) { break; }
+                    auto gt_ast = ParseToAst(gt_str, 64);
+                    if (!gt_ast.has_value()) {
+                        stats.gt_parse_failed++;
+                        break;
+                    }
+                    auto gt_folded = FoldConstantBitwise(std::move(gt_ast.value().expr), 64);
+                    auto gt_cost   = ComputeCost(*gt_folded).cost;
+                    auto our_cost  = ComputeCost(*result.value().expr).cost;
+                    stats.cost_compared++;
+
+                    if (IsBetter(our_cost, gt_cost)) {
+                        stats.cost_better++;
+                    } else if (IsBetter(gt_cost, our_cost)) {
+                        stats.cost_worse++;
+                        std::string our_rendered =
+                            Render(*result.value().expr, result.value().real_vars);
+                        std::cerr << "  line " << line_num << ": cost "
+                                  << our_cost.weighted_size << " > gt " << gt_cost.weighted_size
+                                  << "  ours: " << our_rendered << "  gt: " << gt_str << "\n";
+                    } else {
+                        stats.cost_equal++;
+                    }
                     break;
+                }
                 case SimplifyOutcome::Kind::kUnchangedUnsupported:
                     stats.unsupported++;
                     break;
@@ -118,6 +152,15 @@ namespace {
                     break;
             }
         }
+
+        std::cerr << "\n"
+                  << path.substr(path.rfind('/') + 1) << " cost: " << stats.cost_compared
+                  << " compared, " << stats.cost_equal << " equal, " << stats.cost_better
+                  << " better, " << stats.cost_worse << " worse";
+        if (stats.gt_parse_failed > 0) {
+            std::cerr << ", " << stats.gt_parse_failed << " gt_parse_failed";
+        }
+        std::cerr << "\n";
 
         return stats;
     }
