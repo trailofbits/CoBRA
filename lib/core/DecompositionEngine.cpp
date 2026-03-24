@@ -4,6 +4,7 @@
 #include "cobra/core/ExprUtils.h"
 #include "cobra/core/GhostResidualSolver.h"
 #include "cobra/core/MultivarPolyRecovery.h"
+#include "cobra/core/PassContract.h"
 #include "cobra/core/PolyExprBuilder.h"
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/SignatureEval.h"
@@ -16,6 +17,19 @@
 #include <random>
 
 namespace cobra {
+
+    namespace decomposition {
+        enum Subcode : uint16_t {
+            kNoExpr          = 1,
+            kNoProducts      = 2,
+            kNoEvaluator     = 3,
+            kTooManyVars     = 4,
+            kPolyRecovFailed = 5,
+            kExprBuildFailed = 6,
+            kNoTemplateMatch = 7,
+            kLoopExhausted   = 20,
+        };
+    } // namespace decomposition
 
     namespace {
 
@@ -81,14 +95,31 @@ namespace cobra {
         };
     }
 
-    std::optional< CoreCandidate > ExtractProductCore(const DecompositionContext &ctx) {
-        if (ctx.current_expr == nullptr) { return std::nullopt; }
+    SolverResult< CoreCandidate > ExtractProductCore(const DecompositionContext &ctx) {
+        if (ctx.current_expr == nullptr) {
+            return SolverResult< CoreCandidate >::Inapplicable(
+                ReasonDetail{
+                    .top = { .code = { ReasonCategory::kGuardFailed,
+                                       ReasonDomain::kDecomposition, decomposition::kNoExpr },
+                            .message = "no expression provided" }
+            }
+            );
+        }
 
         std::vector< const Expr * > products;
         std::vector< std::unique_ptr< Expr > > residual;
         SplitAddTree(*ctx.current_expr, products, residual);
 
-        if (products.empty()) { return std::nullopt; }
+        if (products.empty()) {
+            return SolverResult< CoreCandidate >::Blocked(
+                ReasonDetail{
+                    .top = { .code    = { ReasonCategory::kSearchExhausted,
+                                          ReasonDomain::kDecomposition,
+                                          decomposition::kNoProducts },
+                            .message = "no product terms found in AST" }
+            }
+            );
+        }
 
         auto core_expr = CloneExpr(*products[0]);
         for (size_t i = 1; i < products.size(); ++i) {
@@ -98,7 +129,7 @@ namespace cobra {
         CoreCandidate core;
         core.expr = std::move(core_expr);
         core.kind = ExtractorKind::kProductAST;
-        return core;
+        return SolverResult< CoreCandidate >::Success(std::move(core));
     }
 
     bool AcceptCore(const DecompositionContext &ctx, const CoreCandidate &core) {
@@ -144,9 +175,18 @@ namespace cobra {
         return true;
     }
 
-    std::optional< CoreCandidate >
+    SolverResult< CoreCandidate >
     ExtractPolyCore(const DecompositionContext &ctx, uint8_t degree) {
-        if (!ctx.opts.evaluator) { return std::nullopt; }
+        if (!ctx.opts.evaluator) {
+            return SolverResult< CoreCandidate >::Inapplicable(
+                ReasonDetail{
+                    .top = { .code    = { ReasonCategory::kGuardFailed,
+                                          ReasonDomain::kDecomposition,
+                                          decomposition::kNoEvaluator },
+                            .message = "polynomial extraction requires evaluator" }
+            }
+            );
+        }
 
         const auto kNv     = static_cast< uint32_t >(ctx.vars.size());
         const uint32_t kBw = ctx.opts.bitwidth;
@@ -155,25 +195,61 @@ namespace cobra {
         auto fw_elim          = EliminateAuxVars(ctx.sig, ctx.vars, ctx.opts.evaluator, kBw);
         const auto kRealCount = static_cast< uint32_t >(fw_elim.real_vars.size());
 
-        if (kRealCount > 6) { return std::nullopt; }
+        if (kRealCount > 6) {
+            return SolverResult< CoreCandidate >::Inapplicable(
+                ReasonDetail{
+                    .top = { .code    = { ReasonCategory::kGuardFailed,
+                                          ReasonDomain::kDecomposition,
+                                          decomposition::kTooManyVars },
+                            .message = "too many real variables for polynomial extraction" }
+            }
+            );
+        }
 
         auto support = BuildVarSupport(ctx.vars, fw_elim.real_vars);
 
         auto poly = RecoverMultivarPoly(ctx.opts.evaluator, support, kNv, kBw, degree);
-        if (!poly.Succeeded()) { return std::nullopt; }
+        if (!poly.Succeeded()) {
+            return SolverResult< CoreCandidate >::Blocked(
+                ReasonDetail{
+                    .top = { .code    = { ReasonCategory::kSearchExhausted,
+                                          ReasonDomain::kDecomposition,
+                                          decomposition::kPolyRecovFailed },
+                            .message = "polynomial recovery failed" }
+            }
+            );
+        }
 
         auto expr = BuildPolyExpr(poly.TakePayload());
-        if (!expr.has_value()) { return std::nullopt; }
+        if (!expr.has_value()) {
+            return SolverResult< CoreCandidate >::Blocked(
+                ReasonDetail{
+                    .top = { .code    = { ReasonCategory::kSearchExhausted,
+                                          ReasonDomain::kDecomposition,
+                                          decomposition::kExprBuildFailed },
+                            .message = "expression build from polynomial failed" }
+            }
+            );
+        }
 
         CoreCandidate core;
         core.expr        = std::move(expr.value());
         core.kind        = ExtractorKind::kPolynomial;
         core.degree_used = degree;
-        return core;
+        return SolverResult< CoreCandidate >::Success(std::move(core));
     }
 
-    std::optional< CoreCandidate > ExtractTemplateCore(const DecompositionContext &ctx) {
-        if (!ctx.opts.evaluator) { return std::nullopt; }
+    SolverResult< CoreCandidate > ExtractTemplateCore(const DecompositionContext &ctx) {
+        if (!ctx.opts.evaluator) {
+            return SolverResult< CoreCandidate >::Inapplicable(
+                ReasonDetail{
+                    .top = { .code    = { ReasonCategory::kGuardFailed,
+                                          ReasonDomain::kDecomposition,
+                                          decomposition::kNoEvaluator },
+                            .message = "template extraction requires evaluator" }
+            }
+            );
+        }
 
         const auto kNv     = static_cast< uint32_t >(ctx.vars.size());
         const uint32_t kBw = ctx.opts.bitwidth;
@@ -213,7 +289,7 @@ namespace cobra {
                 CoreCandidate core;
                 core.expr = std::move(td_payload.expr);
                 core.kind = ExtractorKind::kTemplate;
-                return core;
+                return SolverResult< CoreCandidate >::Success(std::move(core));
             }
         }
 
@@ -230,15 +306,50 @@ namespace cobra {
                 CoreCandidate core;
                 core.expr = std::move(td2.TakePayload().expr);
                 core.kind = ExtractorKind::kTemplate;
-                return core;
+                return SolverResult< CoreCandidate >::Success(std::move(core));
             }
         }
 
-        return std::nullopt;
+        return SolverResult< CoreCandidate >::Blocked(
+            ReasonDetail{
+                .top = { .code    = { ReasonCategory::kSearchExhausted,
+                                      ReasonDomain::kDecomposition,
+                                      decomposition::kNoTemplateMatch },
+                        .message = "no template match found" }
+        }
+        );
     }
 
-    std::optional< DecompositionResult > TryDecomposition(const DecompositionContext &ctx) {
-        if (!ctx.opts.evaluator) { return std::nullopt; }
+    namespace {
+        PassOutcome MakeDecompSuccess(const DecompositionContext &ctx, DecompositionResult dr) {
+            auto outcome = PassOutcome::Success(
+                std::move(dr.expr), { ctx.vars.begin(), ctx.vars.end() },
+                VerificationState::kVerified
+            );
+            outcome.SetDecompositionMeta(
+                DecompositionMeta{
+                    .extractor_kind = static_cast< uint8_t >(dr.extractor_kind),
+                    .solver_kind    = dr.solver_kind ? static_cast< uint8_t >(*dr.solver_kind)
+                                                     : static_cast< uint8_t >(0),
+                    .has_solver     = dr.solver_kind.has_value(),
+                    .core_degree    = dr.core_degree,
+                }
+            );
+            return outcome;
+        }
+    } // namespace
+
+    PassOutcome TryDecomposition(const DecompositionContext &ctx) {
+        if (!ctx.opts.evaluator) {
+            return PassOutcome::Inapplicable(
+                ReasonDetail{
+                    .top = { .code    = { ReasonCategory::kGuardFailed,
+                                          ReasonDomain::kDecomposition,
+                                          decomposition::kNoEvaluator },
+                            .message = "decomposition requires evaluator" }
+            }
+            );
+        }
 
         const auto kNv     = static_cast< uint32_t >(ctx.vars.size());
         const uint32_t kBw = ctx.opts.bitwidth;
@@ -272,11 +383,11 @@ namespace cobra {
                         FullWidthCheckEval(ctx.opts.evaluator, kNv, *ghost_payload.expr, kBw);
                     if (check.passed) {
                         COBRA_TRACE("DecompEngine", "Boolean-null: GhostResidual succeeded");
-                        DecompositionResult result;
-                        result.expr           = std::move(ghost_payload.expr);
-                        result.extractor_kind = ExtractorKind::kBooleanNullDirect;
-                        result.solver_kind    = ResidualSolverKind::kGhostResidual;
-                        return result;
+                        DecompositionResult dr;
+                        dr.expr           = std::move(ghost_payload.expr);
+                        dr.extractor_kind = ExtractorKind::kBooleanNullDirect;
+                        dr.solver_kind    = ResidualSolverKind::kGhostResidual;
+                        return MakeDecompSuccess(ctx, std::move(dr));
                     }
                 }
 
@@ -291,11 +402,11 @@ namespace cobra {
                         COBRA_TRACE(
                             "DecompEngine", "Boolean-null: FactoredGhost(d=0) succeeded"
                         );
-                        DecompositionResult result;
-                        result.expr           = std::move(factored_payload.expr);
-                        result.extractor_kind = ExtractorKind::kBooleanNullDirect;
-                        result.solver_kind    = ResidualSolverKind::kGhostResidual;
-                        return result;
+                        DecompositionResult dr;
+                        dr.expr           = std::move(factored_payload.expr);
+                        dr.extractor_kind = ExtractorKind::kBooleanNullDirect;
+                        dr.solver_kind    = ResidualSolverKind::kGhostResidual;
+                        return MakeDecompSuccess(ctx, std::move(dr));
                     }
                 }
 
@@ -313,11 +424,11 @@ namespace cobra {
                         COBRA_TRACE(
                             "DecompEngine", "Boolean-null: FactoredGhost(d=2) succeeded"
                         );
-                        DecompositionResult result;
-                        result.expr           = std::move(factored2_payload.expr);
-                        result.extractor_kind = ExtractorKind::kBooleanNullDirect;
-                        result.solver_kind    = ResidualSolverKind::kGhostResidual;
-                        return result;
+                        DecompositionResult dr;
+                        dr.expr           = std::move(factored2_payload.expr);
+                        dr.extractor_kind = ExtractorKind::kBooleanNullDirect;
+                        dr.solver_kind    = ResidualSolverKind::kGhostResidual;
+                        return MakeDecompSuccess(ctx, std::move(dr));
                     }
                 }
 
@@ -329,7 +440,7 @@ namespace cobra {
         }
 
         // Helper: try a core candidate through the decomposition pipeline
-        auto TryCore = [&](CoreCandidate &core) -> std::optional< DecompositionResult > {
+        auto TryCore = [&](CoreCandidate core) -> std::optional< DecompositionResult > {
             // Direct-success path
             auto direct_check = FullWidthCheckEval(ctx.opts.evaluator, kNv, *core.expr, kBw);
             if (direct_check.passed) {
@@ -681,10 +792,12 @@ namespace cobra {
         // Extractor 1: Product/AST
         {
             auto core = ExtractProductCore(ctx);
-            if (core.has_value()) {
+            if (core.Succeeded()) {
                 COBRA_TRACE("DecompEngine", "Trying ProductAST core");
-                auto result = TryCore(*core);
-                if (result.has_value()) { return result; }
+                auto tc_result = TryCore(core.TakePayload());
+                if (tc_result.has_value()) {
+                    return MakeDecompSuccess(ctx, std::move(*tc_result));
+                }
                 COBRA_TRACE("DecompEngine", "ProductAST core: all solvers exhausted");
             } else {
                 COBRA_TRACE("DecompEngine", "ProductAST: no core extracted");
@@ -694,10 +807,12 @@ namespace cobra {
         // Extractor 2: Polynomial D=2
         {
             auto core = ExtractPolyCore(ctx, 2);
-            if (core.has_value()) {
+            if (core.Succeeded()) {
                 COBRA_TRACE("DecompEngine", "Trying Polynomial D=2 core");
-                auto result = TryCore(*core);
-                if (result.has_value()) { return result; }
+                auto tc_result = TryCore(core.TakePayload());
+                if (tc_result.has_value()) {
+                    return MakeDecompSuccess(ctx, std::move(*tc_result));
+                }
                 COBRA_TRACE("DecompEngine", "Polynomial D=2 core: all solvers exhausted");
             } else {
                 COBRA_TRACE("DecompEngine", "Polynomial D=2: no core extracted");
@@ -707,10 +822,12 @@ namespace cobra {
         // Extractor 3: Template
         {
             auto core = ExtractTemplateCore(ctx);
-            if (core.has_value()) {
+            if (core.Succeeded()) {
                 COBRA_TRACE("DecompEngine", "Trying Template core");
-                auto result = TryCore(*core);
-                if (result.has_value()) { return result; }
+                auto tc_result = TryCore(core.TakePayload());
+                if (tc_result.has_value()) {
+                    return MakeDecompSuccess(ctx, std::move(*tc_result));
+                }
                 COBRA_TRACE("DecompEngine", "Template core: all solvers exhausted");
             } else {
                 COBRA_TRACE("DecompEngine", "Template: no core extracted");
@@ -720,10 +837,12 @@ namespace cobra {
         // Extractor 4: Polynomial D=3
         {
             auto core = ExtractPolyCore(ctx, 3);
-            if (core.has_value()) {
+            if (core.Succeeded()) {
                 COBRA_TRACE("DecompEngine", "Trying Polynomial D=3 core");
-                auto result = TryCore(*core);
-                if (result.has_value()) { return result; }
+                auto tc_result = TryCore(core.TakePayload());
+                if (tc_result.has_value()) {
+                    return MakeDecompSuccess(ctx, std::move(*tc_result));
+                }
                 COBRA_TRACE("DecompEngine", "Polynomial D=3 core: all solvers exhausted");
             } else {
                 COBRA_TRACE("DecompEngine", "Polynomial D=3: no core extracted");
@@ -733,18 +852,27 @@ namespace cobra {
         // Extractor 5: Polynomial D=4
         {
             auto core = ExtractPolyCore(ctx, 4);
-            if (core.has_value()) {
+            if (core.Succeeded()) {
                 COBRA_TRACE("DecompEngine", "Trying Polynomial D=4 core");
-                auto result = TryCore(*core);
-                if (result.has_value()) { return result; }
+                auto tc_result = TryCore(core.TakePayload());
+                if (tc_result.has_value()) {
+                    return MakeDecompSuccess(ctx, std::move(*tc_result));
+                }
                 COBRA_TRACE("DecompEngine", "Polynomial D=4 core: all solvers exhausted");
             } else {
                 COBRA_TRACE("DecompEngine", "Polynomial D=4: no core extracted");
             }
         }
 
-        COBRA_TRACE("DecompEngine", "All extractors exhausted, returning nullopt");
-        return std::nullopt;
+        COBRA_TRACE("DecompEngine", "All extractors exhausted");
+        return PassOutcome::Blocked(
+            ReasonDetail{
+                .top = { .code    = { ReasonCategory::kSearchExhausted,
+                                      ReasonDomain::kDecomposition,
+                                      decomposition::kLoopExhausted },
+                        .message = "all extractors exhausted" }
+        }
+        );
     }
 
 } // namespace cobra

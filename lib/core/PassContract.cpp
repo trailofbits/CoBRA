@@ -100,4 +100,12 @@ namespace cobra {
 
     void PassOutcome::SetSigVector(std::vector< uint64_t > sv) { sig_vector_ = std::move(sv); }
 
+    const std::optional< DecompositionMeta > &PassOutcome::DecompositionMetadata() const {
+        return decomposition_meta_;
+    }
+
+    void PassOutcome::SetDecompositionMeta(DecompositionMeta meta) {
+        decomposition_meta_.emplace(std::move(meta));
+    }
+
 } // namespace cobra

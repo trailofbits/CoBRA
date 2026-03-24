@@ -295,12 +295,24 @@ TEST(QSynthDiagnostic, DecompEngineTelemetry) {
 
         std::string label = "L" + std::to_string(line_num);
 
-        // Probe each extractor
-        auto prod = ExtractProductCore(dctx);
-        auto p2   = ExtractPolyCore(dctx, 2);
-        auto tmpl = ExtractTemplateCore(dctx);
-        auto p3   = ExtractPolyCore(dctx, 3);
-        auto p4   = ExtractPolyCore(dctx, 4);
+        // Probe each extractor — unwrap SolverResult into optional
+        // for diagnostic probe compatibility
+        auto prod_r = ExtractProductCore(dctx);
+        auto p2_r   = ExtractPolyCore(dctx, 2);
+        auto tmpl_r = ExtractTemplateCore(dctx);
+        auto p3_r   = ExtractPolyCore(dctx, 3);
+        auto p4_r   = ExtractPolyCore(dctx, 4);
+
+        std::optional< CoreCandidate > prod =
+            prod_r.Succeeded() ? std::optional(prod_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > p2 =
+            p2_r.Succeeded() ? std::optional(p2_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > tmpl =
+            tmpl_r.Succeeded() ? std::optional(tmpl_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > p3 =
+            p3_r.Succeeded() ? std::optional(p3_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > p4 =
+            p4_r.Succeeded() ? std::optional(p4_r.TakePayload()) : std::nullopt;
 
         bool any_core = false;
         if (prod.has_value()) {
@@ -756,7 +768,9 @@ TEST(QSynthDiagnostic, DirectSuccessProductCoreInvestigation) {
                                         .sig          = sig,
                                         .current_expr = folded.get(),
                                         .cls          = orig_cls };
-        auto orig_prod     = ExtractProductCore(orig_dctx);
+        auto orig_prod_r = ExtractProductCore(orig_dctx);
+        std::optional< CoreCandidate > orig_prod =
+            orig_prod_r.Succeeded() ? std::optional(orig_prod_r.TakePayload()) : std::nullopt;
         bool orig_has_core = orig_prod.has_value();
         bool orig_direct   = false;
         if (orig_has_core) {
@@ -783,7 +797,9 @@ TEST(QSynthDiagnostic, DirectSuccessProductCoreInvestigation) {
             .current_expr = current_expr.get(),
             .cls          = post_cls,
         };
-        auto post_prod     = ExtractProductCore(post_dctx);
+        auto post_prod_r = ExtractProductCore(post_dctx);
+        std::optional< CoreCandidate > post_prod =
+            post_prod_r.Succeeded() ? std::optional(post_prod_r.TakePayload()) : std::nullopt;
         bool post_has_core = post_prod.has_value();
         bool post_direct   = false;
         if (post_has_core) {
@@ -797,16 +813,16 @@ TEST(QSynthDiagnostic, DirectSuccessProductCoreInvestigation) {
 
         std::cerr << "  " << label << " orig_core=" << orig_has_core
                   << " orig_direct=" << orig_direct
-                  << " orig_decomp=" << orig_decomp.has_value()
+                  << " orig_decomp=" << orig_decomp.Succeeded()
                   << " step2=" << op_result.changed << " step2.5=" << pi_result.changed
                   << " post_core=" << post_has_core << " post_direct=" << post_direct
-                  << " post_decomp=" << post_decomp.has_value();
+                  << " post_decomp=" << post_decomp.Succeeded();
         if (orig_has_core) { std::cerr << " orig_expr=" << Render(*orig_prod->expr, vars, 64); }
         if (post_has_core) { std::cerr << " post_expr=" << Render(*post_prod->expr, vars, 64); }
         std::cerr << "\n";
 
         if (orig_direct && !post_has_core) { precond_destroy++; }
-        if (orig_decomp.has_value() && !post_decomp.has_value()) { confirmed_miss++; }
+        if (orig_decomp.Succeeded() && !post_decomp.Succeeded()) { confirmed_miss++; }
     }
 
     std::cerr << "\n=== Direct-Success Product Core Investigation ===\n";
@@ -886,11 +902,21 @@ TEST(QSynthDiagnostic, FactoredGhostTelemetry) {
                                    .cls          = cls };
 
         // Core extraction cascade (same order as DecompEngineTelemetry)
-        auto prod = ExtractProductCore(dctx);
-        auto p2   = ExtractPolyCore(dctx, 2);
-        auto tmpl = ExtractTemplateCore(dctx);
-        auto p3   = ExtractPolyCore(dctx, 3);
-        auto p4   = ExtractPolyCore(dctx, 4);
+        auto prod_r = ExtractProductCore(dctx);
+        auto p2_r   = ExtractPolyCore(dctx, 2);
+        auto tmpl_r = ExtractTemplateCore(dctx);
+        auto p3_r   = ExtractPolyCore(dctx, 3);
+        auto p4_r   = ExtractPolyCore(dctx, 4);
+        std::optional< CoreCandidate > prod =
+            prod_r.Succeeded() ? std::optional(prod_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > p2 =
+            p2_r.Succeeded() ? std::optional(p2_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > tmpl =
+            tmpl_r.Succeeded() ? std::optional(tmpl_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > p3 =
+            p3_r.Succeeded() ? std::optional(p3_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > p4 =
+            p4_r.Succeeded() ? std::optional(p4_r.TakePayload()) : std::nullopt;
 
         // try_core: accept first core that doesn't solve directly
         auto try_core = [&](std::optional< CoreCandidate > &core,
@@ -1160,7 +1186,9 @@ TEST(QSynthDiagnostic, BooleanNullResidualCharacterization) {
             .current_expr = current.get(),
             .cls          = post_cls,
         };
-        auto p2 = ExtractPolyCore(dctx, 2);
+        auto p2_r = ExtractPolyCore(dctx, 2);
+        std::optional< CoreCandidate > p2 =
+            p2_r.Succeeded() ? std::optional(p2_r.TakePayload()) : std::nullopt;
         if (!p2.has_value()) {
             std::cerr << "  Poly2 core: NONE\n";
             continue;
@@ -1343,7 +1371,9 @@ TEST(QSynthDiagnostic, NullFactorTelemetry) {
         std::vector< uint32_t > support;
         std::string target_type;
 
-        auto p2 = ExtractPolyCore(dctx, 2);
+        auto p2_r = ExtractPolyCore(dctx, 2);
+        std::optional< CoreCandidate > p2 =
+            p2_r.Succeeded() ? std::optional(p2_r.TakePayload()) : std::nullopt;
         if (p2.has_value() && AcceptCore(dctx, *p2)) {
             auto direct = FullWidthCheckEval(opts.evaluator, kNv, *p2->expr, kBw);
             if (direct.passed) { continue; }
@@ -1646,7 +1676,9 @@ TEST(QSynthDiagnostic, MultiWeightNullBasisTelemetry) {
         std::vector< uint32_t > support;
         std::string target_type;
 
-        auto p2 = ExtractPolyCore(dctx, 2);
+        auto p2_r = ExtractPolyCore(dctx, 2);
+        std::optional< CoreCandidate > p2 =
+            p2_r.Succeeded() ? std::optional(p2_r.TakePayload()) : std::nullopt;
         if (p2.has_value() && AcceptCore(dctx, *p2)) {
             auto direct = FullWidthCheckEval(opts.evaluator, kNv, *p2->expr, kBw);
             if (direct.passed) { continue; }
@@ -1986,28 +2018,44 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
         // kSimplified — that's what the main Simplifier tries first. If that
         // works, the case wouldn't be unsupported. So this should always be
         // false. But TryDecomposition on original vs post may differ.
-        if (orig_decomp.has_value() || post_decomp.has_value()) {
+        if (orig_decomp.Succeeded() || post_decomp.Succeeded()) {
             routing_miss++;
-            if (orig_decomp.has_value()) { rm_orig_decomp++; }
-            if (post_decomp.has_value()) { rm_post_decomp++; }
+            if (orig_decomp.Succeeded()) { rm_orig_decomp++; }
+            if (post_decomp.Succeeded()) { rm_post_decomp++; }
             std::cerr << "  L" << line_num << " ROUTING_MISS"
-                      << " orig_decomp=" << orig_decomp.has_value()
-                      << " post_decomp=" << post_decomp.has_value() << "\n";
+                      << " orig_decomp=" << orig_decomp.Succeeded()
+                      << " post_decomp=" << post_decomp.Succeeded() << "\n";
             continue;
         }
 
         // --- Probe 2: core extraction on BOTH ASTs ---
-        // Try all extractors on original AST
-        auto o_prod = ExtractProductCore(orig_dctx);
-        auto o_p2   = ExtractPolyCore(orig_dctx, 2);
-        auto o_tmpl = ExtractTemplateCore(orig_dctx);
-        auto o_p3   = ExtractPolyCore(orig_dctx, 3);
+        // Try all extractors on original AST — unwrap SolverResult
+        auto o_prod_r = ExtractProductCore(orig_dctx);
+        auto o_p2_r   = ExtractPolyCore(orig_dctx, 2);
+        auto o_tmpl_r = ExtractTemplateCore(orig_dctx);
+        auto o_p3_r   = ExtractPolyCore(orig_dctx, 3);
+        std::optional< CoreCandidate > o_prod =
+            o_prod_r.Succeeded() ? std::optional(o_prod_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > o_p2 =
+            o_p2_r.Succeeded() ? std::optional(o_p2_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > o_tmpl =
+            o_tmpl_r.Succeeded() ? std::optional(o_tmpl_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > o_p3 =
+            o_p3_r.Succeeded() ? std::optional(o_p3_r.TakePayload()) : std::nullopt;
 
         // Try all extractors on post-preconditioned AST
-        auto p_prod = ExtractProductCore(post_dctx);
-        auto p_p2   = ExtractPolyCore(post_dctx, 2);
-        auto p_tmpl = ExtractTemplateCore(post_dctx);
-        auto p_p3   = ExtractPolyCore(post_dctx, 3);
+        auto p_prod_r = ExtractProductCore(post_dctx);
+        auto p_p2_r   = ExtractPolyCore(post_dctx, 2);
+        auto p_tmpl_r = ExtractTemplateCore(post_dctx);
+        auto p_p3_r   = ExtractPolyCore(post_dctx, 3);
+        std::optional< CoreCandidate > p_prod =
+            p_prod_r.Succeeded() ? std::optional(p_prod_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > p_p2 =
+            p_p2_r.Succeeded() ? std::optional(p_p2_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > p_tmpl =
+            p_tmpl_r.Succeeded() ? std::optional(p_tmpl_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > p_p3 =
+            p_p3_r.Succeeded() ? std::optional(p_p3_r.TakePayload()) : std::nullopt;
 
         // Pick best core: prefer post-preconditioned, use engine order
         struct CoreChoice
@@ -2495,7 +2543,9 @@ TEST(QSynthDiagnostic, NonBnResidualCharacterization) {
                                         .current_expr = precond_expr.get(),
                                         .cls          = post_cls };
 
-        auto prod = ExtractProductCore(post_dctx);
+        auto prod_r = ExtractProductCore(post_dctx);
+        std::optional< CoreCandidate > prod =
+            prod_r.Succeeded() ? std::optional(prod_r.TakePayload()) : std::nullopt;
         if (!prod.has_value()) {
             std::cerr << "  L" << line_num << " SKIP: no product core\n";
             continue;
@@ -3026,7 +3076,7 @@ TEST(QSynthDiagnostic, RecoverableCaseTrace) {
             .cls          = orig_cls,
         };
         auto orig_decomp = TryDecomposition(orig_dctx);
-        std::cerr << "early decomp (original): " << orig_decomp.has_value() << "\n";
+        std::cerr << "early decomp (original): " << orig_decomp.Succeeded() << "\n";
 
         // Phase 2 decomp on preconditioned
         auto post_sig =
@@ -3039,12 +3089,18 @@ TEST(QSynthDiagnostic, RecoverableCaseTrace) {
             .cls          = cls,
         };
         auto post_decomp = TryDecomposition(post_dctx);
-        std::cerr << "phase2 decomp (precond): " << post_decomp.has_value() << "\n";
+        std::cerr << "phase2 decomp (precond): " << post_decomp.Succeeded() << "\n";
 
         // What extractors see on preconditioned AST
-        auto p_prod = ExtractProductCore(post_dctx);
-        auto p_p2   = ExtractPolyCore(post_dctx, 2);
-        auto p_p3   = ExtractPolyCore(post_dctx, 3);
+        auto p_prod_r = ExtractProductCore(post_dctx);
+        auto p_p2_r   = ExtractPolyCore(post_dctx, 2);
+        auto p_p3_r   = ExtractPolyCore(post_dctx, 3);
+        std::optional< CoreCandidate > p_prod =
+            p_prod_r.Succeeded() ? std::optional(p_prod_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > p_p2 =
+            p_p2_r.Succeeded() ? std::optional(p_p2_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > p_p3 =
+            p_p3_r.Succeeded() ? std::optional(p_p3_r.TakePayload()) : std::nullopt;
         std::cerr << "extractors: prod=" << p_prod.has_value() << " poly2=" << p_p2.has_value()
                   << " poly3=" << p_p3.has_value() << "\n";
         if (p_prod.has_value()) {
@@ -3083,8 +3139,12 @@ TEST(QSynthDiagnostic, RecoverableCaseTrace) {
             .current_expr = t_shared->get(),
             .cls          = t_cls,
         };
-        auto t_prod = ExtractProductCore(t_dctx);
-        auto t_p2   = ExtractPolyCore(t_dctx, 2);
+        auto t_prod_r = ExtractProductCore(t_dctx);
+        auto t_p2_r   = ExtractPolyCore(t_dctx, 2);
+        std::optional< CoreCandidate > t_prod =
+            t_prod_r.Succeeded() ? std::optional(t_prod_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > t_p2 =
+            t_p2_r.Succeeded() ? std::optional(t_p2_r.TakePayload()) : std::nullopt;
         std::cerr << "truth extractors: prod=" << t_prod.has_value()
                   << " poly2=" << t_p2.has_value() << "\n";
         if (t_prod.has_value()) {
@@ -3095,9 +3155,10 @@ TEST(QSynthDiagnostic, RecoverableCaseTrace) {
         }
 
         auto t_decomp = TryDecomposition(t_dctx);
-        std::cerr << "truth decomp: " << t_decomp.has_value() << "\n";
-        if (t_decomp.has_value()) {
-            std::cerr << "truth result: " << Render(*t_decomp->expr, t_parse->vars, 64) << "\n";
+        std::cerr << "truth decomp: " << t_decomp.Succeeded() << "\n";
+        if (t_decomp.Succeeded()) {
+            std::cerr << "truth result: " << Render(t_decomp.GetExpr(), t_parse->vars, 64)
+                      << "\n";
         }
     }
 }

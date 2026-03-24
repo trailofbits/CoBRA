@@ -141,6 +141,19 @@ namespace cobra {
     };
 
     // ---------------------------------------------------------------
+    // DecompositionMeta — set via SetDecompositionMeta() when
+    // TryDecomposition produces a result.
+    // ---------------------------------------------------------------
+
+    struct DecompositionMeta
+    {
+        uint8_t extractor_kind = 0; // Cast of ExtractorKind
+        uint8_t solver_kind    = 0; // Cast of ResidualSolverKind (0 = none)
+        bool has_solver        = false;
+        uint8_t core_degree    = 0;
+    };
+
+    // ---------------------------------------------------------------
     // PassOutcome — concrete outcome for simplification passes
     // ---------------------------------------------------------------
 
@@ -195,6 +208,9 @@ namespace cobra {
         const std::vector< uint64_t > &SigVector() const;
         void SetSigVector(std::vector< uint64_t > sv);
 
+        const std::optional< DecompositionMeta > &DecompositionMetadata() const;
+        void SetDecompositionMeta(DecompositionMeta meta);
+
       private:
         explicit PassOutcome(OutcomeKind kind);
 
@@ -205,6 +221,7 @@ namespace cobra {
         std::optional< ReasonDetail > reason_;
         std::optional< PendingWork > pending_;
         std::vector< uint64_t > sig_vector_;
+        std::optional< DecompositionMeta > decomposition_meta_;
     };
 
 } // namespace cobra

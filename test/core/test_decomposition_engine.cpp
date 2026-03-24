@@ -2,6 +2,7 @@
 #include "cobra/core/Classifier.h"
 #include "cobra/core/DecompositionEngine.h"
 #include "cobra/core/Expr.h"
+#include "cobra/core/PassContract.h"
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/SignatureEval.h"
 #include "cobra/core/Simplifier.h"
@@ -66,13 +67,13 @@ TEST(ExtractProductCoreTest, FindsProductTerms) {
     auto ctx = MakeCtx(opts, vars, sig, combined.get(), cls);
 
     auto core = ExtractProductCore(ctx);
-    ASSERT_TRUE(core.has_value());
-    EXPECT_EQ(core->kind, ExtractorKind::kProductAST);
+    ASSERT_TRUE(core.Succeeded());
+    EXPECT_EQ(core.Payload().kind, ExtractorKind::kProductAST);
     // The core should contain the product term
-    EXPECT_EQ(core->expr->kind, Expr::Kind::kMul);
+    EXPECT_EQ(core.Payload().expr->kind, Expr::Kind::kMul);
 }
 
-TEST(ExtractProductCoreTest, NoProducts_ReturnsNullopt) {
+TEST(ExtractProductCoreTest, NoProducts_ReturnsBlocked) {
     // expr = x0 ^ x1 (no product terms)
     auto expr = Expr::BitwiseXor(Expr::Variable(0), Expr::Variable(1));
 
@@ -83,7 +84,7 @@ TEST(ExtractProductCoreTest, NoProducts_ReturnsNullopt) {
     auto ctx = MakeCtx(opts, vars, sig, expr.get(), cls);
 
     auto core = ExtractProductCore(ctx);
-    EXPECT_FALSE(core.has_value());
+    EXPECT_FALSE(core.Succeeded());
 }
 
 TEST(ExtractProductCoreTest, ConstantMul_NotExtracted) {
@@ -98,7 +99,7 @@ TEST(ExtractProductCoreTest, ConstantMul_NotExtracted) {
     auto ctx = MakeCtx(opts, vars, sig, combined.get(), cls);
 
     auto core = ExtractProductCore(ctx);
-    EXPECT_FALSE(core.has_value());
+    EXPECT_FALSE(core.Succeeded());
 }
 
 TEST(ExtractPolyCoreTest, RecoversDegree2) {
@@ -115,12 +116,12 @@ TEST(ExtractPolyCoreTest, RecoversDegree2) {
                                                       .route    = Route::kMixedRewrite };
     auto ctx                        = MakeCtx(opts, vars, sig, nullptr, cls);
     auto core                       = ExtractPolyCore(ctx, 2);
-    ASSERT_TRUE(core.has_value());
-    EXPECT_EQ(core->kind, ExtractorKind::kPolynomial);
-    EXPECT_EQ(core->degree_used, 2);
+    ASSERT_TRUE(core.Succeeded());
+    EXPECT_EQ(core.Payload().kind, ExtractorKind::kPolynomial);
+    EXPECT_EQ(core.Payload().degree_used, 2);
 }
 
-TEST(ExtractPolyCoreTest, TooManyVars_ReturnsNullopt) {
+TEST(ExtractPolyCoreTest, TooManyVars_ReturnsInapplicable) {
     // 7 live variables exceed the 6-var support cap
     Evaluator eval = [](const std::vector< uint64_t > &v) -> uint64_t {
         return v[0] * v[1] + v[2] * v[3] + v[4] * v[5] + v[6];
@@ -134,7 +135,7 @@ TEST(ExtractPolyCoreTest, TooManyVars_ReturnsNullopt) {
                                                       .route    = Route::kMixedRewrite };
     auto ctx                        = MakeCtx(opts, vars, sig, nullptr, cls);
     auto core                       = ExtractPolyCore(ctx, 2);
-    EXPECT_FALSE(core.has_value());
+    EXPECT_FALSE(core.Succeeded());
 }
 
 TEST(AcceptCoreTest, RejectsZeroCore) {
@@ -235,8 +236,8 @@ TEST(ExtractTemplateCoreTest, FindsTemplateForSimpleComposition) {
                                                       .route    = Route::kMixedRewrite };
     auto ctx                        = MakeCtx(opts, vars, sig, nullptr, cls);
     auto core                       = ExtractTemplateCore(ctx);
-    ASSERT_TRUE(core.has_value());
-    EXPECT_EQ(core->kind, ExtractorKind::kTemplate);
+    ASSERT_TRUE(core.Succeeded());
+    EXPECT_EQ(core.Payload().kind, ExtractorKind::kTemplate);
 }
 
 TEST(TryDecompositionTest, DirectSuccess_PolyMatchesWholeFunction) {
@@ -251,10 +252,14 @@ TEST(TryDecompositionTest, DirectSuccess_PolyMatchesWholeFunction) {
                                                       .route    = Route::kMixedRewrite };
     auto ctx                        = MakeCtx(opts, vars, sig, nullptr, cls);
     auto result                     = TryDecomposition(ctx);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->extractor_kind, ExtractorKind::kPolynomial);
-    EXPECT_FALSE(result->solver_kind.has_value());
-    auto check = FullWidthCheckEval(eval, 2, *result->expr, 64);
+    ASSERT_TRUE(result.Succeeded());
+    ASSERT_TRUE(result.DecompositionMetadata().has_value());
+    EXPECT_EQ(
+        result.DecompositionMetadata()->extractor_kind,
+        static_cast< uint8_t >(ExtractorKind::kPolynomial)
+    );
+    EXPECT_FALSE(result.DecompositionMetadata()->has_solver);
+    auto check = FullWidthCheckEval(eval, 2, result.GetExpr(), 64);
     EXPECT_TRUE(check.passed);
 }
 
@@ -272,12 +277,12 @@ TEST(TryDecompositionTest, PolyCore_PlusBitwiseResidual) {
                                                       .route    = Route::kMixedRewrite };
     auto ctx                        = MakeCtx(opts, vars, sig, nullptr, cls);
     auto result                     = TryDecomposition(ctx);
-    ASSERT_TRUE(result.has_value());
-    auto check = FullWidthCheckEval(eval, 2, *result->expr, 64);
+    ASSERT_TRUE(result.Succeeded());
+    auto check = FullWidthCheckEval(eval, 2, result.GetExpr(), 64);
     EXPECT_TRUE(check.passed);
 }
 
-TEST(TryDecompositionTest, NoEvaluator_ReturnsNullopt) {
+TEST(TryDecompositionTest, NoEvaluator_ReturnsInapplicable) {
     Options opts{ .bitwidth = 64 };
     std::vector< std::string > vars = { "x0" };
     std::vector< uint64_t > sig     = { 0, 1 };
@@ -286,7 +291,8 @@ TEST(TryDecompositionTest, NoEvaluator_ReturnsNullopt) {
                                                       .route    = Route::kMixedRewrite };
     auto ctx                        = MakeCtx(opts, vars, sig, nullptr, cls);
     auto result                     = TryDecomposition(ctx);
-    EXPECT_FALSE(result.has_value());
+    EXPECT_FALSE(result.Succeeded());
+    EXPECT_EQ(result.Kind(), OutcomeKind::kInapplicable);
 }
 
 TEST(TryDecompositionTest, GhostResidual_MulSubAnd) {
@@ -308,9 +314,14 @@ TEST(TryDecompositionTest, GhostResidual_MulSubAnd) {
     auto product                    = Expr::Mul(Expr::Variable(0), Expr::Variable(1));
     auto ctx                        = MakeCtx(opts, vars, sig, product.get(), cls);
     auto result                     = TryDecomposition(ctx);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->solver_kind, ResidualSolverKind::kGhostResidual);
-    auto check = FullWidthCheckEval(eval, 2, *result->expr, 64);
+    ASSERT_TRUE(result.Succeeded());
+    ASSERT_TRUE(result.DecompositionMetadata().has_value());
+    EXPECT_TRUE(result.DecompositionMetadata()->has_solver);
+    EXPECT_EQ(
+        result.DecompositionMetadata()->solver_kind,
+        static_cast< uint8_t >(ResidualSolverKind::kGhostResidual)
+    );
+    auto check = FullWidthCheckEval(eval, 2, result.GetExpr(), 64);
     EXPECT_TRUE(check.passed);
 }
 
@@ -331,9 +342,14 @@ TEST(TryDecompositionTest, GhostResidual_Arity3) {
     auto product                    = Expr::Mul(Expr::Variable(0), Expr::Variable(1));
     auto ctx                        = MakeCtx(opts, vars, sig, product.get(), cls);
     auto result                     = TryDecomposition(ctx);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->solver_kind, ResidualSolverKind::kGhostResidual);
-    auto check = FullWidthCheckEval(eval, 3, *result->expr, 64);
+    ASSERT_TRUE(result.Succeeded());
+    ASSERT_TRUE(result.DecompositionMetadata().has_value());
+    EXPECT_TRUE(result.DecompositionMetadata()->has_solver);
+    EXPECT_EQ(
+        result.DecompositionMetadata()->solver_kind,
+        static_cast< uint8_t >(ResidualSolverKind::kGhostResidual)
+    );
+    auto check = FullWidthCheckEval(eval, 3, result.GetExpr(), 64);
     EXPECT_TRUE(check.passed);
 }
 
@@ -354,10 +370,14 @@ TEST(TryDecompositionTest, NonGhostResidual_StillRoutes) {
     auto product                    = Expr::Mul(Expr::Variable(0), Expr::Variable(1));
     auto ctx                        = MakeCtx(opts, vars, sig, product.get(), cls);
     auto result                     = TryDecomposition(ctx);
-    ASSERT_TRUE(result.has_value());
+    ASSERT_TRUE(result.Succeeded());
+    ASSERT_TRUE(result.DecompositionMetadata().has_value());
     // Should NOT use ghost solver — residual is ordinary bitwise
-    EXPECT_NE(result->solver_kind, ResidualSolverKind::kGhostResidual);
-    auto check = FullWidthCheckEval(eval, 2, *result->expr, 64);
+    EXPECT_NE(
+        result.DecompositionMetadata()->solver_kind,
+        static_cast< uint8_t >(ResidualSolverKind::kGhostResidual)
+    );
+    auto check = FullWidthCheckEval(eval, 2, result.GetExpr(), 64);
     EXPECT_TRUE(check.passed);
 }
 
@@ -434,8 +454,8 @@ TEST(TryDecompositionTest, ResidualFalsePositiveRejection) {
     // alternative.
     auto dctx   = MakeCtx(opts, vars, sig, ast.get(), cls);
     auto decomp = TryDecomposition(dctx);
-    if (decomp.has_value()) {
-        auto fwc = FullWidthCheckEval(eval, 2, *decomp->expr, 64);
+    if (decomp.Succeeded()) {
+        auto fwc = FullWidthCheckEval(eval, 2, decomp.GetExpr(), 64);
         EXPECT_TRUE(fwc.passed) << "Any decomposition result must be FW-correct";
     }
 }

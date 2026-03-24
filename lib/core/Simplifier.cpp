@@ -589,12 +589,12 @@ namespace cobra {
                     auto early_decomp = TryDecomposition(early_dctx);
                     COBRA_TRACE(
                         "Simplifier", "MixedRewrite step 1.5: early decomposition found={}",
-                        early_decomp.has_value()
+                        early_decomp.Succeeded()
                     );
-                    if (early_decomp.has_value()) {
+                    if (early_decomp.Succeeded()) {
                         SimplifyOutcome outcome;
                         outcome.kind                = SimplifyOutcome::Kind::kSimplified;
-                        outcome.expr                = std::move(early_decomp->expr);
+                        outcome.expr                = early_decomp.TakeExpr();
                         outcome.sig_vector          = working_sig;
                         outcome.real_vars           = { vars.begin(), vars.end() };
                         outcome.verified            = true;
@@ -692,12 +692,12 @@ namespace cobra {
                     auto decomp = TryDecomposition(dctx);
                     COBRA_TRACE(
                         "Simplifier", "MixedRewrite Phase 2: decomposition found={}",
-                        decomp.has_value()
+                        decomp.Succeeded()
                     );
-                    if (decomp.has_value()) {
+                    if (decomp.Succeeded()) {
                         SimplifyOutcome outcome;
                         outcome.kind                = SimplifyOutcome::Kind::kSimplified;
-                        outcome.expr                = std::move(decomp->expr);
+                        outcome.expr                = decomp.TakeExpr();
                         outcome.sig_vector          = decomp_sig;
                         outcome.real_vars           = { vars.begin(), vars.end() };
                         outcome.verified            = true;
