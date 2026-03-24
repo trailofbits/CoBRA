@@ -418,8 +418,9 @@ namespace cobra {
             std::optional< WorkItem > lowered_item;
 
             if (lr.decision == PassDecision::kAdvance && !lr.next.empty()) {
-                lowered_item    = std::move(lr.next[0]);
-                classify_target = &*lowered_item;
+                lowered_item       = std::move(lr.next[0]);
+                classify_target    = &*lowered_item;
+                ctx.lowering_fired = true;
             } else {
                 classify_target = &seed;
             }
@@ -483,6 +484,7 @@ namespace cobra {
                 opts.evaluator ? std::optional< Evaluator >(opts.evaluator) : std::nullopt,
             .bitwidth     = opts.bitwidth,
             .run_metadata = {},
+            .input_sig    = sig,
         };
 
         Worklist worklist;

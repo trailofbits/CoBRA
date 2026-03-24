@@ -176,6 +176,14 @@ namespace cobra {
         std::optional< Evaluator > evaluator;
         uint32_t bitwidth = 64;
         RunMetadata run_metadata;
+        // Parser-computed signature for the initial expression.
+        // Used by RunBuildSignatureState on the first (non-rewritten)
+        // pass to match legacy signature computation exactly.
+        std::vector< uint64_t > input_sig;
+        // Whether the NOT-over-arith lowering fired on the input.
+        // When true, RunBuildSignatureState must recompute the
+        // signature from the AST because the parser's sig is stale.
+        bool lowering_fired = false;
     };
 
     // ---------------------------------------------------------------

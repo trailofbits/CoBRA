@@ -233,25 +233,34 @@ namespace cobra {
         const auto &ast     = std::get< AstPayload >(item.payload);
         const auto num_vars = static_cast< uint32_t >(ctx.original_vars.size());
 
-        // Step 1: Compute signature
-        auto sig = EvaluateBooleanSignature(*ast.expr, num_vars, ctx.bitwidth);
+        // Step 1: Compute signature.
+        // For the initial (non-rewritten) item, use the parser's
+        // input signature when NOT-over-arith lowering was a no-op.
+        // This matches the legacy's working_sig exactly.  For
+        // lowered or rewritten items, recompute from the AST.
+        bool use_input_sig =
+            !ctx.input_sig.empty() && !ctx.lowering_fired && item.rewrite_gen == 0;
+        auto sig = use_input_sig ? ctx.input_sig
+                                 : EvaluateBooleanSignature(*ast.expr, num_vars, ctx.bitwidth);
 
         // Step 2: Constant match
         {
             auto pm = MatchPattern(sig, num_vars, ctx.bitwidth);
             if (pm && (*pm)->kind == Expr::Kind::kConstant) {
+                bool needs_verify = ctx.evaluator.has_value();
                 WorkItem cand_item;
                 cand_item.payload = CandidatePayload{
                     .expr                              = std::move(*pm),
                     .real_vars                         = {},
                     .cost                              = ExprCost{ .weighted_size = 1 },
                     .producing_pass                    = PassId::kBuildSignatureState,
-                    .needs_original_space_verification = false,
+                    .needs_original_space_verification = needs_verify,
                 };
                 cand_item.features              = item.features;
                 cand_item.metadata              = item.metadata;
                 cand_item.metadata.sig_vector   = sig;
-                cand_item.metadata.verification = VerificationState::kVerified;
+                cand_item.metadata.verification = needs_verify ? VerificationState::kUnverified
+                                                               : VerificationState::kVerified;
                 cand_item.depth                 = item.depth;
                 cand_item.rewrite_gen           = item.rewrite_gen;
                 cand_item.stage_cursor          = item.stage_cursor;
@@ -344,8 +353,19 @@ namespace cobra {
             }
         }
 
+        // For non-MixedRewrite routes, propagate structural_flags
+        // from the classification to match the legacy's
+        //   pipeline_opts.structural_flags = cls.flags
+        // in the kBitwiseOnly/kMultilinear/kPowerRecovery branch.
+        Options solve_opts = ctx.opts;
+        if (item.features.classification
+            && item.features.classification->route != Route::kMixedRewrite)
+        {
+            solve_opts.structural_flags = item.features.classification->flags;
+        }
+
         auto sub =
-            SimplifyFromSignature(sig_payload.elimination.reduced_sig, sig_ctx, ctx.opts, 0);
+            SimplifyFromSignature(sig_payload.elimination.reduced_sig, sig_ctx, solve_opts, 0);
 
         if (sub.Succeeded()) {
             auto payload = sub.TakePayload();
@@ -484,7 +504,13 @@ namespace cobra {
         }
 
         const auto num_vars = static_cast< uint32_t >(ctx.original_vars.size());
-        auto decomp_sig     = EvaluateBooleanSignature(*ast.expr, num_vars, ctx.bitwidth);
+        // Use the parser's input signature for the initial
+        // (non-rewritten) AST to match legacy's working_sig exactly.
+        bool use_input_sig =
+            !ctx.input_sig.empty() && !ctx.lowering_fired && item.rewrite_gen == 0;
+        auto decomp_sig = use_input_sig
+            ? ctx.input_sig
+            : EvaluateBooleanSignature(*ast.expr, num_vars, ctx.bitwidth);
 
         DecompositionContext dctx{
             .opts         = ctx.opts,
@@ -509,6 +535,7 @@ namespace cobra {
             };
             cand_item.features              = item.features;
             cand_item.metadata              = item.metadata;
+            cand_item.metadata.sig_vector   = decomp_sig;
             cand_item.metadata.verification = VerificationState::kVerified;
             if (decomp.DecompositionMetadata()) {
                 cand_item.metadata.decomposition_meta = *decomp.DecompositionMetadata();
