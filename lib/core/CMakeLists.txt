@@ -45,6 +45,7 @@ target_sources(cobra-core PRIVATE
     WeightedPolyFit.cpp
     SemilinearSignature.cpp
     StructureRecovery.cpp
+    PassContract.cpp
 )
 
 target_include_directories(cobra-core PUBLIC
