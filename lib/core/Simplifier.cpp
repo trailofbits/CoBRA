@@ -38,6 +38,16 @@ namespace cobra {
 
     namespace {
 
+        namespace semilinear_pass {
+            enum Subcode : uint16_t {
+                kTooManyVars      = 1,
+                kNormalizeFailed  = 2,
+                kSelfCheckFailed  = 3,
+                kPostRewriteProbe = 4,
+                kFinalVerifyFail  = 5,
+            };
+        } // namespace semilinear_pass
+
         // Verify a reduced-variable result against the original evaluator
         // with random values for ALL original variables (including eliminated).
         // This catches cases where aux var elimination incorrectly dropped a
@@ -192,9 +202,8 @@ namespace cobra {
             return ApplyCoefficient(std::move(new_xor), kNegK, bitwidth);
         }
 
-        std::optional< SimplifyOutcome > TrySemilinearPipeline(
-            const Expr &ast, const std::vector< std::string > &vars, const Options &opts,
-            const Classification &cls
+        PassOutcome TrySemilinearPipeline(
+            const Expr &ast, const std::vector< std::string > &vars, const Options &opts
         ) {
             const auto kNumVars = static_cast< uint32_t >(vars.size());
             COBRA_TRACE(
@@ -202,7 +211,16 @@ namespace cobra {
                 opts.bitwidth
             );
 
-            if (kNumVars > opts.max_vars) { return std::nullopt; }
+            if (kNumVars > opts.max_vars) {
+                return PassOutcome::Inapplicable(
+                    ReasonDetail{
+                        .top = { .code    = { ReasonCategory::kGuardFailed,
+                                              ReasonDomain::kSemilinear,
+                                              semilinear_pass::kTooManyVars },
+                                .message = "too many variables for semilinear pipeline" }
+                }
+                );
+            }
 
             auto ir_result = NormalizeToSemilinear(ast, vars, opts.bitwidth);
             if (!ir_result.has_value()) {
@@ -210,7 +228,15 @@ namespace cobra {
                     "Simplifier", "TrySemilinearPipeline: normalization failed: {}",
                     ir_result.error().message
                 );
-                return std::nullopt;
+                return PassOutcome::Blocked(
+                    ReasonDetail{
+                        .top = { .code    = { ReasonCategory::kRepresentationGap,
+                                              ReasonDomain::kSemilinear,
+                                              semilinear_pass::kNormalizeFailed },
+                                .message = "semilinear normalization failed: "
+                                     + ir_result.error().message }
+                }
+                );
             }
             auto &ir = ir_result.value();
 
@@ -223,7 +249,14 @@ namespace cobra {
                     "Simplifier", "TrySemilinearPipeline: self-check failed: {}",
                     check.mismatch_detail
                 );
-                return std::nullopt;
+                return PassOutcome::Blocked(
+                    ReasonDetail{
+                        .top = { .code    = { ReasonCategory::kInternalInvariant,
+                                              ReasonDomain::kSemilinear,
+                                              semilinear_pass::kSelfCheckFailed },
+                                .message = "semilinear self-check failed" }
+                }
+                );
             }
 
             if (FlattenComplexAtoms(ir)) { CoalesceTerms(ir); }
@@ -240,7 +273,15 @@ namespace cobra {
                     COBRA_TRACE(
                         "Simplifier", "TrySemilinearPipeline: post-rewrite probe failed"
                     );
-                    return std::nullopt;
+                    return PassOutcome::VerifyFailed(
+                        std::move(probe_expr), vars,
+                        ReasonDetail{
+                            .top = { .code    = { ReasonCategory::kVerifyFailed,
+                                                  ReasonDomain::kSemilinear,
+                                                  semilinear_pass::kPostRewriteProbe },
+                                    .message = "post-rewrite probe verification failed" }
+                    }
+                    );
                 }
             }
 
@@ -256,19 +297,22 @@ namespace cobra {
                     COBRA_TRACE(
                         "Simplifier", "TrySemilinearPipeline: final verification failed"
                     );
-                    return std::nullopt;
+                    return PassOutcome::VerifyFailed(
+                        std::move(simplified), vars,
+                        ReasonDetail{
+                            .top = { .code    = { ReasonCategory::kVerifyFailed,
+                                                  ReasonDomain::kSemilinear,
+                                                  semilinear_pass::kFinalVerifyFail },
+                                    .message = "final full-width verification failed" }
+                    }
+                    );
                 }
             }
 
-            SimplifyOutcome outcome;
-            outcome.kind                 = SimplifyOutcome::Kind::kSimplified;
-            outcome.expr                 = std::move(simplified);
-            outcome.real_vars            = vars;
-            outcome.verified             = true;
-            outcome.diag.classification  = cls;
-            outcome.diag.attempted_route = cls.route;
             COBRA_TRACE("Simplifier", "TrySemilinearPipeline: success");
-            return outcome;
+            return PassOutcome::Success(
+                std::move(simplified), vars, VerificationState::kVerified
+            );
         }
 
     } // namespace
@@ -436,8 +480,17 @@ namespace cobra {
                 *working_expr, static_cast< uint32_t >(vars.size()), opts.bitwidth
             ))
         {
-            auto semi = TrySemilinearPipeline(*input_expr, vars, opts, cls);
-            if (semi.has_value()) { return Ok(std::move(*semi)); }
+            auto semi = TrySemilinearPipeline(*input_expr, vars, opts);
+            if (semi.Succeeded()) {
+                SimplifyOutcome outcome;
+                outcome.kind                 = SimplifyOutcome::Kind::kSimplified;
+                outcome.expr                 = semi.TakeExpr();
+                outcome.real_vars            = semi.RealVars();
+                outcome.verified             = true;
+                outcome.diag.classification  = cls;
+                outcome.diag.attempted_route = cls.route;
+                return Ok(std::move(outcome));
+            }
             COBRA_TRACE(
                 "Simplifier", "Semilinear pipeline failed, falling back to supported pipeline"
             );
