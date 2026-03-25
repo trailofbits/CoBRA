@@ -280,9 +280,6 @@ namespace cobra {
     // Scheduler — determines which passes to try for a WorkItem
     // ---------------------------------------------------------------
 
-    std::vector< PassId >
-    SchedulePasses(const WorkItem &item, const PassAttemptCache &attempted);
-
     std::optional< PassId > SelectNextPass(
         const WorkItem &item, const OrchestratorPolicy &policy, uint32_t verifications_used,
         const PassAttemptCache &cache
