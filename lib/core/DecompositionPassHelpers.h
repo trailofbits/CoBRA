@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Orchestrator.h"
+#include "cobra/core/Result.h"
 
 #include <cstdint>
 #include <vector>
@@ -14,5 +15,13 @@ namespace cobra {
     std::vector< uint64_t > ComputeDecompositionSignature(
         const AstPayload &ast, const OrchestratorContext &ctx, uint32_t rewrite_gen
     );
+
+    // Decomposition extractor passes: each extracts an arithmetic core
+    // from an MBA expression using a different strategy.
+    Result< PassResult > RunExtractProductCore(const WorkItem &, OrchestratorContext &);
+    Result< PassResult > RunExtractPolyCoreD2(const WorkItem &, OrchestratorContext &);
+    Result< PassResult > RunExtractTemplateCore(const WorkItem &, OrchestratorContext &);
+    Result< PassResult > RunExtractPolyCoreD3(const WorkItem &, OrchestratorContext &);
+    Result< PassResult > RunExtractPolyCoreD4(const WorkItem &, OrchestratorContext &);
 
 } // namespace cobra

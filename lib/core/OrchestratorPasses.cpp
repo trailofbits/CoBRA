@@ -1,4 +1,5 @@
 #include "OrchestratorPasses.h"
+#include "DecompositionPassHelpers.h"
 #include "SimplifierInternal.h"
 #include "cobra/core/AuxVarEliminator.h"
 #include "cobra/core/Classifier.h"
@@ -661,7 +662,39 @@ namespace cobra {
              .tag        = PassTag::kSolver,
              .applicable = [](const WorkItem &item,       const OrchestratorContext & /*ctx*/)
        -> bool { return IsAstKind(item); },
-             .run = RunDecompose,
+             .run = RunExtractProductCore,
+             },
+            {
+             .id         = PassId::kExtractPolyCoreD2,
+             .consumes   = StateKind::kFoldedAst,
+             .tag        = PassTag::kSolver,
+             .applicable = [](const WorkItem &item,       const OrchestratorContext & /*ctx*/)
+       -> bool { return IsAstKind(item); },
+             .run = RunExtractPolyCoreD2,
+             },
+            {
+             .id         = PassId::kExtractTemplateCore,
+             .consumes   = StateKind::kFoldedAst,
+             .tag        = PassTag::kSolver,
+             .applicable = [](const WorkItem &item,       const OrchestratorContext & /*ctx*/)
+       -> bool { return IsAstKind(item); },
+             .run = RunExtractTemplateCore,
+             },
+            {
+             .id         = PassId::kExtractPolyCoreD3,
+             .consumes   = StateKind::kFoldedAst,
+             .tag        = PassTag::kSolver,
+             .applicable = [](const WorkItem &item,       const OrchestratorContext & /*ctx*/)
+       -> bool { return IsAstKind(item); },
+             .run = RunExtractPolyCoreD3,
+             },
+            {
+             .id         = PassId::kExtractPolyCoreD4,
+             .consumes   = StateKind::kFoldedAst,
+             .tag        = PassTag::kSolver,
+             .applicable = [](const WorkItem &item,       const OrchestratorContext & /*ctx*/)
+       -> bool { return IsAstKind(item); },
+             .run = RunExtractPolyCoreD4,
              },
             {
              .id         = PassId::kOperandSimplify,

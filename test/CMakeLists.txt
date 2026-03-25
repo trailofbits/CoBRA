@@ -64,6 +64,9 @@ target_include_directories(test_decomposition_types PRIVATE ${PROJECT_SOURCE_DIR
 cobra_add_test(test_decomposition_helpers core/test_decomposition_helpers.cpp)
 target_include_directories(test_decomposition_helpers PRIVATE ${PROJECT_SOURCE_DIR}/lib/core)
 
+cobra_add_test(test_extractor_passes core/test_extractor_passes.cpp)
+target_include_directories(test_extractor_passes PRIVATE ${PROJECT_SOURCE_DIR}/lib/core)
+
 cobra_add_test(test_orchestrator_telemetry core/test_orchestrator_telemetry.cpp)
 
 # ProductIdentityRecoverer diagnostic against real datasets.
