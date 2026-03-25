@@ -5,8 +5,12 @@
 #include "cobra/core/ExprCost.h"
 #include "cobra/core/ExprUtils.h"
 #include "cobra/core/GhostResidualSolver.h"
+#include "cobra/core/MultivarPolyRecovery.h"
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/SignatureEval.h"
+#include "cobra/core/SignatureSimplifier.h"
+#include "cobra/core/Simplifier.h"
+#include "cobra/core/TemplateDecomposer.h"
 
 namespace cobra {
 
@@ -14,6 +18,59 @@ namespace cobra {
 
         bool IsAstKind(const WorkItem &item) {
             return std::holds_alternative< AstPayload >(item.payload);
+        }
+
+        bool IsResidualKind(const WorkItem &item) {
+            return std::holds_alternative< ResidualStatePayload >(item.payload);
+        }
+
+        std::optional< PassResult > TryRecombineAndEmit(
+            const ResidualStatePayload &residual, std::unique_ptr< Expr > solved_expr,
+            const std::vector< std::string > &real_vars, const WorkItem &parent,
+            OrchestratorContext &ctx, PassId producing_pass, ResidualSolverKind solver_kind
+        ) {
+            if (real_vars.size() < ctx.original_vars.size()) {
+                RemapVarIndices(*solved_expr, residual.residual_support);
+            }
+
+            auto combined = residual.core_expr
+                ? Expr::Add(CloneExpr(*residual.core_expr), std::move(solved_expr))
+                : std::move(solved_expr);
+
+            const auto num_vars = static_cast< uint32_t >(ctx.original_vars.size());
+            auto check = FullWidthCheckEval(*ctx.evaluator, num_vars, *combined, ctx.bitwidth);
+
+            if (!check.passed) { return std::nullopt; }
+
+            auto cost_info = ComputeCost(*combined);
+            WorkItem cand_item;
+            cand_item.payload = CandidatePayload{
+                .expr                              = std::move(combined),
+                .real_vars                         = ctx.original_vars,
+                .cost                              = cost_info.cost,
+                .producing_pass                    = producing_pass,
+                .needs_original_space_verification = false,
+            };
+            cand_item.features                    = parent.features;
+            cand_item.metadata                    = parent.metadata;
+            cand_item.metadata.verification       = VerificationState::kVerified;
+            cand_item.metadata.sig_vector         = residual.source_sig;
+            cand_item.metadata.decomposition_meta = DecompositionMeta{
+                .extractor_kind = static_cast< uint8_t >(residual.origin),
+                .solver_kind    = static_cast< uint8_t >(solver_kind),
+                .has_solver     = true,
+                .core_degree    = residual.core_degree,
+            };
+            cand_item.depth          = parent.depth;
+            cand_item.rewrite_gen    = parent.rewrite_gen;
+            cand_item.attempted_mask = parent.attempted_mask;
+            cand_item.history        = parent.history;
+
+            PassResult result;
+            result.decision    = PassDecision::kSolvedCandidate;
+            result.disposition = ItemDisposition::kConsumeCurrent;
+            result.next.push_back(std::move(cand_item));
+            return result;
         }
 
         template< typename ExtractorFn >
@@ -328,6 +385,368 @@ namespace cobra {
         result.disposition = ItemDisposition::kConsumeCurrent;
         result.next.push_back(std::move(residual_item));
         return Ok(std::move(result));
+    }
+
+    // ---------------------------------------------------------------
+    // Residual solver passes
+    // ---------------------------------------------------------------
+
+    Result< PassResult > RunResidualGhost(const WorkItem &item, OrchestratorContext &ctx) {
+        if (!IsResidualKind(item)) {
+            return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
+        }
+        const auto &residual = std::get< ResidualStatePayload >(item.payload);
+        if (!residual.is_boolean_null) {
+            return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
+        }
+        const auto res_real_count =
+            static_cast< uint32_t >(residual.residual_elim.real_vars.size());
+        if (res_real_count > 6) {
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kNotApplicable,
+                    .disposition = ItemDisposition::kRetainCurrent,
+                }
+            );
+        }
+
+        const auto num_vars = static_cast< uint32_t >(ctx.original_vars.size());
+        auto ghost          = SolveGhostResidual(
+            residual.residual_eval, residual.residual_support, num_vars, ctx.bitwidth
+        );
+        if (!ghost.Succeeded()) {
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kBlocked,
+                    .disposition = ItemDisposition::kRetainCurrent,
+                    .reason      = ghost.Reason(),
+                }
+            );
+        }
+
+        auto ghost_payload = ghost.TakePayload();
+        auto recombined    = TryRecombineAndEmit(
+            residual, std::move(ghost_payload.expr), ctx.original_vars, item, ctx,
+            PassId::kResidualGhost, ResidualSolverKind::kGhostResidual
+        );
+        if (recombined) { return Ok(std::move(*recombined)); }
+
+        return Ok(
+            PassResult{
+                .decision    = PassDecision::kBlocked,
+                .disposition = ItemDisposition::kRetainCurrent,
+                .reason =
+                    ReasonDetail{
+                                 .top = { .code    = { ReasonCategory::kVerifyFailed,
+                                              ReasonDomain::kGhostResidual },
+                                 .message = "ghost residual recombination failed "
+                                            "full-width verification" },
+                                 },
+        }
+        );
+    }
+
+    Result< PassResult >
+    RunResidualFactoredGhost(const WorkItem &item, OrchestratorContext &ctx) {
+        if (!IsResidualKind(item)) {
+            return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
+        }
+        const auto &residual = std::get< ResidualStatePayload >(item.payload);
+        if (!residual.is_boolean_null) {
+            return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
+        }
+        const auto res_real_count =
+            static_cast< uint32_t >(residual.residual_elim.real_vars.size());
+        if (res_real_count > 6) {
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kNotApplicable,
+                    .disposition = ItemDisposition::kRetainCurrent,
+                }
+            );
+        }
+
+        const auto num_vars = static_cast< uint32_t >(ctx.original_vars.size());
+        auto factored       = SolveFactoredGhostResidual(
+            residual.residual_eval, residual.residual_support, num_vars, ctx.bitwidth
+        );
+        if (!factored.Succeeded()) {
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kBlocked,
+                    .disposition = ItemDisposition::kRetainCurrent,
+                    .reason      = factored.Reason(),
+                }
+            );
+        }
+
+        auto factored_payload = factored.TakePayload();
+        auto recombined       = TryRecombineAndEmit(
+            residual, std::move(factored_payload.expr), ctx.original_vars, item, ctx,
+            PassId::kResidualFactoredGhost, ResidualSolverKind::kGhostResidual
+        );
+        if (recombined) { return Ok(std::move(*recombined)); }
+
+        return Ok(
+            PassResult{
+                .decision    = PassDecision::kBlocked,
+                .disposition = ItemDisposition::kRetainCurrent,
+                .reason =
+                    ReasonDetail{
+                                 .top = { .code    = { ReasonCategory::kVerifyFailed,
+                                              ReasonDomain::kGhostResidual },
+                                 .message = "factored ghost recombination failed "
+                                            "full-width verification" },
+                                 },
+        }
+        );
+    }
+
+    Result< PassResult >
+    RunResidualFactoredGhostEscalated(const WorkItem &item, OrchestratorContext &ctx) {
+        if (!IsResidualKind(item)) {
+            return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
+        }
+        const auto &residual = std::get< ResidualStatePayload >(item.payload);
+        if (!residual.is_boolean_null) {
+            return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
+        }
+        const auto res_real_count =
+            static_cast< uint32_t >(residual.residual_elim.real_vars.size());
+        if (res_real_count > 6) {
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kNotApplicable,
+                    .disposition = ItemDisposition::kRetainCurrent,
+                }
+            );
+        }
+
+        const auto num_vars = static_cast< uint32_t >(ctx.original_vars.size());
+        uint8_t grid        = (res_real_count <= 2) ? 3 : 2;
+        auto factored       = SolveFactoredGhostResidual(
+            residual.residual_eval, residual.residual_support, num_vars, ctx.bitwidth, 2, grid
+        );
+        if (!factored.Succeeded()) {
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kBlocked,
+                    .disposition = ItemDisposition::kRetainCurrent,
+                    .reason      = factored.Reason(),
+                }
+            );
+        }
+
+        auto factored_payload = factored.TakePayload();
+        auto recombined       = TryRecombineAndEmit(
+            residual, std::move(factored_payload.expr), ctx.original_vars, item, ctx,
+            PassId::kResidualFactoredGhostEscalated, ResidualSolverKind::kGhostResidual
+        );
+        if (recombined) { return Ok(std::move(*recombined)); }
+
+        return Ok(
+            PassResult{
+                .decision    = PassDecision::kBlocked,
+                .disposition = ItemDisposition::kRetainCurrent,
+                .reason =
+                    ReasonDetail{
+                                 .top = { .code    = { ReasonCategory::kVerifyFailed,
+                                              ReasonDomain::kGhostResidual },
+                                 .message = "escalated factored ghost recombination "
+                                            "failed full-width verification" },
+                                 },
+        }
+        );
+    }
+
+    Result< PassResult >
+    RunResidualPolyRecovery(const WorkItem &item, OrchestratorContext &ctx) {
+        if (!IsResidualKind(item)) {
+            return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
+        }
+        const auto &residual = std::get< ResidualStatePayload >(item.payload);
+        const auto res_real_count =
+            static_cast< uint32_t >(residual.residual_elim.real_vars.size());
+        if (res_real_count > 6) {
+            return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
+        }
+
+        const auto num_vars = static_cast< uint32_t >(ctx.original_vars.size());
+        auto res_poly       = RecoverAndVerifyPoly(
+            residual.residual_eval, residual.residual_support, num_vars, ctx.bitwidth, 4,
+            residual.degree_floor
+        );
+        if (!res_poly.Succeeded()) {
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kBlocked,
+                    .disposition = ItemDisposition::kRetainCurrent,
+                    .reason      = res_poly.Reason(),
+                }
+            );
+        }
+
+        auto poly_payload = res_poly.TakePayload();
+        auto recombined   = TryRecombineAndEmit(
+            residual, std::move(poly_payload.expr), residual.residual_elim.real_vars, item, ctx,
+            PassId::kResidualPolyRecovery, ResidualSolverKind::kPolynomialRecovery
+        );
+        if (recombined) { return Ok(std::move(*recombined)); }
+
+        return Ok(
+            PassResult{
+                .decision    = PassDecision::kBlocked,
+                .disposition = ItemDisposition::kRetainCurrent,
+                .reason =
+                    ReasonDetail{
+                                 .top = { .code    = { ReasonCategory::kVerifyFailed,
+                                              ReasonDomain::kPolynomialRecovery },
+                                 .message = "polynomial residual recombination "
+                                            "failed full-width verification" },
+                                 },
+        }
+        );
+    }
+
+    Result< PassResult > RunResidualSupported(const WorkItem &item, OrchestratorContext &ctx) {
+        if (!IsResidualKind(item)) {
+            return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
+        }
+        const auto &residual = std::get< ResidualStatePayload >(item.payload);
+
+        Options residual_opts   = ctx.opts;
+        residual_opts.evaluator = residual.residual_eval;
+
+        auto res_pass =
+            RunSupportedPass(residual.residual_sig, ctx.original_vars, residual_opts);
+        if (!res_pass.has_value() || !res_pass.value().Succeeded()) {
+            ReasonDetail reason;
+            if (res_pass.has_value() && !res_pass.value().Succeeded()) {
+                reason = res_pass.value().Reason();
+            } else {
+                reason.top = {
+                    .code    = { ReasonCategory::kNoSolution, ReasonDomain::kDecomposition },
+                    .message = "supported pipeline returned error for residual",
+                };
+            }
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kBlocked,
+                    .disposition = ItemDisposition::kRetainCurrent,
+                    .reason      = std::move(reason),
+                }
+            );
+        }
+
+        auto solved_expr      = res_pass.value().TakeExpr();
+        const auto &real_vars = res_pass.value().RealVars();
+        if (!real_vars.empty() && real_vars.size() < ctx.original_vars.size()) {
+            auto idx_map = BuildVarSupport(ctx.original_vars, real_vars);
+            RemapVarIndices(*solved_expr, idx_map);
+        }
+
+        const auto num_vars = static_cast< uint32_t >(ctx.original_vars.size());
+        auto res_check      = FullWidthCheckEval(
+            residual.residual_eval, num_vars, *solved_expr, ctx.bitwidth, 64
+        );
+        if (!res_check.passed) {
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kBlocked,
+                    .disposition = ItemDisposition::kRetainCurrent,
+                    .reason =
+                        ReasonDetail{
+                                     .top = { .code    = { ReasonCategory::kVerifyFailed,
+                                                  ReasonDomain::kDecomposition },
+                                     .message = "supported residual candidate failed "
+                                                "strengthened verification" },
+                                     },
+            }
+            );
+        }
+
+        auto recombined = TryRecombineAndEmit(
+            residual, std::move(solved_expr), ctx.original_vars, item, ctx,
+            PassId::kResidualSupported, ResidualSolverKind::kSupportedPipeline
+        );
+        if (recombined) { return Ok(std::move(*recombined)); }
+
+        return Ok(
+            PassResult{
+                .decision    = PassDecision::kBlocked,
+                .disposition = ItemDisposition::kRetainCurrent,
+                .reason =
+                    ReasonDetail{
+                                 .top = { .code    = { ReasonCategory::kVerifyFailed,
+                                              ReasonDomain::kDecomposition },
+                                 .message = "supported residual recombination "
+                                            "failed full-width verification" },
+                                 },
+        }
+        );
+    }
+
+    Result< PassResult > RunResidualTemplate(const WorkItem &item, OrchestratorContext &ctx) {
+        if (!IsResidualKind(item)) {
+            return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
+        }
+        const auto &residual = std::get< ResidualStatePayload >(item.payload);
+        const auto res_real_count =
+            static_cast< uint32_t >(residual.residual_elim.real_vars.size());
+
+        SignatureContext res_sig_ctx;
+        res_sig_ctx.vars             = residual.residual_elim.real_vars;
+        res_sig_ctx.original_indices = residual.residual_support;
+
+        if (residual.residual_elim.real_vars.size() == ctx.original_vars.size()) {
+            res_sig_ctx.eval = residual.residual_eval;
+        } else {
+            res_sig_ctx.eval = [residual_eval = residual.residual_eval,
+                                idx           = residual.residual_support,
+                                full = std::vector< uint64_t >(ctx.original_vars.size(), 0)](
+                                   const std::vector< uint64_t > &rv
+                               ) mutable -> uint64_t {
+                for (size_t i = 0; i < idx.size(); ++i) { full[idx[i]] = rv[i]; }
+                uint64_t result = residual_eval(full);
+                for (size_t i = 0; i < idx.size(); ++i) { full[idx[i]] = 0; }
+                return result;
+            };
+        }
+
+        Options residual_opts   = ctx.opts;
+        residual_opts.evaluator = residual.residual_eval;
+
+        auto td = TryTemplateDecomposition(res_sig_ctx, residual_opts, res_real_count, nullptr);
+        if (!td.Succeeded()) {
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kBlocked,
+                    .disposition = ItemDisposition::kRetainCurrent,
+                    .reason      = td.Reason(),
+                }
+            );
+        }
+
+        auto solved_expr = std::move(td.TakePayload().expr);
+        auto recombined  = TryRecombineAndEmit(
+            residual, std::move(solved_expr), residual.residual_elim.real_vars, item, ctx,
+            PassId::kResidualTemplate, ResidualSolverKind::kTemplateDecomposition
+        );
+        if (recombined) { return Ok(std::move(*recombined)); }
+
+        return Ok(
+            PassResult{
+                .decision    = PassDecision::kBlocked,
+                .disposition = ItemDisposition::kRetainCurrent,
+                .reason =
+                    ReasonDetail{
+                                 .top = { .code    = { ReasonCategory::kVerifyFailed,
+                                              ReasonDomain::kTemplateDecomposer },
+                                 .message = "template residual recombination "
+                                            "failed full-width verification" },
+                                 },
+        }
+        );
     }
 
 } // namespace cobra

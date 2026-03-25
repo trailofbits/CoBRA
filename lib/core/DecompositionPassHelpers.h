@@ -29,4 +29,15 @@ namespace cobra {
     Result< PassResult > RunPrepareDirectResidual(const WorkItem &, OrchestratorContext &);
     Result< PassResult > RunPrepareResidualFromCore(const WorkItem &, OrchestratorContext &);
 
+    // Decomposition residual solver passes: each consumes a
+    // ResidualStatePayload, calls a solver, recombines with the core,
+    // and emits a CandidatePayload on success.
+    Result< PassResult > RunResidualSupported(const WorkItem &, OrchestratorContext &);
+    Result< PassResult > RunResidualPolyRecovery(const WorkItem &, OrchestratorContext &);
+    Result< PassResult > RunResidualGhost(const WorkItem &, OrchestratorContext &);
+    Result< PassResult > RunResidualFactoredGhost(const WorkItem &, OrchestratorContext &);
+    Result< PassResult >
+    RunResidualFactoredGhostEscalated(const WorkItem &, OrchestratorContext &);
+    Result< PassResult > RunResidualTemplate(const WorkItem &, OrchestratorContext &);
+
 } // namespace cobra
