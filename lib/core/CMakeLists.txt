@@ -50,6 +50,7 @@ target_sources(cobra-core PRIVATE
     OrchestratorPasses.cpp
     DecompositionPassHelpers.cpp
     DecompositionPasses.cpp
+    SemilinearPasses.cpp
     VerifyCandidate.cpp
 )
 
