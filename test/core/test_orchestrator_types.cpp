@@ -1,9 +1,24 @@
 #include "Orchestrator.h"
 #include "OrchestratorPasses.h"
+#include "cobra/core/Classification.h"
 #include "cobra/core/Expr.h"
 #include <gtest/gtest.h>
 
 using namespace cobra;
+
+namespace {
+
+    Classification MakeClassification(
+        StructuralFlag flags, SemanticClass semantic = SemanticClass::kNonPolynomial
+    ) {
+        return Classification{
+            .semantic = semantic,
+            .flags    = flags,
+            .route    = DeriveRoute(flags),
+        };
+    }
+
+} // namespace
 
 // --- StateKind dispatch tests ---
 
@@ -581,4 +596,227 @@ TEST(Scheduler, RewrittenResumeBeyondMaxGetsNothing) {
     PassAttemptCache cache;
     auto passes = SchedulePasses(item, cache);
     EXPECT_TRUE(passes.empty());
+}
+
+// --- SelectNextPass tests ---
+
+TEST(SelectNextPass, FreshFoldedAstGetsBuildSigFirst) {
+    WorkItem item;
+    auto cls     = MakeClassification(kSfHasMixedProduct);
+    item.payload = AstPayload{
+        .expr           = Expr::Constant(0),
+        .classification = cls,
+        .provenance     = Provenance::kLowered,
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kLowered;
+    item.attempted_mask          = 0;
+
+    OrchestratorPolicy policy;
+    PassAttemptCache cache;
+    auto pass = SelectNextPass(item, policy, 0, cache);
+    ASSERT_TRUE(pass.has_value());
+    EXPECT_EQ(*pass, PassId::kBuildSignatureState);
+}
+
+TEST(SelectNextPass, AfterBuildSigGetsDecompose) {
+    WorkItem item;
+    auto cls     = MakeClassification(kSfHasMixedProduct);
+    item.payload = AstPayload{
+        .expr           = Expr::Constant(0),
+        .classification = cls,
+        .provenance     = Provenance::kLowered,
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kLowered;
+    item.attempted_mask          = (1 << static_cast< uint8_t >(PassId::kBuildSignatureState));
+
+    OrchestratorPolicy policy;
+    PassAttemptCache cache;
+    auto pass = SelectNextPass(item, policy, 0, cache);
+    ASSERT_TRUE(pass.has_value());
+    EXPECT_EQ(*pass, PassId::kDecompose);
+}
+
+TEST(SelectNextPass, PrereqBlocksOperandSimplifyBeforeDecompose) {
+    WorkItem item;
+    auto cls     = MakeClassification(kSfHasMixedProduct);
+    item.payload = AstPayload{
+        .expr           = Expr::Constant(0),
+        .classification = cls,
+        .provenance     = Provenance::kLowered,
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kLowered;
+    item.attempted_mask          = (1 << static_cast< uint8_t >(PassId::kBuildSignatureState));
+
+    OrchestratorPolicy policy;
+    PassAttemptCache cache;
+    auto pass = SelectNextPass(item, policy, 0, cache);
+    ASSERT_TRUE(pass.has_value());
+    EXPECT_EQ(*pass, PassId::kDecompose);
+}
+
+TEST(SelectNextPass, AllAttemptedReturnsNullopt) {
+    WorkItem item;
+    auto cls     = MakeClassification(kSfHasMixedProduct);
+    item.payload = AstPayload{
+        .expr           = Expr::Constant(0),
+        .classification = cls,
+        .provenance     = Provenance::kLowered,
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kLowered;
+    item.attempted_mask          = (1 << static_cast< uint8_t >(PassId::kBuildSignatureState))
+        | (1 << static_cast< uint8_t >(PassId::kDecompose))
+        | (1 << static_cast< uint8_t >(PassId::kOperandSimplify))
+        | (1 << static_cast< uint8_t >(PassId::kProductIdentityCollapse))
+        | (1 << static_cast< uint8_t >(PassId::kXorLowering));
+
+    OrchestratorPolicy policy;
+    PassAttemptCache cache;
+    auto pass = SelectNextPass(item, policy, 0, cache);
+    EXPECT_FALSE(pass.has_value());
+}
+
+TEST(SelectNextPass, RewriteBudgetBlocksTransforms) {
+    WorkItem item;
+    auto cls     = MakeClassification(kSfHasMixedProduct);
+    item.payload = AstPayload{
+        .expr           = Expr::Constant(0),
+        .classification = cls,
+        .provenance     = Provenance::kLowered,
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kLowered;
+    item.attempted_mask          = (1 << static_cast< uint8_t >(PassId::kBuildSignatureState))
+        | (1 << static_cast< uint8_t >(PassId::kDecompose));
+    item.rewrite_gen = 3;
+
+    OrchestratorPolicy policy;
+    policy.max_rewrite_gen = 3;
+    PassAttemptCache cache;
+    auto pass = SelectNextPass(item, policy, 0, cache);
+    EXPECT_FALSE(pass.has_value());
+}
+
+TEST(SelectNextPass, CandidateBudgetBlocksVerify) {
+    WorkItem item;
+    item.payload = CandidatePayload{
+        .expr                              = Expr::Constant(1),
+        .needs_original_space_verification = true,
+    };
+    item.features.provenance = Provenance::kRewritten;
+
+    OrchestratorPolicy policy;
+    policy.max_candidates = 4;
+    PassAttemptCache cache;
+    auto pass = SelectNextPass(item, policy, 4, cache);
+    EXPECT_FALSE(pass.has_value());
+}
+
+TEST(SelectNextPass, CacheBlocksSameState) {
+    WorkItem item;
+    auto cls     = MakeClassification(kSfHasMixedProduct);
+    item.payload = AstPayload{
+        .expr           = Expr::Constant(0),
+        .classification = cls,
+        .provenance     = Provenance::kLowered,
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kLowered;
+    item.attempted_mask          = 0;
+
+    OrchestratorPolicy policy;
+    PassAttemptCache cache;
+    auto fp = ComputeFingerprint(item, 64);
+    cache.Record(fp, PassId::kBuildSignatureState);
+
+    auto pass = SelectNextPass(item, policy, 0, cache);
+    ASSERT_TRUE(pass.has_value());
+    EXPECT_EQ(*pass, PassId::kDecompose);
+}
+
+TEST(SelectNextPass, SignatureStateGetsSupported) {
+    WorkItem item;
+    item.payload             = SignatureStatePayload{};
+    item.features.provenance = Provenance::kOriginal;
+
+    OrchestratorPolicy policy;
+    PassAttemptCache cache;
+    auto pass = SelectNextPass(item, policy, 0, cache);
+    ASSERT_TRUE(pass.has_value());
+    EXPECT_EQ(*pass, PassId::kSupportedSolve);
+}
+
+TEST(SelectNextPass, CandidateGetsVerify) {
+    WorkItem item;
+    item.payload = CandidatePayload{
+        .expr                              = Expr::Constant(1),
+        .needs_original_space_verification = true,
+    };
+    item.features.provenance = Provenance::kRewritten;
+
+    OrchestratorPolicy policy;
+    PassAttemptCache cache;
+    auto pass = SelectNextPass(item, policy, 0, cache);
+    ASSERT_TRUE(pass.has_value());
+    EXPECT_EQ(*pass, PassId::kVerifyCandidate);
+}
+
+TEST(SelectNextPass, UnknownShapeReturnsNullopt) {
+    WorkItem item;
+    auto cls     = MakeClassification(kSfHasUnknownShape);
+    item.payload = AstPayload{
+        .expr           = Expr::Constant(0),
+        .classification = cls,
+        .provenance     = Provenance::kLowered,
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kLowered;
+
+    OrchestratorPolicy policy;
+    PassAttemptCache cache;
+    auto pass = SelectNextPass(item, policy, 0, cache);
+    EXPECT_FALSE(pass.has_value());
+}
+
+TEST(SelectNextPass, NonExplorationLoweredGetsOnlyBuildSig) {
+    WorkItem item;
+    auto cls     = MakeClassification(kSfNone, SemanticClass::kLinear);
+    item.payload = AstPayload{
+        .expr           = Expr::Constant(0),
+        .classification = cls,
+        .provenance     = Provenance::kLowered,
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kLowered;
+
+    OrchestratorPolicy policy;
+    PassAttemptCache cache;
+    auto pass = SelectNextPass(item, policy, 0, cache);
+    ASSERT_TRUE(pass.has_value());
+    EXPECT_EQ(*pass, PassId::kBuildSignatureState);
+
+    item.attempted_mask = (1 << static_cast< uint8_t >(PassId::kBuildSignatureState));
+    pass                = SelectNextPass(item, policy, 0, cache);
+    EXPECT_FALSE(pass.has_value());
+}
+
+TEST(SelectNextPass, OriginalSemilinearGetsSemilinear) {
+    WorkItem item;
+    auto cls     = MakeClassification(kSfNone, SemanticClass::kSemilinear);
+    item.payload = AstPayload{
+        .expr           = Expr::Constant(0),
+        .classification = cls,
+        .provenance     = Provenance::kOriginal,
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kOriginal;
+
+    OrchestratorPolicy policy;
+    PassAttemptCache cache;
+    auto pass = SelectNextPass(item, policy, 0, cache);
+    ASSERT_TRUE(pass.has_value());
+    EXPECT_EQ(*pass, PassId::kTrySemilinearPass);
 }

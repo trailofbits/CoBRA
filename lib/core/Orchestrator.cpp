@@ -295,6 +295,105 @@ namespace cobra {
         return passes;
     }
 
+    // ---------------------------------------------------------------
+    // SelectNextPass — DAG-aware priority scheduler
+    // ---------------------------------------------------------------
+
+    namespace {
+
+        bool IsFoldedAstExplorationCandidate(const Classification &cls) {
+            if (HasFlag(cls.flags, kSfHasUnknownShape)) { return false; }
+            return HasFlag(cls.flags, kSfHasMixedProduct)
+                || HasFlag(cls.flags, kSfHasBitwiseOverArith);
+        }
+
+        struct FoldedAstPassEntry
+        {
+            PassId id;
+            uint16_t prereq_mask;
+            uint8_t priority;
+            bool is_structural_transform;
+        };
+
+        constexpr uint16_t Bit(PassId p) {
+            return static_cast< uint16_t >(1 << static_cast< uint8_t >(p));
+        }
+
+        constexpr FoldedAstPassEntry kFoldedAstPasses[] = {
+            {     PassId::kBuildSignatureState,                       0, 0, false },
+            {               PassId::kDecompose,                       0, 1, false },
+            {         PassId::kOperandSimplify, Bit(PassId::kDecompose), 2,  true },
+            { PassId::kProductIdentityCollapse, Bit(PassId::kDecompose), 3,  true },
+            {             PassId::kXorLowering,                       0, 4,  true },
+        };
+
+    } // namespace
+
+    std::optional< PassId > SelectNextPass(
+        const WorkItem &item, const OrchestratorPolicy &policy, uint32_t verifications_used,
+        const PassAttemptCache &cache
+    ) {
+        auto kind = GetStateKind(item.payload);
+        auto fp   = ComputeFingerprint(item, 64);
+
+        // 1. Candidate → kVerifyCandidate
+        if (kind == StateKind::kCandidateExpr) {
+            auto pass = PassId::kVerifyCandidate;
+            if (verifications_used >= policy.max_candidates) { return std::nullopt; }
+            if ((item.attempted_mask & Bit(pass)) != 0) { return std::nullopt; }
+            if (cache.HasAttempted(fp, pass)) { return std::nullopt; }
+            return pass;
+        }
+
+        // 2. SignatureState → kSupportedSolve
+        if (kind == StateKind::kSignatureState) {
+            auto pass = PassId::kSupportedSolve;
+            if ((item.attempted_mask & Bit(pass)) != 0) { return std::nullopt; }
+            if (cache.HasAttempted(fp, pass)) { return std::nullopt; }
+            return pass;
+        }
+
+        // 3. Original provenance + semilinear → kTrySemilinearPass
+        if (item.features.provenance == Provenance::kOriginal) {
+            if (item.features.classification
+                && item.features.classification->semantic == SemanticClass::kSemilinear)
+            {
+                auto pass = PassId::kTrySemilinearPass;
+                if ((item.attempted_mask & Bit(pass)) != 0) { return std::nullopt; }
+                if (cache.HasAttempted(fp, pass)) { return std::nullopt; }
+                return pass;
+            }
+            return std::nullopt;
+        }
+
+        // 4. Non-original: must have classification and no unknown shape
+        if (!item.features.classification) { return std::nullopt; }
+        const auto &cls = *item.features.classification;
+        if (HasFlag(cls.flags, kSfHasUnknownShape)) { return std::nullopt; }
+
+        // 5. Non-exploration candidates → only kBuildSignatureState
+        if (!IsFoldedAstExplorationCandidate(cls)) {
+            auto pass = PassId::kBuildSignatureState;
+            if ((item.attempted_mask & Bit(pass)) != 0) { return std::nullopt; }
+            if (cache.HasAttempted(fp, pass)) { return std::nullopt; }
+            return pass;
+        }
+
+        // 6. Exploration candidates → iterate the pass table
+        for (const auto &entry : kFoldedAstPasses) {
+            if ((item.attempted_mask & Bit(entry.id)) != 0) { continue; }
+            if ((item.attempted_mask & entry.prereq_mask) != entry.prereq_mask) { continue; }
+            if (entry.is_structural_transform && item.rewrite_gen >= policy.max_rewrite_gen) {
+                continue;
+            }
+            if (cache.HasAttempted(fp, entry.id)) { continue; }
+            return entry.id;
+        }
+
+        // 7. No eligible pass
+        return std::nullopt;
+    }
+
     bool UnsupportedRankBetter(const UnsupportedCandidate &a, const UnsupportedCandidate &b) {
         // 1. Candidates (verification-failed) rank highest
         if (a.is_candidate_state != b.is_candidate_state) { return a.is_candidate_state; }
