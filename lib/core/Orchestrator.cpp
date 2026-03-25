@@ -405,6 +405,20 @@ namespace cobra {
         if (a.history_size != b.history_size) { return a.history_size > b.history_size; }
         // 5. Last PassId enum order
         if (a.last_pass != b.last_pass) { return a.last_pass > b.last_pass; }
+        // 6. Prefer items with structural transform terminal evidence
+        bool a_has_terminal = a.metadata.structural_transform_terminal.has_value();
+        bool b_has_terminal = b.metadata.structural_transform_terminal.has_value();
+        if (a_has_terminal != b_has_terminal) { return a_has_terminal; }
+        if (a_has_terminal && b_has_terminal) {
+            auto rank = [](ReasonCategory c) -> int {
+                if (c == ReasonCategory::kVerifyFailed) { return 2; }
+                if (c == ReasonCategory::kRepresentationGap) { return 1; }
+                return 0;
+            };
+            int ra = rank(a.metadata.structural_transform_terminal->category);
+            int rb = rank(b.metadata.structural_transform_terminal->category);
+            if (ra != rb) { return ra > rb; }
+        }
         return false;
     }
 
@@ -566,9 +580,10 @@ namespace cobra {
 
             outcome.diag.classification  = result.run_metadata.input_classification;
             outcome.diag.attempted_route = result.metadata.attempted_route;
-            outcome.diag.rewrite_rounds  = result.metadata.rewrite_rounds;
-            outcome.diag.rewrite_produced_candidate =
-                result.metadata.rewrite_produced_candidate;
+            outcome.diag.structural_transform_rounds =
+                result.metadata.structural_transform_rounds;
+            outcome.diag.transform_produced_candidate =
+                result.metadata.transform_produced_candidate;
             outcome.diag.candidate_failed_verification =
                 result.metadata.candidate_failed_verification;
             outcome.diag.reason_code = result.metadata.reason_code;
@@ -663,14 +678,14 @@ namespace cobra {
             // Candidate acceptance: verified candidates are immediately returned
             if (auto *cand = std::get_if< CandidatePayload >(&item.payload)) {
                 if (!cand->needs_original_space_verification) {
-                    // Stamp rewrite_produced_candidate if any rewrite
+                    // Stamp transform_produced_candidate if any rewrite
                     // pass is in this candidate's lineage.
                     for (auto h : item.history) {
                         if (h == PassId::kOperandSimplify
                             || h == PassId::kProductIdentityCollapse
                             || h == PassId::kXorLowering)
                         {
-                            item.metadata.rewrite_produced_candidate = true;
+                            item.metadata.transform_produced_candidate = true;
                             break;
                         }
                     }
@@ -792,12 +807,12 @@ namespace cobra {
                         auto cat              = pr.reason.top.code.category;
                         xor_lowering_terminal = cat;
                         if (cat == ReasonCategory::kRepresentationGap) {
-                            item.metadata.rewrite_produced_candidate              = true;
-                            best_unsupported->metadata.rewrite_produced_candidate = true;
+                            item.metadata.transform_produced_candidate              = true;
+                            best_unsupported->metadata.transform_produced_candidate = true;
                         } else if (cat == ReasonCategory::kVerifyFailed) {
-                            item.metadata.rewrite_produced_candidate                 = true;
+                            item.metadata.transform_produced_candidate               = true;
                             item.metadata.candidate_failed_verification              = true;
-                            best_unsupported->metadata.rewrite_produced_candidate    = true;
+                            best_unsupported->metadata.transform_produced_candidate  = true;
                             best_unsupported->metadata.candidate_failed_verification = true;
                         }
                     }
@@ -816,9 +831,9 @@ namespace cobra {
                         }
                         if (xor_in_lineage) {
                             xor_lowering_terminal = ReasonCategory::kVerifyFailed;
-                            item.metadata.rewrite_produced_candidate                 = true;
+                            item.metadata.transform_produced_candidate               = true;
                             item.metadata.candidate_failed_verification              = true;
-                            best_unsupported->metadata.rewrite_produced_candidate    = true;
+                            best_unsupported->metadata.transform_produced_candidate  = true;
                             best_unsupported->metadata.candidate_failed_verification = true;
                         }
                     }
@@ -869,10 +884,10 @@ namespace cobra {
                 }
                 if (xor_in_lineage) {
                     xor_lowering_terminal                       = ReasonCategory::kVerifyFailed;
-                    item.metadata.rewrite_produced_candidate    = true;
+                    item.metadata.transform_produced_candidate  = true;
                     item.metadata.candidate_failed_verification = true;
                     if (best_unsupported) {
-                        best_unsupported->metadata.rewrite_produced_candidate    = true;
+                        best_unsupported->metadata.transform_produced_candidate  = true;
                         best_unsupported->metadata.candidate_failed_verification = true;
                     }
                 }
@@ -906,11 +921,11 @@ namespace cobra {
                 final_meta.reason_code =
                     ReasonCode{ ReasonCategory::kVerifyFailed, ReasonDomain::kMixedRewrite, 0 };
                 final_meta.candidate_failed_verification = true;
-                final_meta.rewrite_produced_candidate    = true;
+                final_meta.transform_produced_candidate  = true;
             } else if (xor_lowering_terminal == ReasonCategory::kRepresentationGap) {
                 final_meta.reason_code = ReasonCode{ ReasonCategory::kRepresentationGap,
                                                      ReasonDomain::kMixedRewrite, 0 };
-                final_meta.rewrite_produced_candidate = true;
+                final_meta.transform_produced_candidate = true;
             } else if (xor_lowering_terminal == ReasonCategory::kSearchExhausted) {
                 final_meta.reason_code = ReasonCode{ ReasonCategory::kSearchExhausted,
                                                      ReasonDomain::kMixedRewrite, 0 };

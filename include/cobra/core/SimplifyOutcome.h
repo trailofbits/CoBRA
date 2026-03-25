@@ -13,13 +13,13 @@ namespace cobra {
 
     struct Diagnostic
     {
-        Classification classification      = { .semantic = SemanticClass::kLinear,
-                                               .flags    = kSfNone,
-                                               .route    = Route::kBitwiseOnly };
-        Route attempted_route              = Route::kBitwiseOnly;
-        uint32_t rewrite_rounds            = 0;
-        bool rewrite_produced_candidate    = false;
-        bool candidate_failed_verification = false;
+        Classification classification        = { .semantic = SemanticClass::kLinear,
+                                                 .flags    = kSfNone,
+                                                 .route    = Route::kBitwiseOnly };
+        Route attempted_route                = Route::kBitwiseOnly;
+        uint32_t structural_transform_rounds = 0;
+        bool transform_produced_candidate    = false;
+        bool candidate_failed_verification   = false;
         std::string reason;
 
         std::optional< ReasonCode > reason_code;

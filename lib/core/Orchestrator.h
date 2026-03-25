@@ -92,18 +92,25 @@ namespace cobra {
         bool needs_full_width_verification = true;
     };
 
+    struct TransformTerminalSignal
+    {
+        PassId source_pass;
+        ReasonCategory category;
+    };
+
     struct ItemMetadata
     {
         std::vector< uint64_t > sig_vector;
-        VerificationState verification     = VerificationState::kUnverified;
-        Route attempted_route              = Route::kBitwiseOnly;
-        uint32_t rewrite_rounds            = 0;
-        bool rewrite_produced_candidate    = false;
-        bool candidate_failed_verification = false;
+        VerificationState verification       = VerificationState::kUnverified;
+        Route attempted_route                = Route::kBitwiseOnly;
+        uint32_t structural_transform_rounds = 0;
+        bool transform_produced_candidate    = false;
+        bool candidate_failed_verification   = false;
         std::optional< ReasonCode > reason_code;
         std::vector< ReasonFrame > cause_chain;
         std::optional< DecompositionMeta > decomposition_meta;
         ReasonDetail last_failure;
+        std::optional< TransformTerminalSignal > structural_transform_terminal;
     };
 
     // ---------------------------------------------------------------

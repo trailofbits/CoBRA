@@ -172,7 +172,8 @@ namespace {
             std::cerr << "Unsupported: " << result.value().diag.reason << "\n";
             if (verbose) {
                 std::cerr << "  Route: " << RouteName(result.value().diag.classification.route)
-                          << ", rewrite rounds: " << result.value().diag.rewrite_rounds << "\n";
+                          << ", rewrite rounds: "
+                          << result.value().diag.structural_transform_rounds << "\n";
             }
             auto text = cobra::Render(*result.value().expr, vars, bitwidth);
             std::cout << text << "\n";

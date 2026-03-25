@@ -596,17 +596,17 @@ namespace cobra {
             .classification = new_cls,
             .provenance     = Provenance::kRewritten,
         };
-        rewritten.features                = item.features;
-        rewritten.features.classification = new_cls;
-        rewritten.features.provenance     = Provenance::kRewritten;
-        rewritten.metadata                = item.metadata;
-        rewritten.metadata.rewrite_rounds = rw.rounds_applied;
-        rewritten.depth                   = item.depth;
-        rewritten.rewrite_gen             = item.rewrite_gen + 1;
-        rewritten.stage_cursor            = item.stage_cursor;
-        rewritten.reentry_pending         = true;
-        rewritten.resume_stage            = 6;
-        rewritten.history                 = item.history;
+        rewritten.features                             = item.features;
+        rewritten.features.classification              = new_cls;
+        rewritten.features.provenance                  = Provenance::kRewritten;
+        rewritten.metadata                             = item.metadata;
+        rewritten.metadata.structural_transform_rounds = rw.rounds_applied;
+        rewritten.depth                                = item.depth;
+        rewritten.rewrite_gen                          = item.rewrite_gen + 1;
+        rewritten.stage_cursor                         = item.stage_cursor;
+        rewritten.reentry_pending                      = true;
+        rewritten.resume_stage                         = 6;
+        rewritten.history                              = item.history;
 
         PassResult result;
         result.decision    = PassDecision::kAdvance;

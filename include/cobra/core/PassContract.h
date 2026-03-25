@@ -39,6 +39,7 @@ namespace cobra {
         kSemilinear,
         kSignature,
         kMixedRewrite,
+        kStructuralTransform,
         kDecomposition,
         kTemplateDecomposer,
         kWeightedPolyFit,

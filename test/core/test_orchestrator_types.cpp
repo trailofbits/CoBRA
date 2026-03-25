@@ -69,9 +69,15 @@ TEST(ItemMetadata, DefaultState) {
     ItemMetadata meta;
     EXPECT_EQ(meta.verification, VerificationState::kUnverified);
     EXPECT_EQ(meta.attempted_route, Route::kBitwiseOnly);
-    EXPECT_EQ(meta.rewrite_rounds, 0);
-    EXPECT_FALSE(meta.rewrite_produced_candidate);
+    EXPECT_EQ(meta.structural_transform_rounds, 0);
+    EXPECT_FALSE(meta.transform_produced_candidate);
     EXPECT_FALSE(meta.candidate_failed_verification);
+}
+
+TEST(ItemMetadata, TransformTerminalSignalDefaultEmpty) {
+    ItemMetadata meta;
+    EXPECT_FALSE(meta.structural_transform_terminal.has_value());
+    EXPECT_FALSE(meta.transform_produced_candidate);
 }
 
 // --- OrchestratorPolicy defaults ---

@@ -395,7 +395,7 @@ TEST(ProductIdentityDiag, MultilinearAfterCollapse) {
             }
             std::cout << "  Route: "
                       << static_cast< int >(result.value().diag.classification.route)
-                      << "  Rewrite: " << result.value().diag.rewrite_produced_candidate
+                      << "  Rewrite: " << result.value().diag.transform_produced_candidate
                       << "\n";
         }
         std::cout << "\n";
