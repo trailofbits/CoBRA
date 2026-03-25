@@ -186,11 +186,13 @@ namespace cobra {
         // Step 7: Emit SignatureStatePayload
         WorkItem sig_item;
         sig_item.payload = SignatureStatePayload{
-            .sig                               = std::move(sig),
-            .real_vars                         = elim.real_vars,
-            .elimination                       = std::move(elim),
-            .original_indices                  = std::move(original_indices),
-            .needs_original_space_verification = needs_verification,
+            .ctx = {
+                .sig                               = std::move(sig),
+                .real_vars                         = elim.real_vars,
+                .elimination                       = std::move(elim),
+                .original_indices                  = std::move(original_indices),
+                .needs_original_space_verification = needs_verification,
+            },
         };
         sig_item.features       = item.features;
         sig_item.metadata       = item.metadata;
@@ -219,18 +221,18 @@ namespace cobra {
 
         // Build SignatureContext with mapped evaluator
         SignatureContext sig_ctx;
-        sig_ctx.vars             = sig_payload.real_vars;
-        sig_ctx.original_indices = sig_payload.original_indices;
+        sig_ctx.vars             = sig_payload.ctx.real_vars;
+        sig_ctx.original_indices = sig_payload.ctx.original_indices;
 
         if (ctx.evaluator) {
-            if (sig_payload.real_vars.size() == ctx.original_vars.size()) {
+            if (sig_payload.ctx.real_vars.size() == ctx.original_vars.size()) {
                 sig_ctx.eval = *ctx.evaluator;
             } else {
-                sig_ctx.eval = [eval = *ctx.evaluator, idx_map = sig_payload.original_indices,
-                                original_vals =
-                                    std::vector< uint64_t >(ctx.original_vars.size(), 0)](
-                                   const std::vector< uint64_t > &reduced_vals
-                               ) mutable -> uint64_t {
+                sig_ctx.eval =
+                    [eval = *ctx.evaluator, idx_map = sig_payload.ctx.original_indices,
+                     original_vals = std::vector< uint64_t >(ctx.original_vars.size(), 0)](
+                        const std::vector< uint64_t > &reduced_vals
+                    ) mutable -> uint64_t {
                     for (size_t i = 0; i < idx_map.size(); ++i) {
                         original_vals[idx_map[i]] = reduced_vals[i];
                     }
@@ -254,8 +256,9 @@ namespace cobra {
             solve_opts.structural_flags = item.features.classification->flags;
         }
 
-        auto sub =
-            SimplifyFromSignature(sig_payload.elimination.reduced_sig, sig_ctx, solve_opts, 0);
+        auto sub = SimplifyFromSignature(
+            sig_payload.ctx.elimination.reduced_sig, sig_ctx, solve_opts, 0
+        );
 
         if (sub.Succeeded()) {
             auto payload = sub.TakePayload();
@@ -263,15 +266,15 @@ namespace cobra {
             WorkItem cand_item;
             cand_item.payload = CandidatePayload{
                 .expr           = std::move(payload.expr),
-                .real_vars      = sig_payload.real_vars,
+                .real_vars      = sig_payload.ctx.real_vars,
                 .cost           = payload.cost,
                 .producing_pass = PassId::kSupportedSolve,
                 .needs_original_space_verification =
-                    sig_payload.needs_original_space_verification,
+                    sig_payload.ctx.needs_original_space_verification,
             };
             cand_item.features              = item.features;
             cand_item.metadata              = item.metadata;
-            cand_item.metadata.sig_vector   = sig_payload.elimination.reduced_sig;
+            cand_item.metadata.sig_vector   = sig_payload.ctx.elimination.reduced_sig;
             cand_item.metadata.verification = payload.verification;
             cand_item.depth                 = item.depth;
             cand_item.rewrite_gen           = item.rewrite_gen;

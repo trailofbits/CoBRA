@@ -20,6 +20,8 @@ namespace cobra {
                     return StateKind::kFoldedAst;
                 } else if constexpr (std::is_same_v< T, SignatureStatePayload >) {
                     return StateKind::kSignatureState;
+                } else if constexpr (std::is_same_v< T, SignatureCoeffStatePayload >) {
+                    return StateKind::kSignatureCoeffState;
                 } else if constexpr (std::is_same_v< T, CoreCandidatePayload >) {
                     return StateKind::kCoreCandidate;
                 } else if constexpr (std::is_same_v< T, ResidualStatePayload >) {
@@ -54,12 +56,22 @@ namespace cobra {
                     fp.payload_hash = std::hash< Expr >{}(*payload.expr);
                     fp.vars         = {};
                 } else if constexpr (std::is_same_v< T, SignatureStatePayload >) {
-                    size_t h = std::hash< size_t >{}(payload.sig.size());
-                    for (uint64_t v : payload.sig) {
+                    size_t h = std::hash< size_t >{}(payload.ctx.sig.size());
+                    for (uint64_t v : payload.ctx.sig) {
                         h = detail::hash_combine(h, std::hash< uint64_t >{}(v));
                     }
                     fp.payload_hash = h;
-                    fp.vars         = payload.real_vars;
+                    fp.vars         = payload.ctx.real_vars;
+                } else if constexpr (std::is_same_v< T, SignatureCoeffStatePayload >) {
+                    size_t h = std::hash< size_t >{}(payload.ctx.sig.size());
+                    for (uint64_t v : payload.ctx.sig) {
+                        h = detail::hash_combine(h, std::hash< uint64_t >{}(v));
+                    }
+                    for (uint64_t c : payload.coeffs) {
+                        h = detail::hash_combine(h, std::hash< uint64_t >{}(c));
+                    }
+                    fp.payload_hash = h;
+                    fp.vars         = payload.ctx.real_vars;
                 } else if constexpr (std::is_same_v< T, CoreCandidatePayload >) {
                     size_t h = std::hash< Expr >{}(*payload.core_expr);
                     h        = detail::hash_combine(
@@ -149,6 +161,7 @@ namespace cobra {
             if (kind == StateKind::kCandidateExpr || kind == StateKind::kCompetitionResolved) {
                 return 0;
             }
+            // kSignatureCoeffState is non-candidate work
             return 1;
         }
 
@@ -340,6 +353,9 @@ namespace cobra {
             return pass;
         }
 
+        // 2b. SignatureCoeffState — stub (filled in Task 4)
+        if (kind == StateKind::kSignatureCoeffState) { return std::nullopt; }
+
         // 3. CoreCandidate → kPrepareResidualFromCore
         if (kind == StateKind::kCoreCandidate) {
             auto pass = PassId::kPrepareResidualFromCore;
@@ -530,11 +546,13 @@ namespace cobra {
 
             WorkItem sig_item;
             sig_item.payload = SignatureStatePayload{
-                .sig                               = sig,
-                .real_vars                         = elim.real_vars,
-                .elimination                       = std::move(elim),
-                .original_indices                  = std::move(original_indices),
-                .needs_original_space_verification = false,
+                .ctx = {
+                    .sig                               = sig,
+                    .real_vars                         = elim.real_vars,
+                    .elimination                       = std::move(elim),
+                    .original_indices                  = std::move(original_indices),
+                    .needs_original_space_verification = false,
+                },
             };
             sig_item.features.provenance = Provenance::kOriginal;
             worklist.Push(std::move(sig_item));
@@ -786,7 +804,13 @@ namespace cobra {
 
             // Select one pass
             auto pass_id = SelectNextPass(item, policy, verifications, cache);
-            if (!pass_id) { continue; }
+            if (!pass_id) {
+                if (item.group_id.has_value()) {
+                    auto resolved = ReleaseHandle(context.competition_groups, *item.group_id);
+                    if (resolved.has_value()) { worklist.Push(std::move(*resolved)); }
+                }
+                continue;
+            }
 
             // Compute pre-attempt fingerprint, record attempt
             auto fp              = ComputeFingerprint(item, context.bitwidth);

@@ -27,6 +27,7 @@ namespace cobra {
     enum class StateKind {
         kFoldedAst,
         kSignatureState,
+        kSignatureCoeffState,
         kCoreCandidate,
         kResidualState,
         kSemilinearNormalizedIr,
@@ -70,13 +71,24 @@ namespace cobra {
         Provenance provenance = Provenance::kOriginal;
     };
 
-    struct SignatureStatePayload
+    struct SignatureSubproblemContext
     {
         std::vector< uint64_t > sig;
         std::vector< std::string > real_vars;
         EliminationResult elimination;
         std::vector< uint32_t > original_indices;
         bool needs_original_space_verification = true;
+    };
+
+    struct SignatureStatePayload
+    {
+        SignatureSubproblemContext ctx;
+    };
+
+    struct SignatureCoeffStatePayload
+    {
+        SignatureSubproblemContext ctx;
+        std::vector< uint64_t > coeffs;
     };
 
     struct CandidatePayload
@@ -143,9 +155,9 @@ namespace cobra {
     };
 
     using StateData = std::variant<
-        AstPayload, SignatureStatePayload, CoreCandidatePayload, ResidualStatePayload,
-        NormalizedSemilinearPayload, CheckedSemilinearPayload, RewrittenSemilinearPayload,
-        CandidatePayload, CompetitionResolvedPayload >;
+        AstPayload, SignatureStatePayload, SignatureCoeffStatePayload, CoreCandidatePayload,
+        ResidualStatePayload, NormalizedSemilinearPayload, CheckedSemilinearPayload,
+        RewrittenSemilinearPayload, CandidatePayload, CompetitionResolvedPayload >;
 
     // ---------------------------------------------------------------
     // State features and item metadata
@@ -189,9 +201,11 @@ namespace cobra {
         StateData payload;
         StateFeatures features;
         ItemMetadata metadata;
-        uint32_t depth          = 0;
-        uint32_t rewrite_gen    = 0;
-        uint64_t attempted_mask = 0;
+        uint32_t depth                    = 0;
+        uint32_t rewrite_gen              = 0;
+        uint64_t attempted_mask           = 0;
+        uint8_t signature_recursion_depth = 0;
+        std::optional< GroupId > group_id;
         std::vector< PassId > history;
     };
 

@@ -572,3 +572,94 @@ TEST(SelectNextPass, RewrittenSemilinearGetsReconstruct) {
     ASSERT_TRUE(pass.has_value());
     EXPECT_EQ(*pass, PassId::kSemilinearReconstruct);
 }
+
+// --- SignatureSubproblemContext round-trip through SignatureStatePayload ---
+
+TEST(SignatureSubproblemContext, RoundTripThroughSignatureStatePayload) {
+    SignatureSubproblemContext ctx;
+    ctx.sig                               = { 1, 2, 3 };
+    ctx.real_vars                         = { "x0", "x1" };
+    ctx.original_indices                  = { 0, 1 };
+    ctx.needs_original_space_verification = true;
+
+    SignatureStatePayload payload{ .ctx = std::move(ctx) };
+    EXPECT_EQ(payload.ctx.sig.size(), 3);
+    EXPECT_EQ(payload.ctx.sig[0], 1);
+    EXPECT_EQ(payload.ctx.sig[2], 3);
+    EXPECT_EQ(payload.ctx.real_vars.size(), 2);
+    EXPECT_EQ(payload.ctx.real_vars[0], "x0");
+    EXPECT_EQ(payload.ctx.original_indices.size(), 2);
+    EXPECT_TRUE(payload.ctx.needs_original_space_verification);
+}
+
+// --- SignatureCoeffStatePayload fingerprint differs from SignatureStatePayload ---
+
+TEST(Fingerprint, SignatureCoeffDiffersFromSignatureState) {
+    std::vector< uint64_t > sig     = { 10, 20, 30 };
+    std::vector< std::string > vars = { "x0" };
+
+    WorkItem sig_item;
+    sig_item.payload = SignatureStatePayload{
+        .ctx = { .sig = sig, .real_vars = vars },
+    };
+
+    WorkItem coeff_item;
+    coeff_item.payload = SignatureCoeffStatePayload{
+        .ctx    = { .sig = sig, .real_vars = vars },
+        .coeffs = { 5 },
+    };
+
+    auto fp_sig   = ComputeFingerprint(sig_item, 64);
+    auto fp_coeff = ComputeFingerprint(coeff_item, 64);
+    // Different StateKind guarantees different fingerprints
+    EXPECT_NE(fp_sig, fp_coeff);
+    // Also verify the payload hashes differ (coeffs included)
+    EXPECT_NE(fp_sig.payload_hash, fp_coeff.payload_hash);
+}
+
+// --- kSignatureCoeffState routes to band 1 ---
+
+TEST(StateKind, SignatureCoeffStateKind) {
+    StateData data = SignatureCoeffStatePayload{
+        .ctx    = { .sig = { 1 } },
+        .coeffs = { 42 },
+    };
+    EXPECT_EQ(GetStateKind(data), StateKind::kSignatureCoeffState);
+}
+
+TEST(SelectNextPass, SignatureCoeffStateReturnsNullopt) {
+    WorkItem item;
+    item.payload = SignatureCoeffStatePayload{
+        .ctx    = { .sig = { 1, 2 } },
+        .coeffs = { 10 },
+    };
+    OrchestratorPolicy policy;
+    PassAttemptCache cache;
+    auto pass = SelectNextPass(item, policy, 0, cache);
+    EXPECT_FALSE(pass.has_value());
+}
+
+TEST(Worklist, SignatureCoeffStatePopsAfterCandidate) {
+    Worklist wl;
+    WorkItem coeff_item;
+    coeff_item.payload = SignatureCoeffStatePayload{
+        .ctx    = { .sig = { 1 } },
+        .coeffs = { 7 },
+    };
+    WorkItem cand_item;
+    cand_item.payload = CandidatePayload{ .expr = Expr::Constant(1) };
+
+    wl.Push(std::move(coeff_item));
+    wl.Push(std::move(cand_item));
+    auto first = wl.Pop();
+    EXPECT_EQ(GetStateKind(first.payload), StateKind::kCandidateExpr);
+}
+
+// --- WorkItem default fields for competition ---
+
+TEST(WorkItem, DefaultCompetitionFields) {
+    WorkItem item;
+    item.payload = AstPayload{ .expr = Expr::Constant(0) };
+    EXPECT_EQ(item.signature_recursion_depth, 0);
+    EXPECT_FALSE(item.group_id.has_value());
+}

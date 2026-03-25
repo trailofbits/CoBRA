@@ -69,8 +69,13 @@ namespace cobra {
 
     // Projects a parent's baseline cost for a child work item
     // given the continuation that will recombine the child's result.
-    std::optional< ExprCost > ProjectBaselineForChild(
-        const std::optional< ExprCost > &parent_baseline, const ContinuationData &continuation
-    );
+    // Conservative initial implementation: returns nullopt for all
+    // continuation types (no baseline inheritance).
+    inline std::optional< ExprCost > ProjectBaselineForChild(
+        const std::optional< ExprCost > & /*parent_baseline*/,
+        const ContinuationData & /*continuation*/
+    ) {
+        return std::nullopt;
+    }
 
 } // namespace cobra
