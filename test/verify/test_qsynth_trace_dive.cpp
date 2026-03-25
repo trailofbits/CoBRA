@@ -141,7 +141,7 @@ namespace {
         return ctx;
     }
 
-    // Replicate RunSupportedPipeline using public APIs
+    // Replicate RunSupportedPass using public APIs
     std::optional< SimplifyOutcome > try_supported_pipeline(
         const std::vector< uint64_t > &sig, const std::vector< std::string > &vars,
         const Options &opts, const char *label

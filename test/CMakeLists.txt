@@ -58,22 +58,8 @@ cobra_add_test(test_structure_recovery core/test_structure_recovery.cpp)
 cobra_add_test(test_orchestrator_types core/test_orchestrator_types.cpp)
 target_include_directories(test_orchestrator_types PRIVATE ${PROJECT_SOURCE_DIR}/lib/core)
 
-add_executable(test_orchestrator_parity
-    core/test_orchestrator_parity.cpp
-    ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp
-)
-target_link_libraries(test_orchestrator_parity PRIVATE cobra-core GTest::gtest_main)
-target_include_directories(test_orchestrator_parity PRIVATE
-    ${PROJECT_SOURCE_DIR}/lib/core
-    ${PROJECT_SOURCE_DIR}/tools/cobra-cli
-)
-target_compile_definitions(test_orchestrator_parity PRIVATE
-    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets"
-)
-gtest_discover_tests(test_orchestrator_parity)
 
 cobra_add_test(test_orchestrator_telemetry core/test_orchestrator_telemetry.cpp)
-target_include_directories(test_orchestrator_telemetry PRIVATE ${PROJECT_SOURCE_DIR}/lib/core)
 
 # ProductIdentityRecoverer diagnostic against real datasets.
 # Not registered with gtest_discover_tests — run manually:

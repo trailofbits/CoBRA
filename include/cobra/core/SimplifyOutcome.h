@@ -26,6 +26,14 @@ namespace cobra {
         std::vector< ReasonFrame > cause_chain;
     };
 
+    struct SimplifyTelemetry
+    {
+        uint32_t total_expansions    = 0;
+        uint32_t max_depth_reached   = 0;
+        uint32_t candidates_verified = 0;
+        uint32_t queue_high_water    = 0;
+    };
+
     struct SimplifyOutcome
     {
         enum class Kind { kSimplified, kUnchangedUnsupported, kError };
@@ -36,6 +44,7 @@ namespace cobra {
         std::vector< std::string > real_vars;
         bool verified = false;
         Diagnostic diag;
+        SimplifyTelemetry telemetry;
     };
 
 } // namespace cobra

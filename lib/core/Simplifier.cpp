@@ -1,5 +1,4 @@
 #include "cobra/core/Simplifier.h"
-#include "Orchestrator.h"
 #include "SimplifierInternal.h"
 #include "cobra/core/AtomSimplifier.h"
 #include "cobra/core/AuxVarEliminator.h"
@@ -14,9 +13,7 @@
 #include "cobra/core/SemilinearIR.h"
 #include "cobra/core/SemilinearNormalizer.h"
 #include "cobra/core/SignatureChecker.h"
-#include "cobra/core/SignatureEval.h"
 #include "cobra/core/SignatureSimplifier.h"
-#include "cobra/core/SimplifyOutcome.h"
 #include "cobra/core/StructureRecovery.h"
 #include "cobra/core/TermRefiner.h"
 #include "cobra/core/Trace.h"
@@ -386,51 +383,6 @@ namespace cobra {
             );
         }
         return Ok(PassOutcome::Blocked(std::move(reason)));
-    }
-
-    Result< SimplifyOutcome > RunSupportedPipeline(
-        const std::vector< uint64_t > &sig, const std::vector< std::string > &vars,
-        const Options &opts
-    ) {
-        auto pass = RunSupportedPass(sig, vars, opts);
-        if (!pass.has_value()) { return std::unexpected(pass.error()); }
-
-        auto &outcome = pass.value();
-        if (outcome.Succeeded()) {
-            SimplifyOutcome legacy;
-            legacy.kind       = SimplifyOutcome::Kind::kSimplified;
-            legacy.expr       = outcome.TakeExpr();
-            legacy.sig_vector = outcome.SigVector();
-            legacy.real_vars  = outcome.RealVars();
-            legacy.verified   = outcome.Verification() == VerificationState::kVerified;
-            return Ok(std::move(legacy));
-        }
-
-        if (outcome.Kind() == OutcomeKind::kVerifyFailed) {
-            return Err< SimplifyOutcome >(
-                CobraError::kVerificationFailed, outcome.Reason().top.message
-            );
-        }
-        return Err< SimplifyOutcome >(
-            CobraError::kVerificationFailed, "SignatureSimplifier produced no result"
-        );
-    }
-
-    Result< SimplifyOutcome > Simplify(
-        const std::vector< uint64_t > &sig, const std::vector< std::string > &vars,
-        const Expr *input_expr, const Options &opts
-    ) {
-        COBRA_TRACE(
-            "Simplifier", "Simplify: vars={} has_ast={}", vars.size(), input_expr != nullptr
-        );
-
-        OrchestratorPolicy policy{
-            .allow_reroute         = false,
-            .strict_route_faithful = true,
-        };
-        auto result = OrchestrateSimplify(input_expr, sig, vars, opts, policy);
-        if (!result.has_value()) { return std::unexpected(result.error()); }
-        return Ok(AdaptToLegacy(std::move(result.value()), input_expr));
     }
 
 } // namespace cobra

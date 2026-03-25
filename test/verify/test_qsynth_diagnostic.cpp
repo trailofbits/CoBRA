@@ -385,16 +385,16 @@ TEST(QSynthDiagnostic, DecompEngineTelemetry) {
             bool sup_solved    = false;
             bool sup_recombine = false;
             bool sup_verified  = false;
-            auto sup           = RunSupportedPipeline(residual_sig, vars, res_opts);
-            if (sup.has_value() && sup.value().kind == SimplifyOutcome::Kind::kSimplified) {
+            auto sup           = RunSupportedPass(residual_sig, vars, res_opts);
+            if (sup.has_value() && sup.value().Succeeded()) {
                 sup_solved       = true;
-                sup_verified     = sup.value().verified;
-                auto solved_expr = CloneExpr(*sup.value().expr);
-                if (!sup.value().real_vars.empty()
-                    && sup.value().real_vars.size() < vars.size())
+                sup_verified     = sup.value().Verification() == VerificationState::kVerified;
+                auto solved_expr = CloneExpr(sup.value().GetExpr());
+                if (!sup.value().RealVars().empty()
+                    && sup.value().RealVars().size() < vars.size())
                 {
                     std::vector< uint32_t > idx_map;
-                    for (const auto &rv : sup.value().real_vars) {
+                    for (const auto &rv : sup.value().RealVars()) {
                         for (uint32_t j = 0; j < kNv; ++j) {
                             if (vars[j] == rv) {
                                 idx_map.push_back(j);
@@ -420,9 +420,9 @@ TEST(QSynthDiagnostic, DecompEngineTelemetry) {
                     std::cerr << "    DEBUG " << name << ": nv=" << kNv
                               << " core_kind=" << static_cast< int >(core.expr->kind)
                               << " sup_real_vars=[";
-                    for (size_t ri = 0; ri < sup.value().real_vars.size(); ++ri) {
+                    for (size_t ri = 0; ri < sup.value().RealVars().size(); ++ri) {
                         if (ri > 0) { std::cerr << ","; }
-                        std::cerr << sup.value().real_vars[ri];
+                        std::cerr << sup.value().RealVars()[ri];
                     }
                     std::cerr << "] vars=[";
                     for (size_t ri = 0; ri < vars.size(); ++ri) {
@@ -1903,7 +1903,7 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
     int core_bn      = 0;
 
     // Sub-counters for routing_miss
-    int rm_orig_direct = 0; // RunSupportedPipeline succeeds on original AST
+    int rm_orig_direct = 0; // RunSupportedPass succeeds on original AST
     int rm_post_direct = 0; // succeeds after preconditioning
     int rm_orig_decomp = 0; // TryDecomposition succeeds on original AST
     int rm_post_decomp = 0; // TryDecomposition succeeds after preconditioning
@@ -1982,7 +1982,7 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
         total++;
 
         // --- Probe 1: routing/orchestration miss ---
-        // Can RunSupportedPipeline or TryDecomposition succeed on original AST?
+        // Can RunSupportedPass or TryDecomposition succeed on original AST?
         auto orig_cls = ClassifyStructural(**folded_ptr);
         DecompositionContext orig_dctx{ .opts         = opts,
                                         .vars         = vars,
@@ -1990,9 +1990,8 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
                                         .current_expr = folded_ptr->get(),
                                         .cls          = orig_cls };
 
-        auto orig_sup = RunSupportedPipeline(sig, vars, opts);
-        bool orig_sup_ok =
-            orig_sup.has_value() && orig_sup->kind == SimplifyOutcome::Kind::kSimplified;
+        auto orig_sup    = RunSupportedPass(sig, vars, opts);
+        bool orig_sup_ok = orig_sup.has_value() && orig_sup->Succeeded();
         auto orig_decomp = TryDecomposition(orig_dctx);
 
         // Post-preconditioning (Step 2 + 2.5)
@@ -2162,25 +2161,25 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
         bool sup_solved    = false;
         bool sup_verified  = false;
         bool sup_recombine = false;
-        auto sup           = RunSupportedPipeline(residual_sig, vars, res_opts);
-        if (sup.has_value() && sup->kind == SimplifyOutcome::Kind::kSimplified) {
+        auto sup           = RunSupportedPass(residual_sig, vars, res_opts);
+        if (sup.has_value() && sup->Succeeded()) {
             sup_solved   = true;
-            sup_verified = sup->verified;
+            sup_verified = sup->Verification() == VerificationState::kVerified;
 
             // Capture real_vars
-            for (size_t ri = 0; ri < sup->real_vars.size(); ++ri) {
+            for (size_t ri = 0; ri < sup->RealVars().size(); ++ri) {
                 if (ri > 0) { sup_real_vars_str += ","; }
-                sup_real_vars_str += sup->real_vars[ri];
+                sup_real_vars_str += sup->RealVars()[ri];
             }
 
-            auto solved_expr = CloneExpr(*sup->expr);
+            auto solved_expr = CloneExpr(sup->GetExpr());
 
             // Render in reduced-var space before remap
-            sup_rendered = Render(*solved_expr, sup->real_vars, 64);
+            sup_rendered = Render(*solved_expr, sup->RealVars(), 64);
 
-            if (!sup->real_vars.empty() && sup->real_vars.size() < vars.size()) {
+            if (!sup->RealVars().empty() && sup->RealVars().size() < vars.size()) {
                 std::vector< uint32_t > idx_map;
-                for (const auto &rv : sup->real_vars) {
+                for (const auto &rv : sup->RealVars()) {
                     for (uint32_t j = 0; j < kNv; ++j) {
                         if (vars[j] == rv) {
                             idx_map.push_back(j);
@@ -2206,10 +2205,10 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
             // Also clone solved_expr before it's moved, for eval
             if (!sup_recombine) {
                 // Re-clone to get a fresh solved_expr for probing
-                auto probe_solved = CloneExpr(*sup->expr);
-                if (!sup->real_vars.empty() && sup->real_vars.size() < vars.size()) {
+                auto probe_solved = CloneExpr(sup->GetExpr());
+                if (!sup->RealVars().empty() && sup->RealVars().size() < vars.size()) {
                     std::vector< uint32_t > idx_map2;
-                    for (const auto &rv : sup->real_vars) {
+                    for (const auto &rv : sup->RealVars()) {
                         for (uint32_t j = 0; j < kNv; ++j) {
                             if (vars[j] == rv) {
                                 idx_map2.push_back(j);
@@ -2229,8 +2228,8 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
                 }
 
                 // Also check in reduced-var space (pre-remap)
-                auto reduced_solved = CloneExpr(*sup->expr);
-                auto reduced_vars   = sup->real_vars;
+                auto reduced_solved = CloneExpr(sup->GetExpr());
+                auto reduced_vars   = sup->RealVars();
                 auto reduced_nv     = static_cast< uint32_t >(reduced_vars.size());
 
                 // Build reduced-space residual evaluator
@@ -2740,7 +2739,7 @@ TEST(QSynthDiagnostic, NonBnResidualCharacterization) {
 
 // Deep characterization of the 44 no_core cases.
 // For each: boolean signature, route classification, polynomial
-// recovery, and whether RunSupportedPipeline succeeds on
+// recovery, and whether RunSupportedPass succeeds on
 // preconditioned AST.
 TEST(QSynthDiagnostic, NoCoreCharacterization) {
     std::ifstream file(DATASET_DIR "/gamba/qsynth_ea.txt");
@@ -2860,16 +2859,15 @@ TEST(QSynthDiagnostic, NoCoreCharacterization) {
         };
         bool hm = has_mul_fn(*precond_expr);
 
-        // 5. RunSupportedPipeline on preconditioned AST sig
+        // 5. RunSupportedPass on preconditioned AST sig
         auto post_sig   = (op_result.changed || pi_result.changed)
             ? EvaluateBooleanSignature(*precond_expr, kNv, 64)
             : sig;
-        auto sup_result = RunSupportedPipeline(post_sig, vars, opts);
-        bool sp =
-            sup_result.has_value() && sup_result->kind == SimplifyOutcome::Kind::kSimplified;
+        auto sup_result = RunSupportedPass(post_sig, vars, opts);
+        bool sp         = sup_result.has_value() && sup_result->Succeeded();
         if (sp) {
             // Verify the result
-            auto check = FullWidthCheckEval(opts.evaluator, kNv, *sup_result->expr, 64, 64);
+            auto check = FullWidthCheckEval(opts.evaluator, kNv, sup_result->GetExpr(), 64, 64);
             sp         = check.passed;
         }
 
@@ -3470,15 +3468,13 @@ TEST(QSynthDiagnostic, AtomLiftingTelemetry) {
         // No evaluator — we'll do FW check manually after substitution
         // against the original evaluator.
 
-        auto sup_result = RunSupportedPipeline(lifted_sig, ext_vars, lift_opts);
-        if (sup_result.has_value()
-            && sup_result.value().kind == SimplifyOutcome::Kind::kSimplified)
-        {
+        auto sup_result = RunSupportedPass(lifted_sig, ext_vars, lift_opts);
+        if (sup_result.has_value() && sup_result.value().Succeeded()) {
             detail.skeleton_ok = true;
             skeleton_solved++;
 
             // Step 4: Substitute atoms back
-            auto reconstructed = SubstituteBack(*sup_result.value().expr, idx_to_atom, kNv);
+            auto reconstructed = SubstituteBack(sup_result.value().GetExpr(), idx_to_atom, kNv);
 
             // Step 5: Full-width verify against original evaluator
             auto check = FullWidthCheckEval(orig_eval, kNv, *reconstructed, kBw, 64);

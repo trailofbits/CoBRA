@@ -141,6 +141,16 @@ namespace cobra {
         bool operator==(const StateFingerprint &) const = default;
     };
 
+} // namespace cobra
+
+template<>
+struct std::hash< cobra::StateFingerprint >
+{
+    size_t operator()(const cobra::StateFingerprint &fp) const;
+};
+
+namespace cobra {
+
     // ---------------------------------------------------------------
     // PassResult — what a pass returns to the orchestrator
     // ---------------------------------------------------------------
@@ -159,11 +169,9 @@ namespace cobra {
 
     struct OrchestratorPolicy
     {
-        bool allow_reroute         = true;
-        uint32_t max_expansions    = 64;
-        uint32_t max_rewrite_gen   = 3;
-        uint32_t max_candidates    = 8;
-        bool strict_route_faithful = false;
+        uint32_t max_expansions  = 64;
+        uint32_t max_rewrite_gen = 3;
+        uint32_t max_candidates  = 8;
     };
 
     struct OrchestratorTelemetry
@@ -213,14 +221,6 @@ namespace cobra {
         bool is_candidate_state = false;
     };
 
-    struct OrchestratorResult
-    {
-        PassOutcome outcome;
-        ItemMetadata metadata;
-        RunMetadata run_metadata;
-        OrchestratorTelemetry telemetry;
-    };
-
     // ---------------------------------------------------------------
     // Helper declarations
     // ---------------------------------------------------------------
@@ -229,22 +229,11 @@ namespace cobra {
     StateKind GetStateKind(const StateData &data);
 
     // Computes a deduplication fingerprint for a WorkItem.
-    // When normalize_stage_cursor is true, the cursor is zeroed in the key.
-    StateFingerprint
-    ComputeFingerprint(const WorkItem &item, uint32_t bitwidth, bool normalize_stage_cursor);
+    StateFingerprint ComputeFingerprint(const WorkItem &item, uint32_t bitwidth);
 
     // Deterministic ordering for selecting the best unsupported candidate
     // to surface in the final result.
     bool UnsupportedRankBetter(const UnsupportedCandidate &a, const UnsupportedCandidate &b);
-
-    // ---------------------------------------------------------------
-    // StateFingerprintHash — std::unordered_map key support
-    // ---------------------------------------------------------------
-
-    struct StateFingerprintHash
-    {
-        size_t operator()(const StateFingerprint &fp) const;
-    };
 
     // ---------------------------------------------------------------
     // PassAttemptCache — deduplication of pass attempts per fingerprint
@@ -257,8 +246,7 @@ namespace cobra {
         bool HasAttempted(const StateFingerprint &fp, PassId pass) const;
 
       private:
-        std::unordered_map< StateFingerprint, std::vector< PassId >, StateFingerprintHash >
-            cache_;
+        std::unordered_map< StateFingerprint, std::vector< PassId > > cache_;
     };
 
     // ---------------------------------------------------------------
@@ -283,33 +271,7 @@ namespace cobra {
     // Scheduler — determines which passes to try for a WorkItem
     // ---------------------------------------------------------------
 
-    std::vector< PassId > SchedulePasses(
-        const WorkItem &item, const OrchestratorPolicy &policy,
-        const PassAttemptCache &attempted
-    );
-
-    // ---------------------------------------------------------------
-    // Orchestrator entry points
-    // ---------------------------------------------------------------
-
-    /// Main orchestrator function: seeds the worklist, runs the
-    /// pass loop, and returns an OrchestratorResult.
-    Result< OrchestratorResult > OrchestrateSimplify(
-        const Expr *input_expr, const std::vector< uint64_t > &sig,
-        const std::vector< std::string > &vars, const Options &opts,
-        const OrchestratorPolicy &policy
-    );
-
-    /// Convert an OrchestratorResult to the legacy SimplifyOutcome
-    /// format used by the existing test harnesses and CLI.
-    SimplifyOutcome AdaptToLegacy(OrchestratorResult result, const Expr *original_expr);
-
-    /// Test-only convenience: runs OrchestrateSimplify then
-    /// AdaptToLegacy, returning Result< SimplifyOutcome >.
-    Result< SimplifyOutcome > OrchestrateSimplifyForTest(
-        const Expr *input_expr, const std::vector< uint64_t > &sig,
-        const std::vector< std::string > &vars, const Options &opts,
-        const OrchestratorPolicy &policy
-    );
+    std::vector< PassId >
+    SchedulePasses(const WorkItem &item, const PassAttemptCache &attempted);
 
 } // namespace cobra

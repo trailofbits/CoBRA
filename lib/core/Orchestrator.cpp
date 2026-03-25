@@ -5,6 +5,7 @@
 #include "cobra/core/ExprUtils.h"
 #include "cobra/core/PatternMatcher.h"
 #include "cobra/core/SignatureEval.h"
+#include "cobra/core/Simplifier.h"
 #include "cobra/core/SimplifyOutcome.h"
 
 #include <algorithm>
@@ -28,19 +29,6 @@ namespace cobra {
     }
 
     namespace {
-        uint64_t HashExpr(const Expr &e) {
-            uint64_t h = 14695981039346656037ULL;
-            auto mix   = [&h](uint64_t val) {
-                h ^= val;
-                h *= 1099511628211ULL;
-            };
-            mix(static_cast< uint64_t >(e.kind));
-            mix(e.constant_val);
-            mix(e.var_index);
-            for (const auto &child : e.children) { mix(HashExpr(*child)); }
-            return h;
-        }
-
         WorkItem CloneWorkItem(const WorkItem &item) {
             WorkItem clone;
             std::visit(
@@ -89,13 +77,12 @@ namespace cobra {
         }
     } // namespace
 
-    StateFingerprint
-    ComputeFingerprint(const WorkItem &item, uint32_t bitwidth, bool normalize_stage_cursor) {
+    StateFingerprint ComputeFingerprint(const WorkItem &item, uint32_t bitwidth) {
         StateFingerprint fp;
         fp.kind            = GetStateKind(item.payload);
         fp.bitwidth        = bitwidth;
         fp.provenance      = item.features.provenance;
-        fp.stage_cursor    = normalize_stage_cursor ? 0 : item.stage_cursor;
+        fp.stage_cursor    = item.stage_cursor;
         fp.reentry_pending = item.reentry_pending;
         fp.resume_stage    = item.resume_stage;
 
@@ -103,7 +90,7 @@ namespace cobra {
             [&fp](const auto &payload) {
                 using T = std::decay_t< decltype(payload) >;
                 if constexpr (std::is_same_v< T, AstPayload >) {
-                    fp.payload_hash = HashExpr(*payload.expr);
+                    fp.payload_hash = std::hash< Expr >{}(*payload.expr);
                     fp.vars         = {};
                 } else if constexpr (std::is_same_v< T, SignatureStatePayload >) {
                     uint64_t h = 14695981039346656037ULL;
@@ -115,7 +102,7 @@ namespace cobra {
                     fp.vars         = payload.real_vars;
                 } else {
                     // CandidatePayload
-                    uint64_t h  = HashExpr(*payload.expr);
+                    uint64_t h  = std::hash< Expr >{}(*payload.expr);
                     h          ^= payload.needs_original_space_verification ? 0x1ULL : 0x0ULL;
                     fp.payload_hash = h;
                     fp.vars         = payload.real_vars;
@@ -147,20 +134,25 @@ namespace cobra {
         }
     } // namespace
 
-    size_t StateFingerprintHash::operator()(const StateFingerprint &fp) const {
-        size_t h = std::hash< uint64_t >{}(fp.payload_hash);
-        h ^= std::hash< int >{}(static_cast< int >(fp.kind)) + 0x9e3779b9 + (h << 6) + (h >> 2);
-        h ^= std::hash< uint32_t >{}(fp.bitwidth) + 0x9e3779b9 + (h << 6) + (h >> 2);
-        h ^= std::hash< int >{}(static_cast< int >(fp.provenance)) + 0x9e3779b9 + (h << 6)
-            + (h >> 2);
-        h ^= std::hash< uint32_t >{}(fp.stage_cursor) + 0x9e3779b9 + (h << 6) + (h >> 2);
-        h ^= std::hash< bool >{}(fp.reentry_pending) + 0x9e3779b9 + (h << 6) + (h >> 2);
-        h ^= std::hash< uint32_t >{}(fp.resume_stage) + 0x9e3779b9 + (h << 6) + (h >> 2);
-        for (const auto &v : fp.vars) {
-            h ^= std::hash< std::string >{}(v) + 0x9e3779b9 + (h << 6) + (h >> 2);
-        }
-        return h;
+} // namespace cobra
+
+size_t
+std::hash< cobra::StateFingerprint >::operator()(const cobra::StateFingerprint &fp) const {
+    size_t h = std::hash< uint64_t >{}(fp.payload_hash);
+    h ^= std::hash< int >{}(static_cast< int >(fp.kind)) + 0x9e3779b9 + (h << 6) + (h >> 2);
+    h ^= std::hash< uint32_t >{}(fp.bitwidth) + 0x9e3779b9 + (h << 6) + (h >> 2);
+    h ^= std::hash< int >{}(static_cast< int >(fp.provenance)) + 0x9e3779b9 + (h << 6)
+        + (h >> 2);
+    h ^= std::hash< uint32_t >{}(fp.stage_cursor) + 0x9e3779b9 + (h << 6) + (h >> 2);
+    h ^= std::hash< bool >{}(fp.reentry_pending) + 0x9e3779b9 + (h << 6) + (h >> 2);
+    h ^= std::hash< uint32_t >{}(fp.resume_stage) + 0x9e3779b9 + (h << 6) + (h >> 2);
+    for (const auto &v : fp.vars) {
+        h ^= std::hash< std::string >{}(v) + 0x9e3779b9 + (h << 6) + (h >> 2);
     }
+    return h;
+}
+
+namespace cobra {
 
     void PassAttemptCache::Record(const StateFingerprint &fp, PassId pass) {
         cache_[fp].push_back(pass);
@@ -222,10 +214,7 @@ namespace cobra {
             }
         }
 
-        void ScheduleFoldedAst(
-            const WorkItem &item, const OrchestratorPolicy &policy,
-            std::vector< PassId > &passes
-        ) {
+        void ScheduleFoldedAst(const WorkItem &item, std::vector< PassId > &passes) {
             auto prov  = item.features.provenance;
             auto route = item.features.classification ? item.features.classification->route
                                                       : Route::kBitwiseOnly;
@@ -278,10 +267,8 @@ namespace cobra {
         }
     } // namespace
 
-    std::vector< PassId > SchedulePasses(
-        const WorkItem &item, const OrchestratorPolicy &policy,
-        const PassAttemptCache &attempted
-    ) {
+    std::vector< PassId >
+    SchedulePasses(const WorkItem &item, const PassAttemptCache &attempted) {
         std::vector< PassId > passes;
         auto kind = GetStateKind(item.payload);
 
@@ -297,11 +284,11 @@ namespace cobra {
                 passes.push_back(PassId::kSupportedSolve);
                 break;
             case StateKind::kFoldedAst:
-                ScheduleFoldedAst(item, policy, passes);
+                ScheduleFoldedAst(item, passes);
                 break;
         }
 
-        auto fp = ComputeFingerprint(item, 64, policy.allow_reroute);
+        auto fp = ComputeFingerprint(item, 64);
         std::erase_if(passes, [&](PassId id) { return attempted.HasAttempted(fp, id); });
 
         return passes;
@@ -322,23 +309,17 @@ namespace cobra {
     }
 
     // ---------------------------------------------------------------
-    // PassId hash for unordered_map keying
+    // Simplify — main orchestrator loop
     // ---------------------------------------------------------------
 
     namespace {
-        struct PassIdHash
+
+        struct OrchestratorResult
         {
-            size_t operator()(PassId id) const {
-                return std::hash< uint8_t >{}(static_cast< uint8_t >(id));
-            }
+            PassOutcome outcome;
+            ItemMetadata metadata;
+            RunMetadata run_metadata;
         };
-    } // namespace
-
-    // ---------------------------------------------------------------
-    // OrchestrateSimplify — main orchestrator loop
-    // ---------------------------------------------------------------
-
-    namespace {
 
         // Seed the worklist for the no-AST path (signature only).
         Result< std::optional< OrchestratorResult > > SeedNoAst(
@@ -466,13 +447,54 @@ namespace cobra {
             return Ok(std::optional< OrchestratorResult >(std::nullopt));
         }
 
+        SimplifyOutcome ToSimplifyOutcome(
+            OrchestratorResult result, const Expr *original_expr,
+            const OrchestratorTelemetry &telemetry
+        ) {
+            SimplifyOutcome outcome;
+
+            if (result.outcome.Succeeded()) {
+                outcome.kind      = SimplifyOutcome::Kind::kSimplified;
+                outcome.expr      = result.outcome.TakeExpr();
+                outcome.real_vars = result.outcome.RealVars();
+                outcome.verified = result.metadata.verification == VerificationState::kVerified;
+                outcome.sig_vector = std::move(result.metadata.sig_vector);
+            } else {
+                outcome.kind = SimplifyOutcome::Kind::kUnchangedUnsupported;
+                outcome.expr = original_expr != nullptr ? CloneExpr(*original_expr) : nullptr;
+            }
+
+            outcome.diag.classification  = result.run_metadata.input_classification;
+            outcome.diag.attempted_route = result.metadata.attempted_route;
+            outcome.diag.rewrite_rounds  = result.metadata.rewrite_rounds;
+            outcome.diag.rewrite_produced_candidate =
+                result.metadata.rewrite_produced_candidate;
+            outcome.diag.candidate_failed_verification =
+                result.metadata.candidate_failed_verification;
+            outcome.diag.reason_code = result.metadata.reason_code;
+            outcome.diag.cause_chain = std::move(result.metadata.cause_chain);
+
+            if (!result.outcome.Succeeded()) {
+                outcome.diag.reason = result.outcome.Reason().top.message;
+            }
+
+            outcome.telemetry = {
+                .total_expansions    = telemetry.total_expansions,
+                .max_depth_reached   = telemetry.max_depth_reached,
+                .candidates_verified = telemetry.candidates_verified,
+                .queue_high_water    = telemetry.queue_high_water,
+            };
+
+            return outcome;
+        }
+
     } // namespace
 
-    Result< OrchestratorResult > OrchestrateSimplify(
-        const Expr *input_expr, const std::vector< uint64_t > &sig,
-        const std::vector< std::string > &vars, const Options &opts,
-        const OrchestratorPolicy &policy
+    Result< SimplifyOutcome > Simplify(
+        const std::vector< uint64_t > &sig, const std::vector< std::string > &vars,
+        const Expr *input_expr, const Options &opts
     ) {
+        OrchestratorPolicy policy;
         OrchestratorContext context{
             .opts          = opts,
             .original_vars = vars,
@@ -491,23 +513,23 @@ namespace cobra {
             auto seed_result = SeedNoAst(sig, vars, context, worklist);
             if (!seed_result.has_value()) { return std::unexpected(seed_result.error()); }
             if (seed_result.value().has_value()) {
-                auto early      = std::move(*seed_result.value());
-                early.telemetry = std::move(telemetry);
-                return Ok(std::move(early));
+                return Ok(
+                    ToSimplifyOutcome(std::move(*seed_result.value()), input_expr, telemetry)
+                );
             }
         } else {
             auto seed_result = SeedWithAst(*input_expr, context, worklist);
             if (!seed_result.has_value()) { return std::unexpected(seed_result.error()); }
             if (seed_result.value().has_value()) {
-                auto early      = std::move(*seed_result.value());
-                early.telemetry = std::move(telemetry);
-                return Ok(std::move(early));
+                return Ok(
+                    ToSimplifyOutcome(std::move(*seed_result.value()), input_expr, telemetry)
+                );
             }
         }
 
         // Build registry lookup map
         const auto &registry = GetPassRegistry();
-        std::unordered_map< PassId, const PassDescriptor *, PassIdHash > registry_map;
+        std::unordered_map< PassId, const PassDescriptor * > registry_map;
         for (const auto &desc : registry) { registry_map[desc.id] = &desc; }
         PassAttemptCache cache;
         uint32_t expansions    = 0;
@@ -553,7 +575,7 @@ namespace cobra {
                         }
                     }
                     telemetry.queue_high_water = worklist.HighWaterMark();
-                    return Ok(
+                    return Ok(ToSimplifyOutcome(
                         OrchestratorResult{
                             .outcome = PassOutcome::Success(
                                 CloneExpr(*cand->expr), cand->real_vars,
@@ -561,14 +583,14 @@ namespace cobra {
                             ),
                             .metadata     = std::move(item.metadata),
                             .run_metadata = context.run_metadata,
-                            .telemetry    = std::move(telemetry),
-                        }
-                    );
+                        },
+                        input_expr, telemetry
+                    ));
                 }
             }
 
             // Schedule and execute passes
-            auto passes = SchedulePasses(item, policy, cache);
+            auto passes = SchedulePasses(item, cache);
 
             bool progressed         = false;
             bool retained_for_stage = false;
@@ -591,7 +613,7 @@ namespace cobra {
                 }
                 if (!result.has_value()) { return std::unexpected(result.error()); }
 
-                auto fp = ComputeFingerprint(item, context.bitwidth, policy.allow_reroute);
+                auto fp = ComputeFingerprint(item, context.bitwidth);
                 cache.Record(fp, pass_id);
 
                 auto &pr = result.value();
@@ -826,62 +848,14 @@ namespace cobra {
         }
 
         telemetry.queue_high_water = worklist.HighWaterMark();
-        return Ok(
+        return Ok(ToSimplifyOutcome(
             OrchestratorResult{
                 .outcome      = PassOutcome::Blocked(std::move(exhaustion_reason)),
                 .metadata     = std::move(final_meta),
                 .run_metadata = context.run_metadata,
-                .telemetry    = std::move(telemetry),
-            }
-        );
-    }
-
-    // ---------------------------------------------------------------
-    // AdaptToLegacy — convert OrchestratorResult to SimplifyOutcome
-    // ---------------------------------------------------------------
-
-    SimplifyOutcome AdaptToLegacy(OrchestratorResult result, const Expr *original_expr) {
-        SimplifyOutcome outcome;
-
-        if (result.outcome.Succeeded()) {
-            outcome.kind       = SimplifyOutcome::Kind::kSimplified;
-            outcome.expr       = result.outcome.TakeExpr();
-            outcome.real_vars  = result.outcome.RealVars();
-            outcome.verified   = result.metadata.verification == VerificationState::kVerified;
-            outcome.sig_vector = std::move(result.metadata.sig_vector);
-        } else {
-            outcome.kind = SimplifyOutcome::Kind::kUnchangedUnsupported;
-            outcome.expr = original_expr != nullptr ? CloneExpr(*original_expr) : nullptr;
-        }
-
-        outcome.diag.classification             = result.run_metadata.input_classification;
-        outcome.diag.attempted_route            = result.metadata.attempted_route;
-        outcome.diag.rewrite_rounds             = result.metadata.rewrite_rounds;
-        outcome.diag.rewrite_produced_candidate = result.metadata.rewrite_produced_candidate;
-        outcome.diag.candidate_failed_verification =
-            result.metadata.candidate_failed_verification;
-        outcome.diag.reason_code = result.metadata.reason_code;
-        outcome.diag.cause_chain = std::move(result.metadata.cause_chain);
-
-        if (!result.outcome.Succeeded()) {
-            outcome.diag.reason = result.outcome.Reason().top.message;
-        }
-
-        return outcome;
-    }
-
-    // ---------------------------------------------------------------
-    // OrchestrateSimplifyForTest — convenience wrapper
-    // ---------------------------------------------------------------
-
-    Result< SimplifyOutcome > OrchestrateSimplifyForTest(
-        const Expr *input_expr, const std::vector< uint64_t > &sig,
-        const std::vector< std::string > &vars, const Options &opts,
-        const OrchestratorPolicy &policy
-    ) {
-        auto result = OrchestrateSimplify(input_expr, sig, vars, opts, policy);
-        if (!result.has_value()) { return std::unexpected(result.error()); }
-        return Ok(AdaptToLegacy(std::move(result.value()), input_expr));
+            },
+            input_expr, telemetry
+        ));
     }
 
 } // namespace cobra
