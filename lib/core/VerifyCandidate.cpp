@@ -45,9 +45,7 @@ namespace cobra {
             verified_item.metadata.verification = VerificationState::kVerified;
             verified_item.depth                 = item.depth;
             verified_item.rewrite_gen           = item.rewrite_gen;
-            verified_item.stage_cursor          = item.stage_cursor;
-            verified_item.reentry_pending       = item.reentry_pending;
-            verified_item.resume_stage          = item.resume_stage;
+            verified_item.attempted_mask        = item.attempted_mask;
             verified_item.history               = item.history;
 
             PassResult result;

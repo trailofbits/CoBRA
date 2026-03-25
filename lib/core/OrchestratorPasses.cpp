@@ -71,7 +71,7 @@ namespace cobra {
         new_item.metadata.sig_vector = std::move(new_sig);
         new_item.depth               = item.depth;
         new_item.rewrite_gen         = item.rewrite_gen;
-        new_item.stage_cursor        = item.stage_cursor;
+        new_item.attempted_mask      = item.attempted_mask;
         new_item.history             = item.history;
 
         PassResult result;
@@ -100,7 +100,7 @@ namespace cobra {
         new_item.metadata                = item.metadata;
         new_item.depth                   = item.depth;
         new_item.rewrite_gen             = item.rewrite_gen;
-        new_item.stage_cursor            = item.stage_cursor;
+        new_item.attempted_mask          = item.attempted_mask;
         new_item.history                 = item.history;
 
         ctx.run_metadata.input_classification = cls;
@@ -151,7 +151,7 @@ namespace cobra {
                                                                : VerificationState::kVerified;
                 cand_item.depth                 = item.depth;
                 cand_item.rewrite_gen           = item.rewrite_gen;
-                cand_item.stage_cursor          = item.stage_cursor;
+                cand_item.attempted_mask        = item.attempted_mask;
                 cand_item.history               = item.history;
 
                 PassResult result;
@@ -190,12 +190,12 @@ namespace cobra {
             .original_indices                  = std::move(original_indices),
             .needs_original_space_verification = needs_verification,
         };
-        sig_item.features     = item.features;
-        sig_item.metadata     = item.metadata;
-        sig_item.depth        = item.depth;
-        sig_item.rewrite_gen  = item.rewrite_gen;
-        sig_item.stage_cursor = item.stage_cursor;
-        sig_item.history      = item.history;
+        sig_item.features       = item.features;
+        sig_item.metadata       = item.metadata;
+        sig_item.depth          = item.depth;
+        sig_item.rewrite_gen    = item.rewrite_gen;
+        sig_item.attempted_mask = item.attempted_mask;
+        sig_item.history        = item.history;
 
         PassResult result;
         result.decision    = PassDecision::kAdvance;
@@ -273,7 +273,7 @@ namespace cobra {
             cand_item.metadata.verification = payload.verification;
             cand_item.depth                 = item.depth;
             cand_item.rewrite_gen           = item.rewrite_gen;
-            cand_item.stage_cursor          = item.stage_cursor;
+            cand_item.attempted_mask        = item.attempted_mask;
             cand_item.history               = item.history;
 
             PassResult result;
@@ -347,7 +347,7 @@ namespace cobra {
             cand_item.metadata.verification = VerificationState::kVerified;
             cand_item.depth                 = item.depth;
             cand_item.rewrite_gen           = item.rewrite_gen;
-            cand_item.stage_cursor          = item.stage_cursor;
+            cand_item.attempted_mask        = item.attempted_mask;
             cand_item.history               = item.history;
 
             PassResult result;
@@ -429,10 +429,10 @@ namespace cobra {
             if (decomp.DecompositionMetadata()) {
                 cand_item.metadata.decomposition_meta = *decomp.DecompositionMetadata();
             }
-            cand_item.depth        = item.depth;
-            cand_item.rewrite_gen  = item.rewrite_gen;
-            cand_item.stage_cursor = item.stage_cursor;
-            cand_item.history      = item.history;
+            cand_item.depth          = item.depth;
+            cand_item.rewrite_gen    = item.rewrite_gen;
+            cand_item.attempted_mask = item.attempted_mask;
+            cand_item.history        = item.history;
 
             PassResult result;
             result.decision    = PassDecision::kSolvedCandidate;
@@ -484,9 +484,7 @@ namespace cobra {
         rewritten.metadata                = item.metadata;
         rewritten.depth                   = item.depth;
         rewritten.rewrite_gen             = item.rewrite_gen + 1;
-        rewritten.stage_cursor            = item.stage_cursor;
-        rewritten.reentry_pending         = true;
-        rewritten.resume_stage            = 3;
+        rewritten.attempted_mask          = 0;
         rewritten.history                 = item.history;
 
         PassResult result;
@@ -529,9 +527,7 @@ namespace cobra {
         rewritten.metadata                = item.metadata;
         rewritten.depth                   = item.depth;
         rewritten.rewrite_gen             = item.rewrite_gen + 1;
-        rewritten.stage_cursor            = item.stage_cursor;
-        rewritten.reentry_pending         = true;
-        rewritten.resume_stage            = 4;
+        rewritten.attempted_mask          = 0;
         rewritten.history                 = item.history;
 
         PassResult result;
@@ -603,9 +599,7 @@ namespace cobra {
         rewritten.metadata.structural_transform_rounds = rw.rounds_applied;
         rewritten.depth                                = item.depth;
         rewritten.rewrite_gen                          = item.rewrite_gen + 1;
-        rewritten.stage_cursor                         = item.stage_cursor;
-        rewritten.reentry_pending                      = true;
-        rewritten.resume_stage                         = 6;
+        rewritten.attempted_mask                       = 0;
         rewritten.history                              = item.history;
 
         PassResult result;
