@@ -85,6 +85,7 @@ namespace cobra {
         fp.stage_cursor    = item.stage_cursor;
         fp.reentry_pending = item.reentry_pending;
         fp.resume_stage    = item.resume_stage;
+        fp.attempted_mask  = item.attempted_mask;
 
         std::visit(
             [&fp](const auto &payload) {
@@ -147,6 +148,7 @@ std::hash< cobra::StateFingerprint >::operator()(const cobra::StateFingerprint &
     h        = hash_combine(h, std::hash< uint32_t >{}(fp.stage_cursor));
     h        = hash_combine(h, std::hash< bool >{}(fp.reentry_pending));
     h        = hash_combine(h, std::hash< uint32_t >{}(fp.resume_stage));
+    h        = hash_combine(h, std::hash< uint16_t >{}(fp.attempted_mask));
     for (const auto &v : fp.vars) { h = hash_combine(h, std::hash< std::string >{}(v)); }
     return h;
 }

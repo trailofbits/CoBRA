@@ -31,6 +31,23 @@ TEST(WorkItem, DefaultValuesAreZero) {
     EXPECT_TRUE(item.history.empty());
 }
 
+TEST(WorkItem, DefaultAttemptedMaskIsZero) {
+    WorkItem item;
+    item.payload = AstPayload{ .expr = Expr::Constant(0) };
+    EXPECT_EQ(item.attempted_mask, 0);
+}
+
+TEST(Fingerprint, AttemptedMaskDistinct) {
+    WorkItem a, b;
+    a.payload        = AstPayload{ .expr = Expr::Constant(1) };
+    a.attempted_mask = 0;
+    b.payload        = AstPayload{ .expr = Expr::Constant(1) };
+    b.attempted_mask = (1 << static_cast< uint8_t >(PassId::kDecompose));
+    auto fa          = ComputeFingerprint(a, 64);
+    auto fb          = ComputeFingerprint(b, 64);
+    EXPECT_NE(fa, fb);
+}
+
 // --- ItemMetadata default state tests ---
 
 TEST(ItemMetadata, DefaultState) {
