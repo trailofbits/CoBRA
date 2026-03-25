@@ -591,6 +591,16 @@ namespace cobra {
         // Strongest structural-transform terminal observed across
         // all lineages. Survives best_unsupported replacements.
         std::optional< TransformTerminalSignal > strongest_transform_terminal;
+        auto make_unsupported_candidate = [](const WorkItem &work) -> UnsupportedCandidate {
+            return UnsupportedCandidate{
+                .metadata           = work.metadata,
+                .depth              = work.depth,
+                .rewrite_gen        = work.rewrite_gen,
+                .history_size       = static_cast< uint32_t >(work.history.size()),
+                .last_pass          = work.history.empty() ? PassId{} : work.history.back(),
+                .is_candidate_state = std::holds_alternative< CandidatePayload >(work.payload),
+            };
+        };
 
         // Main loop
         while (!worklist.Empty() && expansions < policy.max_expansions) {
@@ -600,17 +610,20 @@ namespace cobra {
             telemetry.max_depth_reached = std::max(telemetry.max_depth_reached, item.depth);
 
             // Track best unsupported
-            UnsupportedCandidate current{
-                .metadata           = item.metadata,
-                .depth              = item.depth,
-                .rewrite_gen        = item.rewrite_gen,
-                .history_size       = static_cast< uint32_t >(item.history.size()),
-                .last_pass          = item.history.empty() ? PassId{} : item.history.back(),
-                .is_candidate_state = std::holds_alternative< CandidatePayload >(item.payload),
-            };
+            bool current_was_best_snapshot = false;
+            auto current                   = make_unsupported_candidate(item);
             if (!best_unsupported || UnsupportedRankBetter(current, *best_unsupported)) {
-                best_unsupported = current;
+                best_unsupported          = current;
+                current_was_best_snapshot = true;
             }
+            auto refresh_best_unsupported = [&]() {
+                auto refreshed = make_unsupported_candidate(item);
+                if (current_was_best_snapshot || !best_unsupported
+                    || UnsupportedRankBetter(refreshed, *best_unsupported))
+                {
+                    best_unsupported = std::move(refreshed);
+                }
+            };
             // Promote lineage-local terminal to loop-level tracker
             if (item.metadata.structural_transform_terminal) {
                 auto &sig  = *item.metadata.structural_transform_terminal;
@@ -690,12 +703,7 @@ namespace cobra {
                 }
             } else {
                 // kBlocked / kNoProgress
-                if (!pr.reason.top.message.empty()) {
-                    item.metadata.last_failure = pr.reason;
-                    if (best_unsupported) {
-                        best_unsupported->metadata.last_failure = pr.reason;
-                    }
-                }
+                if (!pr.reason.top.message.empty()) { item.metadata.last_failure = pr.reason; }
                 // XOR lowering terminal attribution (lineage-local)
                 if (*pass_id == PassId::kXorLowering) {
                     auto cat = pr.reason.top.code.category;
@@ -706,12 +714,6 @@ namespace cobra {
                     } else if (cat == ReasonCategory::kVerifyFailed) {
                         item.metadata.transform_produced_candidate  = true;
                         item.metadata.candidate_failed_verification = true;
-                    }
-                    if (best_unsupported) {
-                        best_unsupported->metadata.transform_produced_candidate =
-                            item.metadata.transform_produced_candidate;
-                        best_unsupported->metadata.candidate_failed_verification =
-                            item.metadata.candidate_failed_verification;
                     }
                 }
                 // Verify failure after XOR lowering (lineage-local)
@@ -725,10 +727,6 @@ namespace cobra {
                                                          ReasonCategory::kVerifyFailed };
                             item.metadata.transform_produced_candidate  = true;
                             item.metadata.candidate_failed_verification = true;
-                            if (best_unsupported) {
-                                best_unsupported->metadata.transform_produced_candidate  = true;
-                                best_unsupported->metadata.candidate_failed_verification = true;
-                            }
                             break;
                         }
                     }
@@ -739,15 +737,8 @@ namespace cobra {
                     for (const auto &c : pr.reason.causes) {
                         item.metadata.decomposition_causes.push_back(c);
                     }
-                    if (best_unsupported) {
-                        best_unsupported->metadata.decomposition_causes.push_back(
-                            pr.reason.top
-                        );
-                        for (const auto &c : pr.reason.causes) {
-                            best_unsupported->metadata.decomposition_causes.push_back(c);
-                        }
-                    }
                 }
+                refresh_best_unsupported();
                 // Requeue if retained (SelectNextPass will find next eligible)
                 if (pr.disposition == ItemDisposition::kRetainCurrent) {
                     worklist.Push(std::move(item));

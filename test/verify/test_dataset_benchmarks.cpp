@@ -432,9 +432,11 @@ TEST(OSESDataset, Fast) {
 
     // Every unsupported result carries a structured reason code.
     EXPECT_EQ(stats.has_structured_reason, stats.unsupported);
-    EXPECT_EQ(stats.by_category[ReasonCategory::kVerifyFailed], 3);
+    // Lineage-local diagnostics: each branch tracks its own failures,
+    // shifting some kSearchExhausted into kVerifyFailed.
+    EXPECT_EQ(stats.by_category[ReasonCategory::kVerifyFailed], 7);
     EXPECT_EQ(stats.by_category[ReasonCategory::kRepresentationGap], 20);
-    EXPECT_EQ(stats.by_category[ReasonCategory::kSearchExhausted], 43);
+    EXPECT_EQ(stats.by_category[ReasonCategory::kSearchExhausted], 39);
 }
 
 TEST(OSESDataset, DISABLED_Slow) {

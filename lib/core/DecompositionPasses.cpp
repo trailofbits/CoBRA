@@ -24,12 +24,29 @@ namespace cobra {
             return std::holds_alternative< ResidualStatePayload >(item.payload);
         }
 
+        ExtractorKind ProjectExtractorKind(ResidualOrigin origin) {
+            switch (origin) {
+                case ResidualOrigin::kDirectBooleanNull:
+                    return ExtractorKind::kBooleanNullDirect;
+                case ResidualOrigin::kProductCore:
+                    return ExtractorKind::kProductAST;
+                case ResidualOrigin::kPolynomialCore:
+                    return ExtractorKind::kPolynomial;
+                case ResidualOrigin::kTemplateCore:
+                    return ExtractorKind::kTemplate;
+            }
+            return ExtractorKind::kBooleanNullDirect;
+        }
+
         std::optional< PassResult > TryRecombineAndEmit(
             const ResidualStatePayload &residual, std::unique_ptr< Expr > solved_expr,
-            const std::vector< std::string > &real_vars, const WorkItem &parent,
+            const std::vector< std::string > &solved_expr_vars, const WorkItem &parent,
             OrchestratorContext &ctx, PassId producing_pass, ResidualSolverKind solver_kind
         ) {
-            if (real_vars.size() < ctx.original_vars.size()) {
+            // Some residual solvers return expressions already embedded in the
+            // original variable universe. Callers pass ctx.original_vars in
+            // that case to suppress remapping.
+            if (solved_expr_vars.size() < ctx.original_vars.size()) {
                 RemapVarIndices(*solved_expr, residual.residual_support);
             }
 
@@ -56,7 +73,7 @@ namespace cobra {
             cand_item.metadata.verification       = VerificationState::kVerified;
             cand_item.metadata.sig_vector         = residual.source_sig;
             cand_item.metadata.decomposition_meta = DecompositionMeta{
-                .extractor_kind = static_cast< uint8_t >(residual.origin),
+                .extractor_kind = static_cast< uint8_t >(ProjectExtractorKind(residual.origin)),
                 .solver_kind    = static_cast< uint8_t >(solver_kind),
                 .has_solver     = true,
                 .core_degree    = residual.core_degree,
@@ -602,7 +619,7 @@ namespace cobra {
 
         auto poly_payload = res_poly.TakePayload();
         auto recombined   = TryRecombineAndEmit(
-            residual, std::move(poly_payload.expr), residual.residual_elim.real_vars, item, ctx,
+            residual, std::move(poly_payload.expr), ctx.original_vars, item, ctx,
             PassId::kResidualPolyRecovery, ResidualSolverKind::kPolynomialRecovery
         );
         if (recombined) { return Ok(std::move(*recombined)); }
