@@ -24,6 +24,12 @@ namespace cobra {
                     return StateKind::kCoreCandidate;
                 } else if constexpr (std::is_same_v< T, ResidualStatePayload >) {
                     return StateKind::kResidualState;
+                } else if constexpr (std::is_same_v< T, NormalizedSemilinearPayload >) {
+                    return StateKind::kSemilinearNormalizedIr;
+                } else if constexpr (std::is_same_v< T, CheckedSemilinearPayload >) {
+                    return StateKind::kSemilinearCheckedIr;
+                } else if constexpr (std::is_same_v< T, RewrittenSemilinearPayload >) {
+                    return StateKind::kSemilinearRewrittenIr;
                 } else {
                     return StateKind::kCandidateExpr;
                 }
@@ -78,6 +84,15 @@ namespace cobra {
                     h = detail::hash_combine(h, std::hash< uint8_t >{}(payload.degree_floor));
                     fp.payload_hash = h;
                     fp.vars         = {};
+                } else if constexpr (
+                    std::is_same_v< T, NormalizedSemilinearPayload >
+                    || std::is_same_v< T, CheckedSemilinearPayload >
+                    || std::is_same_v< T, RewrittenSemilinearPayload >
+                )
+                {
+                    auto key        = BuildSemilinearFingerprintKey(payload.ctx.ir);
+                    fp.payload_hash = std::hash< SemilinearFingerprintKey >{}(key);
+                    fp.vars         = {};
                 } else {
                     // CandidatePayload
                     size_t h = detail::hash_combine(
@@ -92,6 +107,35 @@ namespace cobra {
         );
 
         return fp;
+    }
+
+    SemilinearFingerprintKey BuildSemilinearFingerprintKey(const SemilinearIR &ir) {
+        SemilinearFingerprintKey key;
+        key.constant = ir.constant;
+        key.bitwidth = ir.bitwidth;
+        key.terms.reserve(ir.terms.size());
+        for (const auto &t : ir.terms) {
+            const auto &info = ir.atom_table[t.atom_id];
+            key.terms.push_back(
+                {
+                    .coeff           = t.coeff,
+                    .support         = info.key.support,
+                    .truth_table     = info.key.truth_table,
+                    .structural_hash = info.structural_hash,
+                    .provenance      = info.provenance,
+                }
+            );
+        }
+        std::sort(key.terms.begin(), key.terms.end(), [](const auto &a, const auto &b) {
+            if (a.coeff != b.coeff) { return a.coeff < b.coeff; }
+            if (a.support != b.support) { return a.support < b.support; }
+            if (a.truth_table != b.truth_table) { return a.truth_table < b.truth_table; }
+            if (a.structural_hash != b.structural_hash) {
+                return a.structural_hash < b.structural_hash;
+            }
+            return static_cast< int >(a.provenance) < static_cast< int >(b.provenance);
+        });
+        return key;
     }
 
     namespace {
@@ -125,6 +169,22 @@ std::hash< cobra::StateFingerprint >::operator()(const cobra::StateFingerprint &
     h        = hash_combine(h, std::hash< int >{}(static_cast< int >(fp.provenance)));
     h        = hash_combine(h, std::hash< uint64_t >{}(fp.attempted_mask));
     for (const auto &v : fp.vars) { h = hash_combine(h, std::hash< std::string >{}(v)); }
+    return h;
+}
+
+size_t std::hash< cobra::SemilinearFingerprintKey >::operator()(
+    const cobra::SemilinearFingerprintKey &key
+) const {
+    using cobra::detail::hash_combine;
+    size_t h = std::hash< uint64_t >{}(key.constant);
+    h        = hash_combine(h, std::hash< uint32_t >{}(key.bitwidth));
+    for (const auto &t : key.terms) {
+        h = hash_combine(h, std::hash< uint64_t >{}(t.coeff));
+        for (auto s : t.support) { h = hash_combine(h, std::hash< uint32_t >{}(s)); }
+        for (auto v : t.truth_table) { h = hash_combine(h, std::hash< uint64_t >{}(v)); }
+        h = hash_combine(h, std::hash< uint64_t >{}(t.structural_hash));
+        h = hash_combine(h, std::hash< int >{}(static_cast< int >(t.provenance)));
+    }
     return h;
 }
 

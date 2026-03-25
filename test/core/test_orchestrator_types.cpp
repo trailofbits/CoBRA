@@ -2,6 +2,7 @@
 #include "OrchestratorPasses.h"
 #include "cobra/core/Classification.h"
 #include "cobra/core/Expr.h"
+#include "cobra/core/SemilinearIR.h"
 #include <gtest/gtest.h>
 
 using namespace cobra;
@@ -464,4 +465,68 @@ TEST(SelectNextPass, CoreDerivedBooleanNullGetsPolyFirst) {
     auto pass = SelectNextPass(item, policy, 0, cache);
     ASSERT_TRUE(pass.has_value());
     EXPECT_EQ(*pass, PassId::kResidualPolyRecovery);
+}
+
+TEST(StateKind, SemilinearStateKinds) {
+    SemilinearIR ir;
+    ir.bitwidth = 64;
+
+    StateData norm = NormalizedSemilinearPayload{
+        .ctx = SemilinearContext{ .ir = std::move(ir) },
+    };
+    EXPECT_EQ(GetStateKind(norm), StateKind::kSemilinearNormalizedIr);
+
+    SemilinearIR ir2;
+    ir2.bitwidth      = 64;
+    StateData checked = CheckedSemilinearPayload{
+        .ctx = SemilinearContext{ .ir = std::move(ir2) },
+    };
+    EXPECT_EQ(GetStateKind(checked), StateKind::kSemilinearCheckedIr);
+
+    SemilinearIR ir3;
+    ir3.bitwidth        = 64;
+    StateData rewritten = RewrittenSemilinearPayload{
+        .ctx = SemilinearContext{ .ir = std::move(ir3) },
+    };
+    EXPECT_EQ(GetStateKind(rewritten), StateKind::kSemilinearRewrittenIr);
+}
+
+TEST(Fingerprint, SemilinearSameIrSameHash) {
+    auto make_ir = []() {
+        SemilinearIR ir;
+        ir.constant = 42;
+        ir.bitwidth = 64;
+        return ir;
+    };
+    WorkItem a;
+    WorkItem b;
+    a.payload = NormalizedSemilinearPayload{
+        .ctx = SemilinearContext{ .ir = make_ir() },
+    };
+    b.payload = NormalizedSemilinearPayload{
+        .ctx = SemilinearContext{ .ir = make_ir() },
+    };
+    auto fa = ComputeFingerprint(a, 64);
+    auto fb = ComputeFingerprint(b, 64);
+    EXPECT_EQ(fa, fb);
+}
+
+TEST(Fingerprint, SemilinearDifferentStateKindDifferentFingerprint) {
+    auto make_ir = []() {
+        SemilinearIR ir;
+        ir.constant = 42;
+        ir.bitwidth = 64;
+        return ir;
+    };
+    WorkItem a;
+    WorkItem b;
+    a.payload = NormalizedSemilinearPayload{
+        .ctx = SemilinearContext{ .ir = make_ir() },
+    };
+    b.payload = CheckedSemilinearPayload{
+        .ctx = SemilinearContext{ .ir = make_ir() },
+    };
+    auto fa = ComputeFingerprint(a, 64);
+    auto fb = ComputeFingerprint(b, 64);
+    EXPECT_NE(fa, fb);
 }

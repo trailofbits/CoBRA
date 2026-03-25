@@ -214,6 +214,37 @@ struct std::hash< cobra::StateFingerprint >
 
 namespace cobra {
 
+    struct SemilinearFingerprintKey
+    {
+        uint64_t constant = 0;
+        uint32_t bitwidth = 0;
+
+        struct TermKey
+        {
+            uint64_t coeff = 0;
+            std::vector< GlobalVarIdx > support;
+            std::vector< uint64_t > truth_table;
+            uint64_t structural_hash               = 0;
+            OperatorFamily provenance              = OperatorFamily::kMixed;
+            bool operator==(const TermKey &) const = default;
+        };
+
+        std::vector< TermKey > terms;
+        bool operator==(const SemilinearFingerprintKey &) const = default;
+    };
+
+    SemilinearFingerprintKey BuildSemilinearFingerprintKey(const SemilinearIR &ir);
+
+} // namespace cobra
+
+template<>
+struct std::hash< cobra::SemilinearFingerprintKey >
+{
+    size_t operator()(const cobra::SemilinearFingerprintKey &key) const;
+};
+
+namespace cobra {
+
     // ---------------------------------------------------------------
     // PassResult — what a pass returns to the orchestrator
     // ---------------------------------------------------------------
