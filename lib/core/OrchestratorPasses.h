@@ -17,6 +17,11 @@ namespace cobra {
         kBuildSignatureState,
         kSupportedSolve,
         kTrySemilinearPass,
+        // Semilinear passes
+        kSemilinearNormalize,
+        kSemilinearCheck,
+        kSemilinearRewrite,
+        kSemilinearReconstruct,
         // Decomposition extractors
         kExtractProductCore,
         kExtractPolyCoreD2,
