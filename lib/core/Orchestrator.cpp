@@ -517,7 +517,6 @@ namespace cobra {
         uint32_t expansions    = 0;
         uint32_t verifications = 0;
         std::optional< UnsupportedCandidate > best_unsupported;
-        std::vector< ReasonFrame > decomp_causes;
         // Strongest structural-transform terminal observed across
         // all lineages. Survives best_unsupported replacements.
         std::optional< TransformTerminalSignal > strongest_transform_terminal;
@@ -665,8 +664,18 @@ namespace cobra {
                 }
                 // Accumulate decomposition cause chain
                 if (IsDecompositionFamilyPass(*pass_id)) {
-                    decomp_causes.push_back(pr.reason.top);
-                    for (const auto &c : pr.reason.causes) { decomp_causes.push_back(c); }
+                    item.metadata.decomposition_causes.push_back(pr.reason.top);
+                    for (const auto &c : pr.reason.causes) {
+                        item.metadata.decomposition_causes.push_back(c);
+                    }
+                    if (best_unsupported) {
+                        best_unsupported->metadata.decomposition_causes.push_back(
+                            pr.reason.top
+                        );
+                        for (const auto &c : pr.reason.causes) {
+                            best_unsupported->metadata.decomposition_causes.push_back(c);
+                        }
+                    }
                 }
                 // Requeue if retained (SelectNextPass will find next eligible)
                 if (pr.disposition == ItemDisposition::kRetainCurrent) {
@@ -720,8 +729,8 @@ namespace cobra {
         }
 
         // Propagate accumulated decomposition cause chain
-        if (final_meta.cause_chain.empty() && !decomp_causes.empty()) {
-            final_meta.cause_chain = std::move(decomp_causes);
+        if (final_meta.cause_chain.empty() && !final_meta.decomposition_causes.empty()) {
+            final_meta.cause_chain = std::move(final_meta.decomposition_causes);
         }
         // For non-MixedRewrite routes, propagate semilinear failure
         // as the cause chain (matching legacy behavior where the
