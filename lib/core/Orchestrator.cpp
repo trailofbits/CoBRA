@@ -234,6 +234,10 @@ namespace cobra {
                 || HasFlag(cls.flags, kSfHasBitwiseOverArith);
         }
 
+        bool IsSemilinearPass(PassId id) {
+            return id >= PassId::kSemilinearNormalize && id <= PassId::kSemilinearReconstruct;
+        }
+
         struct FoldedAstPassEntry
         {
             PassId id;
@@ -821,6 +825,12 @@ namespace cobra {
                     for (const auto &c : pr.reason.causes) {
                         item.metadata.decomposition_causes.push_back(c);
                     }
+                }
+                // Populate reason_code for consumed semilinear passes
+                if (IsSemilinearPass(*pass_id)
+                    && pr.reason.top.code.category != ReasonCategory::kNone)
+                {
+                    item.metadata.reason_code = pr.reason.top.code;
                 }
                 refresh_best_unsupported();
                 // Requeue if retained (SelectNextPass will find next eligible)
