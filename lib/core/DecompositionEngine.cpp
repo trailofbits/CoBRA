@@ -11,6 +11,7 @@
 #include "cobra/core/SignatureSimplifier.h"
 #include "cobra/core/TemplateDecomposer.h"
 #include "cobra/core/Trace.h"
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <numeric>
@@ -906,83 +907,46 @@ namespace cobra {
             return std::nullopt;
         };
 
-        // Extractor 1: Product/AST
+        struct ExtractorSpec
         {
-            auto core = ExtractProductCore(ctx);
-            if (core.Succeeded()) {
-                COBRA_TRACE("DecompEngine", "Trying ProductAST core");
-                auto tc_result = TryCore(core.TakePayload());
-                if (tc_result.has_value()) {
-                    return MakeDecompSuccess(ctx, std::move(*tc_result));
-                }
-                COBRA_TRACE("DecompEngine", "ProductAST core: all solvers exhausted");
-            } else {
-                AppendReasonFrames(all_causes, core.Reason());
-                COBRA_TRACE("DecompEngine", "ProductAST: no core extracted");
-            }
-        }
+            ExtractorKind kind;
+            uint8_t poly_degree;
+            const char *label;
+        };
 
-        // Extractor 2: Polynomial D=2
-        {
-            auto core = ExtractPolyCore(ctx, 2);
-            if (core.Succeeded()) {
-                COBRA_TRACE("DecompEngine", "Trying Polynomial D=2 core");
-                auto tc_result = TryCore(core.TakePayload());
-                if (tc_result.has_value()) {
-                    return MakeDecompSuccess(ctx, std::move(*tc_result));
-                }
-                COBRA_TRACE("DecompEngine", "Polynomial D=2 core: all solvers exhausted");
-            } else {
-                AppendReasonFrames(all_causes, core.Reason());
-                COBRA_TRACE("DecompEngine", "Polynomial D=2: no core extracted");
-            }
-        }
+        constexpr std::array kExtractors = {
+            ExtractorSpec{ ExtractorKind::kProductAST, 0,     "ProductAST" },
+            ExtractorSpec{ ExtractorKind::kPolynomial, 2, "Polynomial D=2" },
+            ExtractorSpec{   ExtractorKind::kTemplate, 0,       "Template" },
+            ExtractorSpec{ ExtractorKind::kPolynomial, 3, "Polynomial D=3" },
+            ExtractorSpec{ ExtractorKind::kPolynomial, 4, "Polynomial D=4" },
+        };
 
-        // Extractor 3: Template
-        {
-            auto core = ExtractTemplateCore(ctx);
-            if (core.Succeeded()) {
-                COBRA_TRACE("DecompEngine", "Trying Template core");
-                auto tc_result = TryCore(core.TakePayload());
-                if (tc_result.has_value()) {
-                    return MakeDecompSuccess(ctx, std::move(*tc_result));
+        for (const auto &[kind, degree, label] : kExtractors) {
+            auto core = [&]() -> SolverResult< CoreCandidate > {
+                switch (kind) {
+                    case ExtractorKind::kProductAST:
+                        return ExtractProductCore(ctx);
+                    case ExtractorKind::kPolynomial:
+                        return ExtractPolyCore(ctx, degree);
+                    case ExtractorKind::kTemplate:
+                        return ExtractTemplateCore(ctx);
+                    case ExtractorKind::kBooleanNullDirect:
+                        std::unreachable();
                 }
-                COBRA_TRACE("DecompEngine", "Template core: all solvers exhausted");
-            } else {
-                AppendReasonFrames(all_causes, core.Reason());
-                COBRA_TRACE("DecompEngine", "Template: no core extracted");
-            }
-        }
+                std::unreachable();
+            }();
 
-        // Extractor 4: Polynomial D=3
-        {
-            auto core = ExtractPolyCore(ctx, 3);
             if (core.Succeeded()) {
-                COBRA_TRACE("DecompEngine", "Trying Polynomial D=3 core");
+                COBRA_TRACE("DecompEngine", "Trying {} core", label);
                 auto tc_result = TryCore(core.TakePayload());
                 if (tc_result.has_value()) {
                     return MakeDecompSuccess(ctx, std::move(*tc_result));
                 }
-                COBRA_TRACE("DecompEngine", "Polynomial D=3 core: all solvers exhausted");
+                COBRA_TRACE("DecompEngine", "{} core: all solvers exhausted", label);
             } else {
                 AppendReasonFrames(all_causes, core.Reason());
-                COBRA_TRACE("DecompEngine", "Polynomial D=3: no core extracted");
-            }
-        }
-
-        // Extractor 5: Polynomial D=4
-        {
-            auto core = ExtractPolyCore(ctx, 4);
-            if (core.Succeeded()) {
-                COBRA_TRACE("DecompEngine", "Trying Polynomial D=4 core");
-                auto tc_result = TryCore(core.TakePayload());
-                if (tc_result.has_value()) {
-                    return MakeDecompSuccess(ctx, std::move(*tc_result));
-                }
-                COBRA_TRACE("DecompEngine", "Polynomial D=4 core: all solvers exhausted");
-            } else {
-                AppendReasonFrames(all_causes, core.Reason());
-                COBRA_TRACE("DecompEngine", "Polynomial D=4: no core extracted");
+                COBRA_TRACE("DecompEngine", "{}: no core extracted", label);
             }
         }
 
