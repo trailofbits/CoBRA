@@ -47,10 +47,7 @@ namespace cobra {
         {
             size_t operator()(const ProbeVals &v) const {
                 size_t h = kNProbes;
-                for (auto x : v) {
-                    h ^= std::hash< uint64_t >{}(x) + 0x9e3779b97f4a7c15ULL + (h << 6)
-                        + (h >> 2);
-                }
+                for (auto x : v) { h = detail::hash_combine(h, std::hash< uint64_t >{}(x)); }
                 return h;
             }
         };

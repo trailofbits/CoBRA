@@ -15,7 +15,7 @@ namespace cobra {
 
     namespace {
 
-        using CoeffMap = std::unordered_map< AtomKey, uint64_t, AtomKeyHash >;
+        using CoeffMap = std::unordered_map< AtomKey, uint64_t >;
 
         CoeffMap BuildCoeffMap(const SemilinearIR &ir, uint64_t mask) {
             CoeffMap result;

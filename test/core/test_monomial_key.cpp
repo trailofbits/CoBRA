@@ -73,7 +73,7 @@ TEST(MonomialKeyTest, HashConsistency) {
     uint8_t exps[] = { 1, 2 };
     auto k1        = MonomialKey::FromExponents(exps, 2);
     auto k2        = MonomialKey::FromExponents(exps, 2);
-    MonomialKeyHash h;
+    std::hash< MonomialKey > h;
     EXPECT_EQ(h(k1), h(k2));
 }
 
@@ -82,7 +82,7 @@ TEST(MonomialKeyTest, HashDiffers) {
     uint8_t e2[] = { 2, 1 };
     auto k1      = MonomialKey::FromExponents(e1, 2);
     auto k2      = MonomialKey::FromExponents(e2, 2);
-    MonomialKeyHash h;
+    std::hash< MonomialKey > h;
     EXPECT_NE(h(k1), h(k2));
 }
 

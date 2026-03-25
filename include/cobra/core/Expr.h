@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -52,3 +53,23 @@ namespace cobra {
     );
 
 } // namespace cobra
+
+namespace cobra::detail {
+    inline size_t hash_combine(size_t seed, size_t value) {
+        return seed ^ (value + 0x9e3779b9 + (seed << 6) + (seed >> 2));
+    }
+} // namespace cobra::detail
+
+template<>
+struct std::hash< cobra::Expr >
+{
+    size_t operator()(const cobra::Expr &e) const {
+        size_t h = std::hash< int >{}(static_cast< int >(e.kind));
+        h        = cobra::detail::hash_combine(h, std::hash< uint64_t >{}(e.constant_val));
+        h        = cobra::detail::hash_combine(h, std::hash< uint32_t >{}(e.var_index));
+        for (const auto &child : e.children) {
+            h = cobra::detail::hash_combine(h, std::hash< cobra::Expr >{}(*child));
+        }
+        return h;
+    }
+};

@@ -57,7 +57,7 @@ TEST(AtomKeyTest, HashConsistency) {
         { 0 },
         { 0, 1 }
     };
-    AtomKeyHash hasher;
+    std::hash< AtomKey > hasher;
     EXPECT_EQ(hasher(k1), hasher(k2));
 }
 

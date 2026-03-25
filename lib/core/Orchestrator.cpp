@@ -93,17 +93,18 @@ namespace cobra {
                     fp.payload_hash = std::hash< Expr >{}(*payload.expr);
                     fp.vars         = {};
                 } else if constexpr (std::is_same_v< T, SignatureStatePayload >) {
-                    uint64_t h = 14695981039346656037ULL;
+                    size_t h = std::hash< size_t >{}(payload.sig.size());
                     for (uint64_t v : payload.sig) {
-                        h ^= v;
-                        h *= 1099511628211ULL;
+                        h = detail::hash_combine(h, std::hash< uint64_t >{}(v));
                     }
                     fp.payload_hash = h;
                     fp.vars         = payload.real_vars;
                 } else {
                     // CandidatePayload
-                    uint64_t h  = std::hash< Expr >{}(*payload.expr);
-                    h          ^= payload.needs_original_space_verification ? 0x1ULL : 0x0ULL;
+                    size_t h = detail::hash_combine(
+                        std::hash< Expr >{}(*payload.expr),
+                        std::hash< bool >{}(payload.needs_original_space_verification)
+                    );
                     fp.payload_hash = h;
                     fp.vars         = payload.real_vars;
                 }
@@ -138,17 +139,15 @@ namespace cobra {
 
 size_t
 std::hash< cobra::StateFingerprint >::operator()(const cobra::StateFingerprint &fp) const {
+    using cobra::detail::hash_combine;
     size_t h = std::hash< uint64_t >{}(fp.payload_hash);
-    h ^= std::hash< int >{}(static_cast< int >(fp.kind)) + 0x9e3779b9 + (h << 6) + (h >> 2);
-    h ^= std::hash< uint32_t >{}(fp.bitwidth) + 0x9e3779b9 + (h << 6) + (h >> 2);
-    h ^= std::hash< int >{}(static_cast< int >(fp.provenance)) + 0x9e3779b9 + (h << 6)
-        + (h >> 2);
-    h ^= std::hash< uint32_t >{}(fp.stage_cursor) + 0x9e3779b9 + (h << 6) + (h >> 2);
-    h ^= std::hash< bool >{}(fp.reentry_pending) + 0x9e3779b9 + (h << 6) + (h >> 2);
-    h ^= std::hash< uint32_t >{}(fp.resume_stage) + 0x9e3779b9 + (h << 6) + (h >> 2);
-    for (const auto &v : fp.vars) {
-        h ^= std::hash< std::string >{}(v) + 0x9e3779b9 + (h << 6) + (h >> 2);
-    }
+    h        = hash_combine(h, std::hash< int >{}(static_cast< int >(fp.kind)));
+    h        = hash_combine(h, std::hash< uint32_t >{}(fp.bitwidth));
+    h        = hash_combine(h, std::hash< int >{}(static_cast< int >(fp.provenance)));
+    h        = hash_combine(h, std::hash< uint32_t >{}(fp.stage_cursor));
+    h        = hash_combine(h, std::hash< bool >{}(fp.reentry_pending));
+    h        = hash_combine(h, std::hash< uint32_t >{}(fp.resume_stage));
+    for (const auto &v : fp.vars) { h = hash_combine(h, std::hash< std::string >{}(v)); }
     return h;
 }
 
