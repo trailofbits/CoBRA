@@ -58,6 +58,8 @@ cobra_add_test(test_structure_recovery core/test_structure_recovery.cpp)
 cobra_add_test(test_orchestrator_types core/test_orchestrator_types.cpp)
 target_include_directories(test_orchestrator_types PRIVATE ${PROJECT_SOURCE_DIR}/lib/core)
 
+cobra_add_test(test_decomposition_types core/test_decomposition_types.cpp)
+target_include_directories(test_decomposition_types PRIVATE ${PROJECT_SOURCE_DIR}/lib/core)
 
 cobra_add_test(test_orchestrator_telemetry core/test_orchestrator_telemetry.cpp)
 

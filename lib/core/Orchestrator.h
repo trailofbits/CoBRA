@@ -2,6 +2,7 @@
 
 #include "cobra/core/AuxVarEliminator.h"
 #include "cobra/core/Classification.h"
+#include "cobra/core/DecompositionEngine.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/ExprCost.h"
 #include "cobra/core/PassContract.h"
@@ -24,6 +25,8 @@ namespace cobra {
     enum class StateKind {
         kFoldedAst,
         kSignatureState,
+        kCoreCandidate,
+        kResidualState,
         kCandidateExpr,
     };
 
@@ -79,7 +82,38 @@ namespace cobra {
         bool needs_original_space_verification = true;
     };
 
-    using StateData = std::variant< AstPayload, SignatureStatePayload, CandidatePayload >;
+    enum class ResidualOrigin : uint8_t {
+        kDirectBooleanNull,
+        kProductCore,
+        kPolynomialCore,
+        kTemplateCore,
+    };
+
+    struct CoreCandidatePayload
+    {
+        std::unique_ptr< Expr > core_expr;
+        ExtractorKind extractor_kind;
+        uint8_t degree_used = 0;
+        std::vector< uint64_t > source_sig;
+    };
+
+    struct ResidualStatePayload
+    {
+        ResidualOrigin origin;
+        std::unique_ptr< Expr > core_expr;
+        uint8_t core_degree = 0;
+        Evaluator residual_eval;
+        std::vector< uint64_t > source_sig;
+        std::vector< uint64_t > residual_sig;
+        EliminationResult residual_elim;
+        std::vector< uint32_t > residual_support;
+        bool is_boolean_null = false;
+        uint8_t degree_floor = 2;
+    };
+
+    using StateData = std::variant<
+        AstPayload, SignatureStatePayload, CoreCandidatePayload, ResidualStatePayload,
+        CandidatePayload >;
 
     // ---------------------------------------------------------------
     // State features and item metadata
@@ -109,6 +143,7 @@ namespace cobra {
         std::optional< ReasonCode > reason_code;
         std::vector< ReasonFrame > cause_chain;
         std::optional< DecompositionMeta > decomposition_meta;
+        std::vector< ReasonFrame > decomposition_causes;
         ReasonDetail last_failure;
         std::optional< TransformTerminalSignal > structural_transform_terminal;
     };

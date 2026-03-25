@@ -20,6 +20,10 @@ namespace cobra {
                     return StateKind::kFoldedAst;
                 } else if constexpr (std::is_same_v< T, SignatureStatePayload >) {
                     return StateKind::kSignatureState;
+                } else if constexpr (std::is_same_v< T, CoreCandidatePayload >) {
+                    return StateKind::kCoreCandidate;
+                } else if constexpr (std::is_same_v< T, ResidualStatePayload >) {
+                    return StateKind::kResidualState;
                 } else {
                     return StateKind::kCandidateExpr;
                 }
@@ -48,6 +52,32 @@ namespace cobra {
                     }
                     fp.payload_hash = h;
                     fp.vars         = payload.real_vars;
+                } else if constexpr (std::is_same_v< T, CoreCandidatePayload >) {
+                    size_t h = std::hash< Expr >{}(*payload.core_expr);
+                    h        = detail::hash_combine(
+                        h,
+                        std::hash< uint8_t >{}(static_cast< uint8_t >(payload.extractor_kind))
+                    );
+                    h = detail::hash_combine(h, std::hash< uint8_t >{}(payload.degree_used));
+                    fp.payload_hash = h;
+                    fp.vars         = {};
+                } else if constexpr (std::is_same_v< T, ResidualStatePayload >) {
+                    size_t h = std::hash< uint8_t >{}(static_cast< uint8_t >(payload.origin));
+                    if (payload.core_expr) {
+                        h = detail::hash_combine(h, std::hash< Expr >{}(*payload.core_expr));
+                    } else {
+                        h = detail::hash_combine(h, std::hash< uint64_t >{}(0xDEAD));
+                    }
+                    for (uint64_t v : payload.residual_sig) {
+                        h = detail::hash_combine(h, std::hash< uint64_t >{}(v));
+                    }
+                    for (uint32_t s : payload.residual_support) {
+                        h = detail::hash_combine(h, std::hash< uint32_t >{}(s));
+                    }
+                    h = detail::hash_combine(h, std::hash< bool >{}(payload.is_boolean_null));
+                    h = detail::hash_combine(h, std::hash< uint8_t >{}(payload.degree_floor));
+                    fp.payload_hash = h;
+                    fp.vars         = {};
                 } else {
                     // CandidatePayload
                     size_t h = detail::hash_combine(
