@@ -211,7 +211,7 @@ TEST(SelectNextPass, FreshFoldedAstGetsBuildSigFirst) {
     EXPECT_EQ(*pass, PassId::kBuildSignatureState);
 }
 
-TEST(SelectNextPass, DISABLED_AfterBuildSigGetsPrepareDirectResidual) {
+TEST(SelectNextPass, AfterBuildSigGetsPrepareDirectResidual) {
     WorkItem item;
     auto cls     = MakeClassification(kSfHasMixedProduct);
     item.payload = AstPayload{
@@ -227,10 +227,10 @@ TEST(SelectNextPass, DISABLED_AfterBuildSigGetsPrepareDirectResidual) {
     PassAttemptCache cache;
     auto pass = SelectNextPass(item, policy, 0, cache);
     ASSERT_TRUE(pass.has_value());
-    EXPECT_EQ(*pass, PassId::kExtractProductCore);
+    EXPECT_EQ(*pass, PassId::kPrepareDirectResidual);
 }
 
-TEST(SelectNextPass, DISABLED_PrereqBlocksOperandSimplifyBeforeExtract) {
+TEST(SelectNextPass, PrereqBlocksOperandSimplifyBeforeExtract) {
     WorkItem item;
     auto cls     = MakeClassification(kSfHasMixedProduct);
     item.payload = AstPayload{
@@ -246,7 +246,7 @@ TEST(SelectNextPass, DISABLED_PrereqBlocksOperandSimplifyBeforeExtract) {
     PassAttemptCache cache;
     auto pass = SelectNextPass(item, policy, 0, cache);
     ASSERT_TRUE(pass.has_value());
-    EXPECT_EQ(*pass, PassId::kExtractProductCore);
+    EXPECT_EQ(*pass, PassId::kPrepareDirectResidual);
 }
 
 TEST(SelectNextPass, AllAttemptedReturnsNullopt) {
@@ -267,7 +267,7 @@ TEST(SelectNextPass, AllAttemptedReturnsNullopt) {
     EXPECT_FALSE(pass.has_value());
 }
 
-TEST(SelectNextPass, DISABLED_RewriteBudgetBlocksTransforms) {
+TEST(SelectNextPass, RewriteBudgetBlocksTransforms) {
     WorkItem item;
     auto cls     = MakeClassification(kSfHasMixedProduct);
     item.payload = AstPayload{
@@ -278,7 +278,12 @@ TEST(SelectNextPass, DISABLED_RewriteBudgetBlocksTransforms) {
     item.features.classification = cls;
     item.features.provenance     = Provenance::kLowered;
     item.attempted_mask = (1ULL << static_cast< uint8_t >(PassId::kBuildSignatureState))
-        | (1ULL << static_cast< uint8_t >(PassId::kExtractProductCore));
+        | (1ULL << static_cast< uint8_t >(PassId::kPrepareDirectResidual))
+        | (1ULL << static_cast< uint8_t >(PassId::kExtractProductCore))
+        | (1ULL << static_cast< uint8_t >(PassId::kExtractPolyCoreD2))
+        | (1ULL << static_cast< uint8_t >(PassId::kExtractTemplateCore))
+        | (1ULL << static_cast< uint8_t >(PassId::kExtractPolyCoreD3))
+        | (1ULL << static_cast< uint8_t >(PassId::kExtractPolyCoreD4));
     item.rewrite_gen = 3;
 
     OrchestratorPolicy policy;
@@ -322,7 +327,7 @@ TEST(SelectNextPass, CacheBlocksSameState) {
 
     auto pass = SelectNextPass(item, policy, 0, cache);
     ASSERT_TRUE(pass.has_value());
-    EXPECT_EQ(*pass, PassId::kExtractProductCore);
+    EXPECT_EQ(*pass, PassId::kPrepareDirectResidual);
 }
 
 TEST(SelectNextPass, SignatureStateGetsSupported) {
@@ -407,4 +412,56 @@ TEST(SelectNextPass, OriginalSemilinearGetsSemilinear) {
     auto pass = SelectNextPass(item, policy, 0, cache);
     ASSERT_TRUE(pass.has_value());
     EXPECT_EQ(*pass, PassId::kTrySemilinearPass);
+}
+
+TEST(SelectNextPass, CoreCandidateGetsPrepareResidual) {
+    WorkItem item;
+    item.payload = CoreCandidatePayload{
+        .core_expr      = Expr::Constant(1),
+        .extractor_kind = ExtractorKind::kProductAST,
+    };
+    OrchestratorPolicy policy;
+    PassAttemptCache cache;
+    auto pass = SelectNextPass(item, policy, 0, cache);
+    ASSERT_TRUE(pass.has_value());
+    EXPECT_EQ(*pass, PassId::kPrepareResidualFromCore);
+}
+
+TEST(SelectNextPass, ResidualStateGetsFirstSolver) {
+    WorkItem item;
+    item.payload = ResidualStatePayload{
+        .origin          = ResidualOrigin::kProductCore,
+        .is_boolean_null = false,
+    };
+    OrchestratorPolicy policy;
+    PassAttemptCache cache;
+    auto pass = SelectNextPass(item, policy, 0, cache);
+    ASSERT_TRUE(pass.has_value());
+    EXPECT_EQ(*pass, PassId::kResidualSupported);
+}
+
+TEST(SelectNextPass, BooleanNullResidualGetsGhostFirst) {
+    WorkItem item;
+    item.payload = ResidualStatePayload{
+        .origin          = ResidualOrigin::kDirectBooleanNull,
+        .is_boolean_null = true,
+    };
+    OrchestratorPolicy policy;
+    PassAttemptCache cache;
+    auto pass = SelectNextPass(item, policy, 0, cache);
+    ASSERT_TRUE(pass.has_value());
+    EXPECT_EQ(*pass, PassId::kResidualGhost);
+}
+
+TEST(SelectNextPass, CoreDerivedBooleanNullGetsPolyFirst) {
+    WorkItem item;
+    item.payload = ResidualStatePayload{
+        .origin          = ResidualOrigin::kProductCore,
+        .is_boolean_null = true,
+    };
+    OrchestratorPolicy policy;
+    PassAttemptCache cache;
+    auto pass = SelectNextPass(item, policy, 0, cache);
+    ASSERT_TRUE(pass.has_value());
+    EXPECT_EQ(*pass, PassId::kResidualPolyRecovery);
 }

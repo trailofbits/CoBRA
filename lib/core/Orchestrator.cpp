@@ -188,10 +188,46 @@ namespace cobra {
 
         constexpr FoldedAstPassEntry kFoldedAstPasses[] = {
             {     PassId::kBuildSignatureState,                                0, 0, false },
-            {      PassId::kExtractProductCore,                                0, 1, false },
-            {         PassId::kOperandSimplify, Bit(PassId::kExtractProductCore), 2,  true },
-            { PassId::kProductIdentityCollapse, Bit(PassId::kExtractProductCore), 3,  true },
-            {             PassId::kXorLowering,                                0, 4,  true },
+            {   PassId::kPrepareDirectResidual,                                0, 1, false },
+            {      PassId::kExtractProductCore,                                0, 2, false },
+            {       PassId::kExtractPolyCoreD2,                                0, 3, false },
+            {     PassId::kExtractTemplateCore,                                0, 4, false },
+            {       PassId::kExtractPolyCoreD3,                                0, 5, false },
+            {       PassId::kExtractPolyCoreD4,                                0, 6, false },
+            {         PassId::kOperandSimplify, Bit(PassId::kExtractProductCore), 7,  true },
+            { PassId::kProductIdentityCollapse, Bit(PassId::kExtractProductCore), 8,  true },
+            {             PassId::kXorLowering,                                0, 9,  true },
+        };
+
+        struct ResidualPassEntry
+        {
+            PassId id;
+            uint64_t prereq_mask;
+            uint8_t priority;
+        };
+
+        // Direct boolean-null: ghost-first
+        constexpr ResidualPassEntry kDirectBooleanNullSolvers[] = {
+            {                  PassId::kResidualGhost, 0, 0 },
+            {          PassId::kResidualFactoredGhost, 0, 1 },
+            { PassId::kResidualFactoredGhostEscalated, 0, 2 },
+            {           PassId::kResidualPolyRecovery, 0, 3 },
+            {               PassId::kResidualTemplate, 0, 4 },
+        };
+
+        // Core-derived boolean-null: poly-first
+        constexpr ResidualPassEntry kCoreBooleanNullSolvers[] = {
+            {  PassId::kResidualPolyRecovery, 0, 0 },
+            {         PassId::kResidualGhost, 0, 1 },
+            { PassId::kResidualFactoredGhost, 0, 2 },
+            {      PassId::kResidualTemplate, 0, 3 },
+        };
+
+        // Core-derived standard: supported-first
+        constexpr ResidualPassEntry kCoreStandardSolvers[] = {
+            {    PassId::kResidualSupported, 0, 0 },
+            { PassId::kResidualPolyRecovery, 0, 1 },
+            {     PassId::kResidualTemplate, 0, 2 },
         };
 
     } // namespace
@@ -220,7 +256,42 @@ namespace cobra {
             return pass;
         }
 
-        // 3. Original provenance + semilinear → kTrySemilinearPass
+        // 3. CoreCandidate → kPrepareResidualFromCore
+        if (kind == StateKind::kCoreCandidate) {
+            auto pass = PassId::kPrepareResidualFromCore;
+            if ((item.attempted_mask & Bit(pass)) != 0) { return std::nullopt; }
+            if (cache.HasAttempted(fp, pass)) { return std::nullopt; }
+            return pass;
+        }
+
+        // 4. ResidualState → iterate residual solver table
+        if (kind == StateKind::kResidualState) {
+            const auto &residual = std::get< ResidualStatePayload >(item.payload);
+
+            const ResidualPassEntry *table = nullptr;
+            size_t table_size              = 0;
+
+            if (residual.origin == ResidualOrigin::kDirectBooleanNull) {
+                table      = kDirectBooleanNullSolvers;
+                table_size = std::size(kDirectBooleanNullSolvers);
+            } else if (residual.is_boolean_null) {
+                table      = kCoreBooleanNullSolvers;
+                table_size = std::size(kCoreBooleanNullSolvers);
+            } else {
+                table      = kCoreStandardSolvers;
+                table_size = std::size(kCoreStandardSolvers);
+            }
+
+            for (size_t i = 0; i < table_size; ++i) {
+                const auto &entry = table[i];
+                if ((item.attempted_mask & Bit(entry.id)) != 0) { continue; }
+                if (cache.HasAttempted(fp, entry.id)) { continue; }
+                return entry.id;
+            }
+            return std::nullopt;
+        }
+
+        // 5. Original provenance + semilinear → kTrySemilinearPass
         if (item.features.provenance == Provenance::kOriginal) {
             if (item.features.classification
                 && item.features.classification->semantic == SemanticClass::kSemilinear)
@@ -233,12 +304,12 @@ namespace cobra {
             return std::nullopt;
         }
 
-        // 4. Non-original: must have classification and no unknown shape
+        // 6. Non-original: must have classification and no unknown shape
         if (!item.features.classification) { return std::nullopt; }
         const auto &cls = *item.features.classification;
         if (HasFlag(cls.flags, kSfHasUnknownShape)) { return std::nullopt; }
 
-        // 5. Non-exploration candidates → only kBuildSignatureState
+        // 7. Non-exploration candidates → only kBuildSignatureState
         if (!IsFoldedAstExplorationCandidate(cls)) {
             auto pass = PassId::kBuildSignatureState;
             if ((item.attempted_mask & Bit(pass)) != 0) { return std::nullopt; }
@@ -246,7 +317,7 @@ namespace cobra {
             return pass;
         }
 
-        // 6. Exploration candidates → iterate the pass table
+        // 8. Exploration candidates → iterate the pass table
         for (const auto &entry : kFoldedAstPasses) {
             if ((item.attempted_mask & Bit(entry.id)) != 0) { continue; }
             if ((item.attempted_mask & entry.prereq_mask) != entry.prereq_mask) { continue; }
@@ -257,7 +328,7 @@ namespace cobra {
             return entry.id;
         }
 
-        // 7. No eligible pass
+        // 9. No eligible pass
         return std::nullopt;
     }
 
