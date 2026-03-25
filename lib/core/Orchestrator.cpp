@@ -30,6 +30,8 @@ namespace cobra {
                     return StateKind::kSemilinearCheckedIr;
                 } else if constexpr (std::is_same_v< T, RewrittenSemilinearPayload >) {
                     return StateKind::kSemilinearRewrittenIr;
+                } else if constexpr (std::is_same_v< T, CompetitionResolvedPayload >) {
+                    return StateKind::kCompetitionResolved;
                 } else {
                     return StateKind::kCandidateExpr;
                 }
@@ -93,6 +95,9 @@ namespace cobra {
                     auto key        = BuildSemilinearFingerprintKey(payload.ctx.ir);
                     fp.payload_hash = std::hash< SemilinearFingerprintKey >{}(key);
                     fp.vars         = {};
+                } else if constexpr (std::is_same_v< T, CompetitionResolvedPayload >) {
+                    fp.payload_hash = std::hash< uint32_t >{}(payload.group_id);
+                    fp.vars         = {};
                 } else {
                     // CandidatePayload
                     size_t h = detail::hash_combine(
@@ -140,13 +145,28 @@ namespace cobra {
 
     namespace {
         int BandOf(const WorkItem &item) {
-            return GetStateKind(item.payload) == StateKind::kCandidateExpr ? 0 : 1;
+            auto kind = GetStateKind(item.payload);
+            if (kind == StateKind::kCandidateExpr || kind == StateKind::kCompetitionResolved) {
+                return 0;
+            }
+            return 1;
+        }
+
+        // Sub-band within band 0: kCandidateExpr = 0, kCompetitionResolved = 1.
+        int SubBandOf(const WorkItem &item) {
+            auto kind = GetStateKind(item.payload);
+            if (kind == StateKind::kCandidateExpr) { return 0; }
+            if (kind == StateKind::kCompetitionResolved) { return 1; }
+            return 2;
         }
 
         bool IsBetterPriority(const WorkItem &a, const WorkItem &b) {
             int band_a = BandOf(a);
             int band_b = BandOf(b);
             if (band_a != band_b) { return band_a < band_b; }
+            int sub_a = SubBandOf(a);
+            int sub_b = SubBandOf(b);
+            if (sub_a != sub_b) { return sub_a < sub_b; }
             if (a.depth != b.depth) { return a.depth < b.depth; }
             if (a.features.provenance != b.features.provenance) {
                 return a.features.provenance < b.features.provenance;

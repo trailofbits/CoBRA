@@ -55,6 +55,9 @@ cobra_add_test(test_weighted_poly_fit core/test_weighted_poly_fit.cpp)
 cobra_add_test(test_term_refiner core/test_term_refiner.cpp)
 cobra_add_test(test_semilinear_signature core/test_semilinear_signature.cpp)
 cobra_add_test(test_structure_recovery core/test_structure_recovery.cpp)
+cobra_add_test(test_competition_group core/test_competition_group.cpp)
+target_include_directories(test_competition_group PRIVATE ${PROJECT_SOURCE_DIR}/lib/core)
+
 cobra_add_test(test_orchestrator_types core/test_orchestrator_types.cpp)
 target_include_directories(test_orchestrator_types PRIVATE ${PROJECT_SOURCE_DIR}/lib/core)
 

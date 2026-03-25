@@ -46,6 +46,7 @@ target_sources(cobra-core PRIVATE
     SemilinearSignature.cpp
     StructureRecovery.cpp
     PassContract.cpp
+    CompetitionGroup.cpp
     Orchestrator.cpp
     OrchestratorPasses.cpp
     DecompositionPassHelpers.cpp

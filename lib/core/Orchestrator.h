@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CompetitionGroup.h"
 #include "cobra/core/AuxVarEliminator.h"
 #include "cobra/core/Classification.h"
 #include "cobra/core/DecompositionEngine.h"
@@ -32,6 +33,7 @@ namespace cobra {
         kSemilinearCheckedIr,
         kSemilinearRewrittenIr,
         kCandidateExpr,
+        kCompetitionResolved,
     };
 
     enum class Provenance {
@@ -135,10 +137,15 @@ namespace cobra {
         SemilinearContext ctx;
     };
 
+    struct CompetitionResolvedPayload
+    {
+        GroupId group_id;
+    };
+
     using StateData = std::variant<
         AstPayload, SignatureStatePayload, CoreCandidatePayload, ResidualStatePayload,
         NormalizedSemilinearPayload, CheckedSemilinearPayload, RewrittenSemilinearPayload,
-        CandidatePayload >;
+        CandidatePayload, CompetitionResolvedPayload >;
 
     // ---------------------------------------------------------------
     // State features and item metadata
@@ -299,6 +306,9 @@ namespace cobra {
         // When true, RunBuildSignatureState must recompute the
         // signature from the AST because the parser's sig is stale.
         bool lowering_fired = false;
+        // Competition group registry for Phase 3 technique competition.
+        std::unordered_map< GroupId, CompetitionGroup > competition_groups;
+        GroupId next_group_id = 0;
     };
 
     // ---------------------------------------------------------------
@@ -369,5 +379,14 @@ namespace cobra {
         const WorkItem &item, const OrchestratorPolicy &policy, uint32_t verifications_used,
         const PassAttemptCache &cache
     );
+
+    // ---------------------------------------------------------------
+    // Competition group handle release
+    // ---------------------------------------------------------------
+
+    // Decrements a group's open_handles. Returns a
+    // kCompetitionResolved WorkItem when handles reach zero.
+    std::optional< WorkItem >
+    ReleaseHandle(std::unordered_map< GroupId, CompetitionGroup > &groups, GroupId group_id);
 
 } // namespace cobra
