@@ -93,7 +93,7 @@ std::hash< cobra::StateFingerprint >::operator()(const cobra::StateFingerprint &
     h        = hash_combine(h, std::hash< int >{}(static_cast< int >(fp.kind)));
     h        = hash_combine(h, std::hash< uint32_t >{}(fp.bitwidth));
     h        = hash_combine(h, std::hash< int >{}(static_cast< int >(fp.provenance)));
-    h        = hash_combine(h, std::hash< uint16_t >{}(fp.attempted_mask));
+    h        = hash_combine(h, std::hash< uint64_t >{}(fp.attempted_mask));
     for (const auto &v : fp.vars) { h = hash_combine(h, std::hash< std::string >{}(v)); }
     return h;
 }
@@ -147,13 +147,13 @@ namespace cobra {
         struct FoldedAstPassEntry
         {
             PassId id;
-            uint16_t prereq_mask;
+            uint64_t prereq_mask;
             uint8_t priority;
             bool is_structural_transform;
         };
 
-        constexpr uint16_t Bit(PassId p) {
-            return static_cast< uint16_t >(1 << static_cast< uint8_t >(p));
+        constexpr uint64_t Bit(PassId p) {
+            return static_cast< uint64_t >(1) << static_cast< uint8_t >(p);
         }
 
         constexpr FoldedAstPassEntry kFoldedAstPasses[] = {

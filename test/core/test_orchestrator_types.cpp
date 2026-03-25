@@ -55,7 +55,7 @@ TEST(Fingerprint, AttemptedMaskDistinct) {
     a.payload        = AstPayload{ .expr = Expr::Constant(1) };
     a.attempted_mask = 0;
     b.payload        = AstPayload{ .expr = Expr::Constant(1) };
-    b.attempted_mask = (1 << static_cast< uint8_t >(PassId::kDecompose));
+    b.attempted_mask = (1ULL << static_cast< uint8_t >(PassId::kDecompose));
     auto fa          = ComputeFingerprint(a, 64);
     auto fb          = ComputeFingerprint(b, 64);
     EXPECT_NE(fa, fb);
@@ -221,7 +221,7 @@ TEST(SelectNextPass, AfterBuildSigGetsDecompose) {
     };
     item.features.classification = cls;
     item.features.provenance     = Provenance::kLowered;
-    item.attempted_mask          = (1 << static_cast< uint8_t >(PassId::kBuildSignatureState));
+    item.attempted_mask = (1ULL << static_cast< uint8_t >(PassId::kBuildSignatureState));
 
     OrchestratorPolicy policy;
     PassAttemptCache cache;
@@ -240,7 +240,7 @@ TEST(SelectNextPass, PrereqBlocksOperandSimplifyBeforeDecompose) {
     };
     item.features.classification = cls;
     item.features.provenance     = Provenance::kLowered;
-    item.attempted_mask          = (1 << static_cast< uint8_t >(PassId::kBuildSignatureState));
+    item.attempted_mask = (1ULL << static_cast< uint8_t >(PassId::kBuildSignatureState));
 
     OrchestratorPolicy policy;
     PassAttemptCache cache;
@@ -259,11 +259,11 @@ TEST(SelectNextPass, AllAttemptedReturnsNullopt) {
     };
     item.features.classification = cls;
     item.features.provenance     = Provenance::kLowered;
-    item.attempted_mask          = (1 << static_cast< uint8_t >(PassId::kBuildSignatureState))
-        | (1 << static_cast< uint8_t >(PassId::kDecompose))
-        | (1 << static_cast< uint8_t >(PassId::kOperandSimplify))
-        | (1 << static_cast< uint8_t >(PassId::kProductIdentityCollapse))
-        | (1 << static_cast< uint8_t >(PassId::kXorLowering));
+    item.attempted_mask = (1ULL << static_cast< uint8_t >(PassId::kBuildSignatureState))
+        | (1ULL << static_cast< uint8_t >(PassId::kDecompose))
+        | (1ULL << static_cast< uint8_t >(PassId::kOperandSimplify))
+        | (1ULL << static_cast< uint8_t >(PassId::kProductIdentityCollapse))
+        | (1ULL << static_cast< uint8_t >(PassId::kXorLowering));
 
     OrchestratorPolicy policy;
     PassAttemptCache cache;
@@ -281,8 +281,8 @@ TEST(SelectNextPass, RewriteBudgetBlocksTransforms) {
     };
     item.features.classification = cls;
     item.features.provenance     = Provenance::kLowered;
-    item.attempted_mask          = (1 << static_cast< uint8_t >(PassId::kBuildSignatureState))
-        | (1 << static_cast< uint8_t >(PassId::kDecompose));
+    item.attempted_mask = (1ULL << static_cast< uint8_t >(PassId::kBuildSignatureState))
+        | (1ULL << static_cast< uint8_t >(PassId::kDecompose));
     item.rewrite_gen = 3;
 
     OrchestratorPolicy policy;
@@ -390,7 +390,7 @@ TEST(SelectNextPass, NonExplorationLoweredGetsOnlyBuildSig) {
     ASSERT_TRUE(pass.has_value());
     EXPECT_EQ(*pass, PassId::kBuildSignatureState);
 
-    item.attempted_mask = (1 << static_cast< uint8_t >(PassId::kBuildSignatureState));
+    item.attempted_mask = (1ULL << static_cast< uint8_t >(PassId::kBuildSignatureState));
     pass                = SelectNextPass(item, policy, 0, cache);
     EXPECT_FALSE(pass.has_value());
 }

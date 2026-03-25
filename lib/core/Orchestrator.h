@@ -124,7 +124,7 @@ namespace cobra {
         ItemMetadata metadata;
         uint32_t depth          = 0;
         uint32_t rewrite_gen    = 0;
-        uint16_t attempted_mask = 0;
+        uint64_t attempted_mask = 0;
         std::vector< PassId > history;
     };
 
@@ -139,7 +139,7 @@ namespace cobra {
         std::vector< std::string > vars;
         uint32_t bitwidth;
         Provenance provenance;
-        uint16_t attempted_mask = 0;
+        uint64_t attempted_mask = 0;
 
         bool operator==(const StateFingerprint &) const = default;
     };
