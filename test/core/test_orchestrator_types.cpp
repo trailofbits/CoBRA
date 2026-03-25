@@ -40,9 +40,7 @@ TEST(WorkItem, DefaultValuesAreZero) {
     item.payload = AstPayload{ .expr = Expr::Constant(0) };
     EXPECT_EQ(item.depth, 0);
     EXPECT_EQ(item.rewrite_gen, 0);
-    EXPECT_EQ(item.stage_cursor, 0);
-    EXPECT_FALSE(item.reentry_pending);
-    EXPECT_EQ(item.resume_stage, 0);
+    EXPECT_EQ(item.attempted_mask, 0);
     EXPECT_TRUE(item.history.empty());
 }
 
@@ -122,39 +120,6 @@ TEST(Fingerprint, VerifiedVsUnverifiedCandidateDistinct) {
     auto fa = ComputeFingerprint(a, 64);
     auto fb = ComputeFingerprint(b, 64);
     EXPECT_NE(fa.payload_hash, fb.payload_hash);
-}
-
-TEST(Fingerprint, ReentryPendingDistinct) {
-    WorkItem a, b;
-    a.payload         = AstPayload{ .expr = Expr::Constant(1) };
-    a.reentry_pending = true;
-    b.payload         = AstPayload{ .expr = Expr::Constant(1) };
-    b.reentry_pending = false;
-    auto fa           = ComputeFingerprint(a, 64);
-    auto fb           = ComputeFingerprint(b, 64);
-    EXPECT_NE(fa, fb);
-}
-
-TEST(Fingerprint, ResumeStageDistinct) {
-    WorkItem a, b;
-    a.payload      = AstPayload{ .expr = Expr::Constant(1) };
-    a.resume_stage = 3;
-    b.payload      = AstPayload{ .expr = Expr::Constant(1) };
-    b.resume_stage = 4;
-    auto fa        = ComputeFingerprint(a, 64);
-    auto fb        = ComputeFingerprint(b, 64);
-    EXPECT_NE(fa, fb);
-}
-
-TEST(Fingerprint, StageCursorDistinct) {
-    WorkItem a, b;
-    a.payload      = AstPayload{ .expr = Expr::Constant(1) };
-    a.stage_cursor = 3;
-    b.payload      = AstPayload{ .expr = Expr::Constant(1) };
-    b.stage_cursor = 0;
-    auto fa        = ComputeFingerprint(a, 64);
-    auto fb        = ComputeFingerprint(b, 64);
-    EXPECT_NE(fa.stage_cursor, fb.stage_cursor);
 }
 
 // --- UnsupportedRank ordering tests ---
