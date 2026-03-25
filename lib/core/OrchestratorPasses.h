@@ -39,6 +39,13 @@ namespace cobra {
         kResidualTemplate,
         // Competition resolution
         kResolveCompetition,
+        // Signature technique passes
+        kSignaturePatternMatch,
+        kSignatureAnf,
+        kPrepareCoeffModel,
+        kSignatureCobCandidate,
+        kSignatureSingletonPolyRecovery,
+        kSignatureMultivarPolyRecovery,
         // Structural rewrites
         kOperandSimplify,
         kProductIdentityCollapse,

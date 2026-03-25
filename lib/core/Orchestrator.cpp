@@ -345,16 +345,46 @@ namespace cobra {
             return pass;
         }
 
-        // 2. SignatureState → kSupportedSolve
+        // 2. SignatureState → kSupportedSolve (primary), then technique passes
         if (kind == StateKind::kSignatureState) {
-            auto pass = PassId::kSupportedSolve;
-            if ((item.attempted_mask & Bit(pass)) != 0) { return std::nullopt; }
-            if (cache.HasAttempted(fp, pass)) { return std::nullopt; }
-            return pass;
+            static constexpr struct
+            {
+                PassId id;
+                uint8_t priority;
+            } kSignatureStatePasses[] = {
+                {                PassId::kSupportedSolve, 0 },
+                {         PassId::kSignaturePatternMatch, 1 },
+                {                  PassId::kSignatureAnf, 2 },
+                {             PassId::kPrepareCoeffModel, 3 },
+                { PassId::kSignatureMultivarPolyRecovery, 4 },
+            };
+
+            for (const auto &entry : kSignatureStatePasses) {
+                if ((item.attempted_mask & Bit(entry.id)) != 0) { continue; }
+                if (cache.HasAttempted(fp, entry.id)) { continue; }
+                return entry.id;
+            }
+            return std::nullopt;
         }
 
-        // 2b. SignatureCoeffState — stub (filled in Task 4)
-        if (kind == StateKind::kSignatureCoeffState) { return std::nullopt; }
+        // 2b. SignatureCoeffState → technique pass table
+        if (kind == StateKind::kSignatureCoeffState) {
+            static constexpr struct
+            {
+                PassId id;
+                uint8_t priority;
+            } kSignatureCoeffPasses[] = {
+                {          PassId::kSignatureCobCandidate, 0 },
+                { PassId::kSignatureSingletonPolyRecovery, 1 },
+            };
+
+            for (const auto &entry : kSignatureCoeffPasses) {
+                if ((item.attempted_mask & Bit(entry.id)) != 0) { continue; }
+                if (cache.HasAttempted(fp, entry.id)) { continue; }
+                return entry.id;
+            }
+            return std::nullopt;
+        }
 
         // 3. CoreCandidate → kPrepareResidualFromCore
         if (kind == StateKind::kCoreCandidate) {
@@ -544,6 +574,8 @@ namespace cobra {
 
             auto original_indices = BuildVarSupport(vars, elim.real_vars);
 
+            auto group_id = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+
             WorkItem sig_item;
             sig_item.payload = SignatureStatePayload{
                 .ctx = {
@@ -555,6 +587,7 @@ namespace cobra {
                 },
             };
             sig_item.features.provenance = Provenance::kOriginal;
+            sig_item.group_id            = group_id;
             worklist.Push(std::move(sig_item));
 
             return Ok(std::optional< OrchestratorResult >(std::nullopt));

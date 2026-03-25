@@ -61,6 +61,9 @@ target_include_directories(test_competition_group PRIVATE ${PROJECT_SOURCE_DIR}/
 cobra_add_test(test_orchestrator_types core/test_orchestrator_types.cpp)
 target_include_directories(test_orchestrator_types PRIVATE ${PROJECT_SOURCE_DIR}/lib/core)
 
+cobra_add_test(test_signature_passes core/test_signature_passes.cpp)
+target_include_directories(test_signature_passes PRIVATE ${PROJECT_SOURCE_DIR}/lib/core)
+
 cobra_add_test(test_decomposition_types core/test_decomposition_types.cpp)
 target_include_directories(test_decomposition_types PRIVATE ${PROJECT_SOURCE_DIR}/lib/core)
 

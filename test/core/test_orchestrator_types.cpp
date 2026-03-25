@@ -331,7 +331,7 @@ TEST(SelectNextPass, CacheBlocksSameState) {
     EXPECT_EQ(*pass, PassId::kPrepareDirectResidual);
 }
 
-TEST(SelectNextPass, SignatureStateGetsSupported) {
+TEST(SelectNextPass, SignatureStateGetsSupportedFirst) {
     WorkItem item;
     item.payload             = SignatureStatePayload{};
     item.features.provenance = Provenance::kOriginal;
@@ -627,7 +627,7 @@ TEST(StateKind, SignatureCoeffStateKind) {
     EXPECT_EQ(GetStateKind(data), StateKind::kSignatureCoeffState);
 }
 
-TEST(SelectNextPass, SignatureCoeffStateReturnsNullopt) {
+TEST(SelectNextPass, SignatureCoeffStateGetsCobFirst) {
     WorkItem item;
     item.payload = SignatureCoeffStatePayload{
         .ctx    = { .sig = { 1, 2 } },
@@ -636,7 +636,8 @@ TEST(SelectNextPass, SignatureCoeffStateReturnsNullopt) {
     OrchestratorPolicy policy;
     PassAttemptCache cache;
     auto pass = SelectNextPass(item, policy, 0, cache);
-    EXPECT_FALSE(pass.has_value());
+    ASSERT_TRUE(pass.has_value());
+    EXPECT_EQ(*pass, PassId::kSignatureCobCandidate);
 }
 
 TEST(Worklist, SignatureCoeffStatePopsAfterCandidate) {

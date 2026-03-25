@@ -183,7 +183,10 @@ namespace cobra {
         // Step 6: Determine verification needs
         bool needs_verification = ctx.evaluator.has_value();
 
-        // Step 7: Emit SignatureStatePayload
+        // Step 7: Create competition group for technique passes
+        auto group_id = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+
+        // Step 8: Emit SignatureStatePayload
         WorkItem sig_item;
         sig_item.payload = SignatureStatePayload{
             .ctx = {
@@ -199,6 +202,7 @@ namespace cobra {
         sig_item.depth          = item.depth;
         sig_item.rewrite_gen    = item.rewrite_gen;
         sig_item.attempted_mask = item.attempted_mask;
+        sig_item.group_id       = group_id;
         sig_item.history        = item.history;
 
         PassResult result;
@@ -556,6 +560,61 @@ namespace cobra {
              const OrchestratorContext & /*ctx*/) -> bool {
              return std::holds_alternative< CompetitionResolvedPayload >(item.payload);
              },             .run = RunResolveCompetition,
+             },
+            // Signature technique passes
+            {
+             .id         = PassId::kSignaturePatternMatch,
+             .consumes   = StateKind::kSignatureState,
+             .tag        = PassTag::kSolver,
+             .applicable = [](const WorkItem &item,
+             const OrchestratorContext & /*ctx*/) -> bool {
+             return std::holds_alternative< SignatureStatePayload >(item.payload);
+             },          .run = RunSignaturePatternMatch,
+             },
+            {
+             .id         = PassId::kSignatureAnf,
+             .consumes   = StateKind::kSignatureState,
+             .tag        = PassTag::kSolver,
+             .applicable = [](const WorkItem &item,
+             const OrchestratorContext & /*ctx*/) -> bool {
+             return std::holds_alternative< SignatureStatePayload >(item.payload);
+             },                   .run = RunSignatureAnf,
+             },
+            {
+             .id         = PassId::kPrepareCoeffModel,
+             .consumes   = StateKind::kSignatureState,
+             .tag        = PassTag::kAnalysis,
+             .applicable = [](const WorkItem &item,
+             const OrchestratorContext & /*ctx*/) -> bool {
+             return std::holds_alternative< SignatureStatePayload >(item.payload);
+             },              .run = RunPrepareCoeffModel,
+             },
+            {
+             .id         = PassId::kSignatureCobCandidate,
+             .consumes   = StateKind::kSignatureCoeffState,
+             .tag        = PassTag::kSolver,
+             .applicable = [](const WorkItem &item,
+             const OrchestratorContext & /*ctx*/) -> bool {
+             return std::holds_alternative< SignatureCoeffStatePayload >(item.payload);
+             },          .run = RunSignatureCobCandidate,
+             },
+            {
+             .id         = PassId::kSignatureSingletonPolyRecovery,
+             .consumes   = StateKind::kSignatureCoeffState,
+             .tag        = PassTag::kSolver,
+             .applicable = [](const WorkItem &item,
+             const OrchestratorContext & /*ctx*/) -> bool {
+             return std::holds_alternative< SignatureCoeffStatePayload >(item.payload);
+             }, .run = RunSignatureSingletonPolyRecovery,
+             },
+            {
+             .id         = PassId::kSignatureMultivarPolyRecovery,
+             .consumes   = StateKind::kSignatureState,
+             .tag        = PassTag::kSolver,
+             .applicable = [](const WorkItem &item,
+             const OrchestratorContext & /*ctx*/) -> bool {
+             return std::holds_alternative< SignatureStatePayload >(item.payload);
+             },  .run = RunSignatureMultivarPolyRecovery,
              },
             {
              .id         = PassId::kExtractProductCore,

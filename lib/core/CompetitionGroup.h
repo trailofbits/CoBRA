@@ -27,6 +27,8 @@ namespace cobra {
         VerificationState verification = VerificationState::kUnverified;
         std::vector< std::string > real_vars;
         PassId source_pass;
+        bool needs_original_space_verification = true;
+        std::vector< uint64_t > sig_vector;
     };
 
     struct CompetitionGroup
