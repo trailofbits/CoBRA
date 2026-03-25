@@ -1,6 +1,10 @@
 #include "SemilinearPasses.h"
 #include "cobra/core/BitWidth.h"
+#include "cobra/core/ExprCost.h"
 #include "cobra/core/ExprUtils.h"
+#include "cobra/core/SemilinearNormalizer.h"
+#include "cobra/core/SemilinearSignature.h"
+#include "cobra/core/Trace.h"
 
 namespace cobra {
 
@@ -82,6 +86,94 @@ namespace cobra {
         auto var_child = CloneExpr(*xor_node.children[1 - xor_const_idx]);
         auto new_xor   = Expr::BitwiseXor(Expr::Constant(kNotC), std::move(var_child));
         return ApplyCoefficient(std::move(new_xor), kNegK, bitwidth);
+    }
+
+    Result< PassResult >
+    RunSemilinearNormalize(const WorkItem &item, OrchestratorContext &ctx) {
+        if (!std::holds_alternative< AstPayload >(item.payload)) {
+            return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
+        }
+        const auto &ast = std::get< AstPayload >(item.payload);
+
+        if (ast.provenance == Provenance::kLowered) {
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kNotApplicable,
+                    .disposition = ItemDisposition::kConsumeCurrent,
+                }
+            );
+        }
+        if (!ast.classification || ast.classification->semantic != SemanticClass::kSemilinear) {
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kNotApplicable,
+                    .disposition = ItemDisposition::kConsumeCurrent,
+                }
+            );
+        }
+
+        const auto kNumVars = static_cast< uint32_t >(ctx.original_vars.size());
+
+        if (IsLinearShortcut(*ast.expr, kNumVars, ctx.bitwidth)) {
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kNotApplicable,
+                    .disposition = ItemDisposition::kConsumeCurrent,
+                }
+            );
+        }
+
+        if (kNumVars > ctx.opts.max_vars) {
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kNotApplicable,
+                    .disposition = ItemDisposition::kConsumeCurrent,
+                    .reason =
+                        ReasonDetail{
+                                     .top = { .code    = { ReasonCategory::kGuardFailed,
+                                                  ReasonDomain::kSemilinear,
+                                                  semilinear_pass::kTooManyVars },
+                                     .message = "too many variables for semilinear" },
+                                     },
+            }
+            );
+        }
+
+        auto ir_result = NormalizeToSemilinear(*ast.expr, ctx.original_vars, ctx.bitwidth);
+        if (!ir_result.has_value()) {
+            ReasonDetail reason{
+                .top = { .code = { ReasonCategory::kRepresentationGap,
+                                   ReasonDomain::kSemilinear,
+                                   semilinear_pass::kNormalizeFailed },
+                        .message =
+                             "semilinear normalization failed: " + ir_result.error().message },
+            };
+            ctx.run_metadata.semilinear_failure = reason;
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kBlocked,
+                    .disposition = ItemDisposition::kConsumeCurrent,
+                    .reason      = std::move(reason),
+                }
+            );
+        }
+
+        WorkItem next;
+        next.payload = NormalizedSemilinearPayload{
+            .ctx = SemilinearContext{ .ir = std::move(ir_result.value()) },
+        };
+        next.features       = item.features;
+        next.metadata       = item.metadata;
+        next.depth          = item.depth;
+        next.rewrite_gen    = item.rewrite_gen;
+        next.attempted_mask = item.attempted_mask;
+        next.history        = item.history;
+
+        PassResult result;
+        result.decision    = PassDecision::kAdvance;
+        result.disposition = ItemDisposition::kConsumeCurrent;
+        result.next.push_back(std::move(next));
+        return Ok(std::move(result));
     }
 
 } // namespace cobra
