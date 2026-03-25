@@ -563,3 +563,4 @@ Testing/
 compile_commands.json
 CMakeFiles/
 .worktrees/
+build-trace/
