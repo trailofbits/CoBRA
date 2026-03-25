@@ -90,7 +90,7 @@ namespace cobra {
     Result< PassResult > RunBuildSignatureState(const WorkItem &, OrchestratorContext &);
     Result< PassResult > RunSupportedSolve(const WorkItem &, OrchestratorContext &);
     Result< PassResult > RunTrySemilinearPass(const WorkItem &, OrchestratorContext &);
-    Result< PassResult > RunDecompose(const WorkItem &, OrchestratorContext &);
+
     Result< PassResult > RunOperandSimplify(const WorkItem &, OrchestratorContext &);
     Result< PassResult > RunProductIdentityCollapse(const WorkItem &, OrchestratorContext &);
     Result< PassResult > RunXorLowering(const WorkItem &, OrchestratorContext &);

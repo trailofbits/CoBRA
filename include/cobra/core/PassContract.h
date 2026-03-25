@@ -143,7 +143,7 @@ namespace cobra {
 
     // ---------------------------------------------------------------
     // DecompositionMeta — set via SetDecompositionMeta() when
-    // TryDecomposition produces a result.
+    // Decomposition extractor/solver passes produce a result.
     // ---------------------------------------------------------------
 
     struct DecompositionMeta

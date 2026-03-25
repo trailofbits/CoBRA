@@ -50,14 +50,6 @@ namespace cobra {
         uint8_t core_degree = 0;
     };
 
-    // Unified decomposition engine: extract arithmetic core, solve residual,
-    // recombine with full-width verification.
-    //
-    // Requires ctx.opts.evaluator to be non-empty. Returns Inapplicable
-    // otherwise. Returned expr is always in the original variable space
-    // and full-width verified.
-    PassOutcome TryDecomposition(const DecompositionContext &ctx);
-
     // Core extractor: product/AST. Collects Mul(non-const, non-const) terms.
     SolverResult< CoreCandidate > ExtractProductCore(const DecompositionContext &ctx);
 

@@ -807,22 +807,17 @@ TEST(QSynthDiagnostic, DirectSuccessProductCoreInvestigation) {
             post_direct = check.passed;
         }
 
-        // --- Phase D: does TryDecomposition succeed? ---
-        auto orig_decomp = TryDecomposition(orig_dctx);
-        auto post_decomp = TryDecomposition(post_dctx);
+        // TryDecomposition removed — use orchestrator pipeline
 
         std::cerr << "  " << label << " orig_core=" << orig_has_core
-                  << " orig_direct=" << orig_direct
-                  << " orig_decomp=" << orig_decomp.Succeeded()
-                  << " step2=" << op_result.changed << " step2.5=" << pi_result.changed
-                  << " post_core=" << post_has_core << " post_direct=" << post_direct
-                  << " post_decomp=" << post_decomp.Succeeded();
+                  << " orig_direct=" << orig_direct << " step2=" << op_result.changed
+                  << " step2.5=" << pi_result.changed << " post_core=" << post_has_core
+                  << " post_direct=" << post_direct;
         if (orig_has_core) { std::cerr << " orig_expr=" << Render(*orig_prod->expr, vars, 64); }
         if (post_has_core) { std::cerr << " post_expr=" << Render(*post_prod->expr, vars, 64); }
         std::cerr << "\n";
 
         if (orig_direct && !post_has_core) { precond_destroy++; }
-        if (orig_decomp.Succeeded() && !post_decomp.Succeeded()) { confirmed_miss++; }
     }
 
     std::cerr << "\n=== Direct-Success Product Core Investigation ===\n";
@@ -1905,8 +1900,7 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
     // Sub-counters for routing_miss
     int rm_orig_direct = 0; // RunSupportedPass succeeds on original AST
     int rm_post_direct = 0; // succeeds after preconditioning
-    int rm_orig_decomp = 0; // TryDecomposition succeeds on original AST
-    int rm_post_decomp = 0; // TryDecomposition succeeds after preconditioning
+    // TryDecomposition counters removed — use orchestrator pipeline
 
     // Sub-counters for core_non_bn
     int nb_sup_verified_0 = 0; // sup_solved=1, verified=0
@@ -1982,7 +1976,7 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
         total++;
 
         // --- Probe 1: routing/orchestration miss ---
-        // Can RunSupportedPass or TryDecomposition succeed on original AST?
+        // TryDecomposition removed — use orchestrator pipeline
         auto orig_cls = ClassifyStructural(**folded_ptr);
         DecompositionContext orig_dctx{ .opts         = opts,
                                         .vars         = vars,
@@ -1992,7 +1986,7 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
 
         auto orig_sup    = RunSupportedPass(sig, vars, opts);
         bool orig_sup_ok = orig_sup.has_value() && orig_sup->Succeeded();
-        auto orig_decomp = TryDecomposition(orig_dctx);
+        (void) orig_sup_ok;
 
         // Post-preconditioning (Step 2 + 2.5)
         auto precond_expr = CloneExpr(**folded_ptr);
@@ -2010,22 +2004,6 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
                                         .sig          = post_sig,
                                         .current_expr = precond_expr.get(),
                                         .cls          = post_cls };
-
-        auto post_decomp = TryDecomposition(post_dctx);
-
-        // Note: orig_sup_ok means the supported pipeline already returns
-        // kSimplified — that's what the main Simplifier tries first. If that
-        // works, the case wouldn't be unsupported. So this should always be
-        // false. But TryDecomposition on original vs post may differ.
-        if (orig_decomp.Succeeded() || post_decomp.Succeeded()) {
-            routing_miss++;
-            if (orig_decomp.Succeeded()) { rm_orig_decomp++; }
-            if (post_decomp.Succeeded()) { rm_post_decomp++; }
-            std::cerr << "  L" << line_num << " ROUTING_MISS"
-                      << " orig_decomp=" << orig_decomp.Succeeded()
-                      << " post_decomp=" << post_decomp.Succeeded() << "\n";
-            continue;
-        }
 
         // --- Probe 2: core extraction on BOTH ASTs ---
         // Try all extractors on original AST — unwrap SolverResult
@@ -2418,8 +2396,6 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
     // === Summary ===
     std::cerr << "\n=== Unsupported Set Taxonomy (" << total << " cases) ===\n";
     std::cerr << "  1. routing_miss:  " << routing_miss << "\n";
-    std::cerr << "     orig_decomp:   " << rm_orig_decomp << "\n";
-    std::cerr << "     post_decomp:   " << rm_post_decomp << "\n";
     std::cerr << "  2. core_non_bn:   " << core_non_bn << "\n";
     std::cerr << "     sup_verified=0: " << nb_sup_verified_0 << "\n";
     std::cerr << "     sup_verified=1: " << nb_sup_verified_1 << "\n";
@@ -3064,19 +3040,8 @@ TEST(QSynthDiagnostic, RecoverableCaseTrace) {
         auto cls = ClassifyStructural(*pi.expr);
         std::cerr << "route: " << static_cast< int >(cls.route) << "\n";
 
-        // Early decomp on original
-        auto orig_cls = ClassifyStructural(**folded_shared);
-        DecompositionContext orig_dctx{
-            .opts         = opts,
-            .vars         = vars,
-            .sig          = sig,
-            .current_expr = folded_shared->get(),
-            .cls          = orig_cls,
-        };
-        auto orig_decomp = TryDecomposition(orig_dctx);
-        std::cerr << "early decomp (original): " << orig_decomp.Succeeded() << "\n";
+        // TryDecomposition removed — use orchestrator pipeline
 
-        // Phase 2 decomp on preconditioned
         auto post_sig =
             (op.changed || pi.changed) ? EvaluateBooleanSignature(*pi.expr, kNv, 64) : sig;
         DecompositionContext post_dctx{
@@ -3086,8 +3051,6 @@ TEST(QSynthDiagnostic, RecoverableCaseTrace) {
             .current_expr = pi.expr.get(),
             .cls          = cls,
         };
-        auto post_decomp = TryDecomposition(post_dctx);
-        std::cerr << "phase2 decomp (precond): " << post_decomp.Succeeded() << "\n";
 
         // What extractors see on preconditioned AST
         auto p_prod_r = ExtractProductCore(post_dctx);
@@ -3152,12 +3115,7 @@ TEST(QSynthDiagnostic, RecoverableCaseTrace) {
             std::cerr << "  truth poly2 core: " << Render(*t_p2->expr, vars, 64) << "\n";
         }
 
-        auto t_decomp = TryDecomposition(t_dctx);
-        std::cerr << "truth decomp: " << t_decomp.Succeeded() << "\n";
-        if (t_decomp.Succeeded()) {
-            std::cerr << "truth result: " << Render(t_decomp.GetExpr(), t_parse->vars, 64)
-                      << "\n";
-        }
+        // TryDecomposition removed — use orchestrator pipeline
     }
 }
 

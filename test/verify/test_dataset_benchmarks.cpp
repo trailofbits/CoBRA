@@ -374,39 +374,29 @@ TEST(GAMBADataset, MbaObfNonlinear) {
 
 TEST(GAMBADataset, Syntia) {
     auto stats = run_dataset(DATASET_DIR "/gamba/syntia.txt");
-    const auto kOrchestratorVerify =
-        DatasetStats::Triple{ ReasonCategory::kVerifyFailed, ReasonDomain::kOrchestrator, 0 };
     EXPECT_EQ(stats.total, 501);
     EXPECT_EQ(stats.skipped_parse, 1); // header
     EXPECT_EQ(stats.parsed, 500);
-    EXPECT_EQ(stats.simplified, 480);
-    EXPECT_EQ(stats.unsupported, 20);
+    // Technique-level DAG: extractors scheduled individually, expanding coverage
+    EXPECT_EQ(stats.simplified, 500);
+    EXPECT_EQ(stats.unsupported, 0);
     EXPECT_EQ(stats.failed_simplify, 0);
-
-    // Every unsupported result carries a structured reason code.
-    EXPECT_EQ(stats.has_structured_reason, stats.unsupported);
-    EXPECT_EQ(stats.by_category[ReasonCategory::kVerifyFailed], 20);
-    EXPECT_EQ(stats.by_triple[kOrchestratorVerify], 20);
 }
 
 TEST(GAMBADataset, QSynthEA) {
     auto stats = run_dataset(DATASET_DIR "/gamba/qsynth_ea.txt");
-    const auto kOrchestratorVerify =
-        DatasetStats::Triple{ ReasonCategory::kVerifyFailed, ReasonDomain::kOrchestrator, 0 };
     EXPECT_EQ(stats.total, 501);
     EXPECT_EQ(stats.skipped_parse, 1); // header only
     EXPECT_EQ(stats.parsed, 500);
-    EXPECT_EQ(stats.simplified, 288);
-    EXPECT_EQ(stats.unsupported, 212);
+    // Technique-level DAG: extractors scheduled individually, expanding coverage
+    EXPECT_EQ(stats.simplified, 371);
+    EXPECT_EQ(stats.unsupported, 129);
     EXPECT_EQ(stats.failed_simplify, 0);
 
     // Every unsupported result carries a structured reason code.
     EXPECT_EQ(stats.has_structured_reason, stats.unsupported);
-    EXPECT_EQ(stats.by_category[ReasonCategory::kVerifyFailed], 119);
     EXPECT_EQ(stats.by_category[ReasonCategory::kRepresentationGap], 63);
-    EXPECT_EQ(stats.by_category[ReasonCategory::kSearchExhausted], 30);
-    EXPECT_GT(stats.by_triple[kOrchestratorVerify], 0)
-        << "No orchestrator-level FW verification failures recorded";
+    EXPECT_EQ(stats.by_category[ReasonCategory::kSearchExhausted], 66);
 
     // Decomposition cause frames propagated into cause_chain.
     // MixedRewrite unsupported outcomes should carry delegated
@@ -432,25 +422,19 @@ TEST(GAMBADataset, LokiTiny) {
 
 TEST(OSESDataset, Fast) {
     auto stats = run_dataset(DATASET_DIR "/oses/oses_fast.txt");
-    const auto kOrchestratorVerify =
-        DatasetStats::Triple{ ReasonCategory::kVerifyFailed, ReasonDomain::kOrchestrator, 0 };
     EXPECT_EQ(stats.total, 473);
     EXPECT_EQ(stats.skipped_parse, 15);
     EXPECT_EQ(stats.parsed, 458);
-    EXPECT_EQ(stats.simplified, 390);
-    EXPECT_EQ(stats.unsupported, 68);
+    // Technique-level DAG: extractors scheduled individually, expanding coverage
+    EXPECT_EQ(stats.simplified, 392);
+    EXPECT_EQ(stats.unsupported, 66);
     EXPECT_EQ(stats.failed_simplify, 0);
 
     // Every unsupported result carries a structured reason code.
     EXPECT_EQ(stats.has_structured_reason, stats.unsupported);
-    // FW verification failures dominate.
-    // DAG scheduler: minor category redistribution vs staged model
-    // (total unsupported unchanged at 68).
-    EXPECT_EQ(stats.by_category[ReasonCategory::kVerifyFailed], 41);
-    EXPECT_EQ(stats.by_category[ReasonCategory::kRepresentationGap], 23);
-    EXPECT_EQ(stats.by_category[ReasonCategory::kSearchExhausted], 4);
-    EXPECT_GT(stats.by_triple[kOrchestratorVerify], 0)
-        << "No orchestrator-level FW verification failures recorded";
+    EXPECT_EQ(stats.by_category[ReasonCategory::kVerifyFailed], 3);
+    EXPECT_EQ(stats.by_category[ReasonCategory::kRepresentationGap], 20);
+    EXPECT_EQ(stats.by_category[ReasonCategory::kSearchExhausted], 43);
 }
 
 TEST(OSESDataset, DISABLED_Slow) {
