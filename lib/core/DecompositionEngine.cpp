@@ -1,4 +1,5 @@
 #include "cobra/core/DecompositionEngine.h"
+#include "DecompositionPassHelpers.h"
 #include "cobra/core/AuxVarEliminator.h"
 #include "cobra/core/BitWidth.h"
 #include "cobra/core/ExprUtils.h"
@@ -27,23 +28,6 @@ namespace cobra {
         static_cast< int >(ResidualSolverKind::kTemplateDecomposition) <= 255,
         "ResidualSolverKind exceeds uint8_t range in DecompositionMeta"
     );
-
-    namespace decomposition {
-        enum Subcode : uint16_t {
-            kNoExpr           = 1,
-            kNoProducts       = 2,
-            kNoEvaluator      = 3,
-            kTooManyVars      = 4,
-            kPolyRecovFailed  = 5,
-            kExprBuildFailed  = 6,
-            kNoTemplateMatch  = 7,
-            kCoreRejected     = 10,
-            kDirectFwFailed   = 11,
-            kResidualFailed   = 12,
-            kAllSolversFailed = 13,
-            kLoopExhausted    = 20,
-        };
-    } // namespace decomposition
 
     namespace {
 

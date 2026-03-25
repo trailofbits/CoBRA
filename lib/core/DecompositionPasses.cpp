@@ -93,7 +93,8 @@ namespace cobra {
                         .reason =
                             ReasonDetail{
                                          .top = { .code    = { ReasonCategory::kGuardFailed,
-                                                      ReasonDomain::kDecomposition },
+                                                      ReasonDomain::kDecomposition,
+                                                      decomposition::kNoEvaluator },
                                          .message = "Decomposition requires evaluator" },
                                          },
                 }
@@ -175,7 +176,15 @@ namespace cobra {
                         PassResult{
                             .decision    = PassDecision::kBlocked,
                             .disposition = ItemDisposition::kRetainCurrent,
-                        }
+                            .reason =
+                                ReasonDetail{
+                                             .top = { .code    = { ReasonCategory::kInapplicable,
+                                                          ReasonDomain::kDecomposition,
+                                                          decomposition::kCoreRejected },
+                                             .message = "polynomial core rejected by "
+                                                        "acceptance gate" },
+                                             },
+                    }
                     );
                 }
             }
@@ -252,7 +261,8 @@ namespace cobra {
                     .reason =
                         ReasonDetail{
                                      .top = { .code    = { ReasonCategory::kGuardFailed,
-                                                  ReasonDomain::kDecomposition },
+                                                  ReasonDomain::kDecomposition,
+                                                  decomposition::kNoEvaluator },
                                      .message = "Decomposition requires evaluator" },
                                      },
             }
@@ -318,7 +328,8 @@ namespace cobra {
                     .reason =
                         ReasonDetail{
                                      .top = { .code    = { ReasonCategory::kGuardFailed,
-                                                  ReasonDomain::kDecomposition },
+                                                  ReasonDomain::kDecomposition,
+                                                  decomposition::kNoEvaluator },
                                      .message = "Decomposition requires evaluator" },
                                      },
             }
@@ -438,7 +449,8 @@ namespace cobra {
                 .reason =
                     ReasonDetail{
                                  .top = { .code    = { ReasonCategory::kVerifyFailed,
-                                              ReasonDomain::kGhostResidual },
+                                              ReasonDomain::kGhostResidual,
+                                              decomposition::kResidualFailed },
                                  .message = "ghost residual recombination failed "
                                             "full-width verification" },
                                  },
@@ -494,7 +506,8 @@ namespace cobra {
                 .reason =
                     ReasonDetail{
                                  .top = { .code    = { ReasonCategory::kVerifyFailed,
-                                              ReasonDomain::kGhostResidual },
+                                              ReasonDomain::kGhostResidual,
+                                              decomposition::kResidualFailed },
                                  .message = "factored ghost recombination failed "
                                             "full-width verification" },
                                  },
@@ -551,7 +564,8 @@ namespace cobra {
                 .reason =
                     ReasonDetail{
                                  .top = { .code    = { ReasonCategory::kVerifyFailed,
-                                              ReasonDomain::kGhostResidual },
+                                              ReasonDomain::kGhostResidual,
+                                              decomposition::kResidualFailed },
                                  .message = "escalated factored ghost recombination "
                                             "failed full-width verification" },
                                  },
@@ -600,7 +614,8 @@ namespace cobra {
                 .reason =
                     ReasonDetail{
                                  .top = { .code    = { ReasonCategory::kVerifyFailed,
-                                              ReasonDomain::kPolynomialRecovery },
+                                              ReasonDomain::kPolynomialRecovery,
+                                              decomposition::kResidualFailed },
                                  .message = "polynomial residual recombination "
                                             "failed full-width verification" },
                                  },
@@ -625,7 +640,8 @@ namespace cobra {
                 reason = res_pass.value().Reason();
             } else {
                 reason.top = {
-                    .code    = { ReasonCategory::kNoSolution, ReasonDomain::kDecomposition },
+                    .code    = { ReasonCategory::kNoSolution, ReasonDomain::kDecomposition,
+                                decomposition::kResidualFailed },
                     .message = "supported pipeline returned error for residual",
                 };
             }
@@ -657,7 +673,8 @@ namespace cobra {
                     .reason =
                         ReasonDetail{
                                      .top = { .code    = { ReasonCategory::kVerifyFailed,
-                                                  ReasonDomain::kDecomposition },
+                                                  ReasonDomain::kDecomposition,
+                                                  decomposition::kResidualFailed },
                                      .message = "supported residual candidate failed "
                                                 "strengthened verification" },
                                      },
@@ -678,7 +695,8 @@ namespace cobra {
                 .reason =
                     ReasonDetail{
                                  .top = { .code    = { ReasonCategory::kVerifyFailed,
-                                              ReasonDomain::kDecomposition },
+                                              ReasonDomain::kDecomposition,
+                                              decomposition::kResidualFailed },
                                  .message = "supported residual recombination "
                                             "failed full-width verification" },
                                  },
@@ -741,7 +759,8 @@ namespace cobra {
                 .reason =
                     ReasonDetail{
                                  .top = { .code    = { ReasonCategory::kVerifyFailed,
-                                              ReasonDomain::kTemplateDecomposer },
+                                              ReasonDomain::kTemplateDecomposer,
+                                              decomposition::kResidualFailed },
                                  .message = "template residual recombination "
                                             "failed full-width verification" },
                                  },

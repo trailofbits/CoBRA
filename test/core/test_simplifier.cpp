@@ -763,7 +763,9 @@ TEST(SimplifierTest, BitwiseOverArith_NoMul_Unsupported) {
 
     auto result = Simplify(sig, vars, input.get(), opts);
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kUnchangedUnsupported);
+    // Technique-level DAG finds a valid simplification path
+    // that the old monolithic decomposition missed.
+    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
 }
 
 TEST(SimplifierTest, MultivarHighPower_PurePolynomial_Simplifies) {

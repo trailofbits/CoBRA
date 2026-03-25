@@ -8,6 +8,23 @@
 
 namespace cobra {
 
+    namespace decomposition {
+        enum Subcode : uint16_t {
+            kNoExpr           = 1,
+            kNoProducts       = 2,
+            kNoEvaluator      = 3,
+            kTooManyVars      = 4,
+            kPolyRecovFailed  = 5,
+            kExprBuildFailed  = 6,
+            kNoTemplateMatch  = 7,
+            kCoreRejected     = 10,
+            kDirectFwFailed   = 11,
+            kResidualFailed   = 12,
+            kAllSolversFailed = 13,
+            kLoopExhausted    = 20,
+        };
+    } // namespace decomposition
+
     // Compute the Boolean signature to feed into decomposition.
     // Uses the parser-computed input_sig when the expression is fresh
     // (rewrite_gen == 0 and lowering has not fired). Otherwise re-evaluates
