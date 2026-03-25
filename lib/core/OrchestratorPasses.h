@@ -37,6 +37,8 @@ namespace cobra {
         kResidualFactoredGhost,
         kResidualFactoredGhostEscalated,
         kResidualTemplate,
+        // Competition resolution
+        kResolveCompetition,
         // Structural rewrites
         kOperandSimplify,
         kProductIdentityCollapse,

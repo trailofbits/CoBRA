@@ -1,6 +1,7 @@
 #include "OrchestratorPasses.h"
 #include "DecompositionPassHelpers.h"
 #include "SemilinearPasses.h"
+#include "SignaturePasses.h"
 #include "SimplifierInternal.h"
 #include "cobra/core/AuxVarEliminator.h"
 #include "cobra/core/Classifier.h"
@@ -543,6 +544,15 @@ namespace cobra {
              const OrchestratorContext & /*ctx*/) -> bool {
              return std::holds_alternative< RewrittenSemilinearPayload >(item.payload);
              },          .run = RunSemilinearReconstruct,
+             },
+            {
+             .id         = PassId::kResolveCompetition,
+             .consumes   = StateKind::kCompetitionResolved,
+             .tag        = PassTag::kAnalysis,
+             .applicable = [](const WorkItem &item,
+             const OrchestratorContext & /*ctx*/) -> bool {
+             return std::holds_alternative< CompetitionResolvedPayload >(item.payload);
+             },             .run = RunResolveCompetition,
              },
             {
              .id         = PassId::kExtractProductCore,

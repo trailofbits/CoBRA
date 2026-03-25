@@ -399,6 +399,14 @@ namespace cobra {
             return pass;
         }
 
+        // 7b. CompetitionResolved → kResolveCompetition
+        if (kind == StateKind::kCompetitionResolved) {
+            auto pass = PassId::kResolveCompetition;
+            if ((item.attempted_mask & Bit(pass)) != 0) { return std::nullopt; }
+            if (cache.HasAttempted(fp, pass)) { return std::nullopt; }
+            return pass;
+        }
+
         // 8. Original provenance + semilinear → kSemilinearNormalize
         if (item.features.provenance == Provenance::kOriginal) {
             if (item.features.classification

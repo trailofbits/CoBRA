@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ContinuationTypes.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/ExprCost.h"
 #include "cobra/core/PassContract.h"
@@ -9,6 +10,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 namespace cobra {
@@ -32,7 +34,7 @@ namespace cobra {
         uint32_t open_handles = 0;
         std::optional< CandidateRecord > best;
         std::optional< ExprCost > baseline_cost;
-        // continuation added in Task 2
+        std::optional< ContinuationData > continuation;
         std::vector< ReasonDetail > technique_failures;
     };
 

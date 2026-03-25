@@ -1,6 +1,8 @@
 #include "CompetitionGroup.h"
+#include "ContinuationTypes.h"
 #include "Orchestrator.h"
 #include "OrchestratorPasses.h"
+#include "SignaturePasses.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/ExprCost.h"
 
@@ -287,4 +289,246 @@ TEST(CompetitionGroup, TechniqueFailuresAccumulate) {
     groups.at(id).technique_failures.push_back(std::move(failure));
     EXPECT_EQ(groups.at(id).technique_failures.size(), 1);
     EXPECT_EQ(groups.at(id).technique_failures[0].top.message, "solver failed");
+}
+
+// --- Continuation field tests ---
+
+TEST(CompetitionGroup, ContinuationDefaultsToNullopt) {
+    std::unordered_map< GroupId, CompetitionGroup > groups;
+    GroupId next_id = 0;
+    auto id         = CreateGroup(groups, next_id);
+    EXPECT_FALSE(groups.at(id).continuation.has_value());
+}
+
+TEST(CompetitionGroup, ContinuationMonostate) {
+    std::unordered_map< GroupId, CompetitionGroup > groups;
+    GroupId next_id            = 0;
+    auto id                    = CreateGroup(groups, next_id);
+    groups.at(id).continuation = ContinuationData{ std::monostate{} };
+    ASSERT_TRUE(groups.at(id).continuation.has_value());
+    EXPECT_TRUE(std::holds_alternative< std::monostate >(*groups.at(id).continuation));
+}
+
+TEST(CompetitionGroup, ContinuationBitwiseCompose) {
+    std::unordered_map< GroupId, CompetitionGroup > groups;
+    GroupId next_id            = 0;
+    auto id                    = CreateGroup(groups, next_id);
+    groups.at(id).continuation = ContinuationData{
+        BitwiseComposeCont{
+                           .var_k                  = 2,
+                           .gate                   = Expr::Kind::kXor,
+                           .add_coeff              = 0,
+                           .active_context_indices = { 0, 1 },
+                           .parent_group_id        = 99,
+                           }
+    };
+    ASSERT_TRUE(groups.at(id).continuation.has_value());
+    EXPECT_TRUE(std::holds_alternative< BitwiseComposeCont >(*groups.at(id).continuation));
+}
+
+// --- RunResolveCompetition tests ---
+
+namespace {
+
+    Options MakeDefaultOpts() {
+        Options opts;
+        opts.bitwidth = 64;
+        return opts;
+    }
+
+} // namespace
+
+TEST(CompetitionGroup, ResolveMonostateWithWinner) {
+    Options opts                    = MakeDefaultOpts();
+    std::vector< std::string > vars = { "x0" };
+    OrchestratorContext ctx{
+        .opts          = opts,
+        .original_vars = vars,
+        .bitwidth      = 64,
+    };
+
+    auto gid = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+
+    CandidateRecord rec;
+    rec.expr         = Expr::Constant(42);
+    rec.cost         = ExprCost{ .weighted_size = 3 };
+    rec.verification = VerificationState::kVerified;
+    rec.real_vars    = { "x0" };
+    rec.source_pass  = PassId::kSupportedSolve;
+    SubmitCandidate(ctx.competition_groups, gid, std::move(rec));
+
+    WorkItem item;
+    item.payload = CompetitionResolvedPayload{ .group_id = gid };
+
+    auto result = RunResolveCompetition(item, ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->decision, PassDecision::kSolvedCandidate);
+    ASSERT_EQ(result->next.size(), 1);
+    auto kind = GetStateKind(result->next[0].payload);
+    EXPECT_EQ(kind, StateKind::kCandidateExpr);
+    auto &cand = std::get< CandidatePayload >(result->next[0].payload);
+    EXPECT_EQ(cand.cost.weighted_size, 3);
+    EXPECT_EQ(cand.expr->constant_val, 42);
+
+    // Group cleaned up
+    EXPECT_EQ(ctx.competition_groups.count(gid), 0);
+}
+
+TEST(CompetitionGroup, ResolveMonostateNoWinner) {
+    Options opts                    = MakeDefaultOpts();
+    std::vector< std::string > vars = { "x0" };
+    OrchestratorContext ctx{
+        .opts          = opts,
+        .original_vars = vars,
+        .bitwidth      = 64,
+    };
+
+    auto gid = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+    ReasonDetail failure;
+    failure.top.message       = "technique A failed";
+    failure.top.code.category = ReasonCategory::kNoSolution;
+    ctx.competition_groups.at(gid).technique_failures.push_back(failure);
+
+    ReasonDetail failure2;
+    failure2.top.message       = "technique B failed";
+    failure2.top.code.category = ReasonCategory::kSearchExhausted;
+    ctx.competition_groups.at(gid).technique_failures.push_back(failure2);
+
+    WorkItem item;
+    item.payload = CompetitionResolvedPayload{ .group_id = gid };
+
+    auto result = RunResolveCompetition(item, ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->decision, PassDecision::kBlocked);
+    EXPECT_EQ(result->reason.top.message, "technique A failed");
+    EXPECT_EQ(result->reason.causes.size(), 1);
+    EXPECT_EQ(result->reason.causes[0].message, "technique B failed");
+
+    // Group cleaned up
+    EXPECT_EQ(ctx.competition_groups.count(gid), 0);
+}
+
+TEST(CompetitionGroup, ResolveMonostateNoWinnerNoFailures) {
+    Options opts                    = MakeDefaultOpts();
+    std::vector< std::string > vars = { "x0" };
+    OrchestratorContext ctx{
+        .opts          = opts,
+        .original_vars = vars,
+        .bitwidth      = 64,
+    };
+
+    auto gid = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+
+    WorkItem item;
+    item.payload = CompetitionResolvedPayload{ .group_id = gid };
+
+    auto result = RunResolveCompetition(item, ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->decision, PassDecision::kBlocked);
+    EXPECT_EQ(result->reason.top.code.category, ReasonCategory::kSearchExhausted);
+
+    EXPECT_EQ(ctx.competition_groups.count(gid), 0);
+}
+
+TEST(CompetitionGroup, ResolveCleansUpGroup) {
+    Options opts                    = MakeDefaultOpts();
+    std::vector< std::string > vars = { "x0" };
+    OrchestratorContext ctx{
+        .opts          = opts,
+        .original_vars = vars,
+        .bitwidth      = 64,
+    };
+
+    auto gid0 = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+    auto gid1 = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+    EXPECT_EQ(ctx.competition_groups.size(), 2);
+
+    WorkItem item;
+    item.payload = CompetitionResolvedPayload{ .group_id = gid0 };
+    auto result  = RunResolveCompetition(item, ctx);
+    ASSERT_TRUE(result.has_value());
+
+    // Only gid0 removed; gid1 still present
+    EXPECT_EQ(ctx.competition_groups.size(), 1);
+    EXPECT_EQ(ctx.competition_groups.count(gid0), 0);
+    EXPECT_EQ(ctx.competition_groups.count(gid1), 1);
+}
+
+TEST(CompetitionGroup, ResolveWithContinuationStubReturnsBlocked) {
+    Options opts                    = MakeDefaultOpts();
+    std::vector< std::string > vars = { "x0" };
+    OrchestratorContext ctx{
+        .opts          = opts,
+        .original_vars = vars,
+        .bitwidth      = 64,
+    };
+
+    auto gid = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+    ctx.competition_groups.at(gid).continuation = ContinuationData{
+        HybridComposeCont{
+                          .var_k           = 0,
+                          .op              = ExtractOp::kXor,
+                          .parent_group_id = 0,
+                          }
+    };
+
+    CandidateRecord rec;
+    rec.expr        = Expr::Constant(1);
+    rec.cost        = ExprCost{ .weighted_size = 2 };
+    rec.source_pass = PassId::kSupportedSolve;
+    SubmitCandidate(ctx.competition_groups, gid, std::move(rec));
+
+    WorkItem item;
+    item.payload = CompetitionResolvedPayload{ .group_id = gid };
+
+    auto result = RunResolveCompetition(item, ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->decision, PassDecision::kBlocked);
+    EXPECT_EQ(result->reason.top.code.category, ReasonCategory::kInapplicable);
+
+    EXPECT_EQ(ctx.competition_groups.count(gid), 0);
+}
+
+TEST(CompetitionGroup, ResolveNotApplicableForNonResolved) {
+    Options opts                    = MakeDefaultOpts();
+    std::vector< std::string > vars = { "x0" };
+    OrchestratorContext ctx{
+        .opts          = opts,
+        .original_vars = vars,
+        .bitwidth      = 64,
+    };
+
+    WorkItem item;
+    item.payload = AstPayload{ .expr = Expr::Constant(0) };
+
+    auto result = RunResolveCompetition(item, ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->decision, PassDecision::kNotApplicable);
+}
+
+// --- SelectNextPass integration ---
+
+TEST(CompetitionGroup, SchedulerRoutesResolvedToResolveCompetition) {
+    OrchestratorPolicy policy;
+    PassAttemptCache cache;
+
+    WorkItem item;
+    item.payload = CompetitionResolvedPayload{ .group_id = 0 };
+
+    auto pass = SelectNextPass(item, policy, 0, cache);
+    ASSERT_TRUE(pass.has_value());
+    EXPECT_EQ(*pass, PassId::kResolveCompetition);
+}
+
+TEST(CompetitionGroup, SchedulerNoRepeatAfterAttemptMask) {
+    OrchestratorPolicy policy;
+    PassAttemptCache cache;
+
+    WorkItem item;
+    item.payload        = CompetitionResolvedPayload{ .group_id = 0 };
+    item.attempted_mask = static_cast< uint64_t >(1)
+        << static_cast< uint8_t >(PassId::kResolveCompetition);
+
+    auto pass = SelectNextPass(item, policy, 0, cache);
+    EXPECT_FALSE(pass.has_value());
 }

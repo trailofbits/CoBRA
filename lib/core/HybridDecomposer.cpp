@@ -1,4 +1,5 @@
 #include "cobra/core/HybridDecomposer.h"
+#include "ContinuationTypes.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/ExprCost.h"
 #include "cobra/core/PassContract.h"
@@ -77,8 +78,6 @@ namespace cobra {
             }
             return Expr::Constant(0);
         }
-
-        enum class ExtractOp { kXor, kAdd };
 
         // Build the residual signature: r_sig[i] = sig[i] OP^{-1} bit_k(i)
         // XOR: r_sig[i] = sig[i] ^ ((i >> k) & 1)
