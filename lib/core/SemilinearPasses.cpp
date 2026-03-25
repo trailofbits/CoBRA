@@ -1,9 +1,17 @@
 #include "SemilinearPasses.h"
+#include "OrchestratorPasses.h"
+#include "cobra/core/AtomSimplifier.h"
+#include "cobra/core/BitPartitioner.h"
 #include "cobra/core/BitWidth.h"
 #include "cobra/core/ExprCost.h"
 #include "cobra/core/ExprUtils.h"
+#include "cobra/core/MaskedAtomReconstructor.h"
+#include "cobra/core/SelfCheck.h"
 #include "cobra/core/SemilinearNormalizer.h"
 #include "cobra/core/SemilinearSignature.h"
+#include "cobra/core/SignatureChecker.h"
+#include "cobra/core/StructureRecovery.h"
+#include "cobra/core/TermRefiner.h"
 #include "cobra/core/Trace.h"
 
 namespace cobra {
@@ -173,6 +181,172 @@ namespace cobra {
         result.decision    = PassDecision::kAdvance;
         result.disposition = ItemDisposition::kConsumeCurrent;
         result.next.push_back(std::move(next));
+        return Ok(std::move(result));
+    }
+
+    Result< PassResult > RunSemilinearCheck(const WorkItem &item, OrchestratorContext &ctx) {
+        if (!std::holds_alternative< NormalizedSemilinearPayload >(item.payload)) {
+            return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
+        }
+        auto ir =
+            CloneSemilinearIR(std::get< NormalizedSemilinearPayload >(item.payload).ctx.ir);
+
+        SimplifyStructure(ir);
+
+        auto plain = ReconstructMaskedAtoms(ir, {});
+        auto check = SelfCheckSemilinear(ir, *plain, ctx.original_vars, ctx.bitwidth);
+        if (!check.passed) {
+            COBRA_TRACE(
+                "Simplifier", "RunSemilinearCheck: self-check failed: {}", check.mismatch_detail
+            );
+            ReasonDetail reason{
+                .top = { .code    = { ReasonCategory::kInternalInvariant,
+                                      ReasonDomain::kSemilinear,
+                                      semilinear_pass::kSelfCheckFailed },
+                        .message = "semilinear self-check failed" },
+            };
+            ctx.run_metadata.semilinear_failure = reason;
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kBlocked,
+                    .disposition = ItemDisposition::kConsumeCurrent,
+                    .reason      = std::move(reason),
+                }
+            );
+        }
+
+        WorkItem next;
+        next.payload = CheckedSemilinearPayload{
+            .ctx = SemilinearContext{ .ir = std::move(ir) },
+        };
+        next.features       = item.features;
+        next.metadata       = item.metadata;
+        next.depth          = item.depth;
+        next.rewrite_gen    = item.rewrite_gen;
+        next.attempted_mask = item.attempted_mask;
+        next.history        = item.history;
+
+        PassResult result;
+        result.decision    = PassDecision::kAdvance;
+        result.disposition = ItemDisposition::kConsumeCurrent;
+        result.next.push_back(std::move(next));
+        return Ok(std::move(result));
+    }
+
+    Result< PassResult > RunSemilinearRewrite(const WorkItem &item, OrchestratorContext &ctx) {
+        if (!std::holds_alternative< CheckedSemilinearPayload >(item.payload)) {
+            return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
+        }
+        auto ir = CloneSemilinearIR(std::get< CheckedSemilinearPayload >(item.payload).ctx.ir);
+
+        if (FlattenComplexAtoms(ir)) { CoalesceTerms(ir); }
+        RecoverStructure(ir);
+        RefineTerms(ir);
+        CoalesceTerms(ir);
+
+        if (ctx.evaluator) {
+            const auto kNumVars = static_cast< uint32_t >(ctx.original_vars.size());
+            auto probe_expr     = ReconstructMaskedAtoms(ir, {});
+            auto probe =
+                FullWidthCheckEval(*ctx.evaluator, kNumVars, *probe_expr, ctx.bitwidth, 16);
+            if (!probe.passed) {
+                COBRA_TRACE("Simplifier", "RunSemilinearRewrite: post-rewrite probe failed");
+                ReasonDetail reason{
+                    .top = { .code = { ReasonCategory::kVerifyFailed, ReasonDomain::kSemilinear,
+                                       semilinear_pass::kPostRewriteProbe },
+                            .message = "post-rewrite probe verification failed" },
+                };
+                ctx.run_metadata.semilinear_failure = reason;
+                return Ok(
+                    PassResult{
+                        .decision    = PassDecision::kBlocked,
+                        .disposition = ItemDisposition::kConsumeCurrent,
+                        .reason      = std::move(reason),
+                    }
+                );
+            }
+        }
+
+        WorkItem next;
+        next.payload = RewrittenSemilinearPayload{
+            .ctx = SemilinearContext{ .ir = std::move(ir) },
+        };
+        next.features       = item.features;
+        next.metadata       = item.metadata;
+        next.depth          = item.depth;
+        next.rewrite_gen    = item.rewrite_gen;
+        next.attempted_mask = item.attempted_mask;
+        next.history        = item.history;
+
+        PassResult result;
+        result.decision    = PassDecision::kAdvance;
+        result.disposition = ItemDisposition::kConsumeCurrent;
+        result.next.push_back(std::move(next));
+        return Ok(std::move(result));
+    }
+
+    Result< PassResult >
+    RunSemilinearReconstruct(const WorkItem &item, OrchestratorContext &ctx) {
+        if (!std::holds_alternative< RewrittenSemilinearPayload >(item.payload)) {
+            return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
+        }
+        auto ir =
+            CloneSemilinearIR(std::get< RewrittenSemilinearPayload >(item.payload).ctx.ir);
+
+        CompactAtomTable(ir);
+        auto partitions = ComputePartitions(ir);
+        auto simplified = ReconstructMaskedAtoms(ir, partitions);
+        simplified      = SimplifyXorConstant(std::move(simplified), ctx.bitwidth);
+
+        const auto kNumVars = static_cast< uint32_t >(ctx.original_vars.size());
+        auto verification   = VerificationState::kUnverified;
+
+        if (ctx.evaluator) {
+            auto final_check =
+                FullWidthCheckEval(*ctx.evaluator, kNumVars, *simplified, ctx.bitwidth);
+            if (!final_check.passed) {
+                COBRA_TRACE(
+                    "Simplifier", "RunSemilinearReconstruct: final verification failed"
+                );
+                ReasonDetail reason{
+                    .top = { .code = { ReasonCategory::kVerifyFailed, ReasonDomain::kSemilinear,
+                                       semilinear_pass::kFinalVerifyFail },
+                            .message = "final full-width verification failed" },
+                };
+                ctx.run_metadata.semilinear_failure = reason;
+                return Ok(
+                    PassResult{
+                        .decision    = PassDecision::kBlocked,
+                        .disposition = ItemDisposition::kConsumeCurrent,
+                        .reason      = std::move(reason),
+                    }
+                );
+            }
+            verification = VerificationState::kVerified;
+        }
+
+        auto cost_info = ComputeCost(*simplified);
+
+        WorkItem cand_item;
+        cand_item.payload = CandidatePayload{
+            .expr                              = std::move(simplified),
+            .real_vars                         = ctx.original_vars,
+            .cost                              = cost_info.cost,
+            .producing_pass                    = PassId::kSemilinearReconstruct,
+            .needs_original_space_verification = false,
+        };
+        cand_item.features              = item.features;
+        cand_item.metadata              = item.metadata;
+        cand_item.metadata.verification = verification;
+        cand_item.depth                 = item.depth;
+        cand_item.rewrite_gen           = item.rewrite_gen;
+        cand_item.attempted_mask        = item.attempted_mask;
+        cand_item.history               = item.history;
+
+        PassResult result;
+        result.decision    = PassDecision::kSolvedCandidate;
+        result.disposition = ItemDisposition::kConsumeCurrent;
+        result.next.push_back(std::move(cand_item));
         return Ok(std::move(result));
     }
 
