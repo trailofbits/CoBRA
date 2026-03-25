@@ -118,6 +118,8 @@ namespace cobra {
         uint32_t depth        = 0;
         uint32_t rewrite_gen  = 0;
         uint32_t stage_cursor = 0;
+        bool reentry_pending  = false;
+        uint32_t resume_stage = 0;
         std::vector< PassId > history;
     };
 
@@ -133,6 +135,8 @@ namespace cobra {
         uint32_t bitwidth;
         Provenance provenance;
         uint32_t stage_cursor;
+        bool reentry_pending;
+        uint32_t resume_stage;
 
         bool operator==(const StateFingerprint &) const = default;
     };

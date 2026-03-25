@@ -67,17 +67,18 @@ namespace cobra {
                 },
                 item.payload
             );
-            clone.features     = item.features;
-            clone.metadata     = item.metadata;
-            clone.depth        = item.depth;
-            clone.rewrite_gen  = item.rewrite_gen;
-            clone.stage_cursor = item.stage_cursor;
-            clone.history      = item.history;
+            clone.features        = item.features;
+            clone.metadata        = item.metadata;
+            clone.depth           = item.depth;
+            clone.rewrite_gen     = item.rewrite_gen;
+            clone.stage_cursor    = item.stage_cursor;
+            clone.reentry_pending = item.reentry_pending;
+            clone.resume_stage    = item.resume_stage;
+            clone.history         = item.history;
             return clone;
         }
 
-        bool IsStrictMixedRewriteItem(const WorkItem &item, const OrchestratorPolicy &policy) {
-            if (!policy.strict_route_faithful) { return false; }
+        bool IsMixedRewritePipelineItem(const WorkItem &item) {
             if (!std::holds_alternative< AstPayload >(item.payload)) { return false; }
             auto prov = item.features.provenance;
             if (prov != Provenance::kLowered && prov != Provenance::kRewritten) {
@@ -91,10 +92,12 @@ namespace cobra {
     StateFingerprint
     ComputeFingerprint(const WorkItem &item, uint32_t bitwidth, bool normalize_stage_cursor) {
         StateFingerprint fp;
-        fp.kind         = GetStateKind(item.payload);
-        fp.bitwidth     = bitwidth;
-        fp.provenance   = item.features.provenance;
-        fp.stage_cursor = normalize_stage_cursor ? 0 : item.stage_cursor;
+        fp.kind            = GetStateKind(item.payload);
+        fp.bitwidth        = bitwidth;
+        fp.provenance      = item.features.provenance;
+        fp.stage_cursor    = normalize_stage_cursor ? 0 : item.stage_cursor;
+        fp.reentry_pending = item.reentry_pending;
+        fp.resume_stage    = item.resume_stage;
 
         std::visit(
             [&fp](const auto &payload) {
@@ -151,6 +154,8 @@ namespace cobra {
         h ^= std::hash< int >{}(static_cast< int >(fp.provenance)) + 0x9e3779b9 + (h << 6)
             + (h >> 2);
         h ^= std::hash< uint32_t >{}(fp.stage_cursor) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash< bool >{}(fp.reentry_pending) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash< uint32_t >{}(fp.resume_stage) + 0x9e3779b9 + (h << 6) + (h >> 2);
         for (const auto &v : fp.vars) {
             h ^= std::hash< std::string >{}(v) + 0x9e3779b9 + (h << 6) + (h >> 2);
         }
@@ -194,9 +199,9 @@ namespace cobra {
     // ---------------------------------------------------------------
 
     namespace {
-        // Stage-gated passes for strict MixedRewrite pipeline.
-        // Maps stage_cursor -> PassId for stages 0..6.
-        constexpr int kMixedRewriteMaxStage = 6;
+        // Stage-gated passes for MixedRewrite pipeline.
+        // Maps stage_cursor -> PassId for stages 0..5.
+        constexpr int kMixedRewriteMaxStage = 5;
 
         PassId MixedRewriteStagePass(uint32_t stage) {
             switch (stage) {
@@ -212,19 +217,9 @@ namespace cobra {
                     return PassId::kDecompose;
                 case 5:
                     return PassId::kXorLowering;
-                case 6:
-                    return PassId::kBuildSignatureState;
                 default:
                     return PassId::kBuildSignatureState;
             }
-        }
-
-        std::vector< PassId > FullBand1Passes() {
-            return {
-                PassId::kBuildSignatureState, PassId::kDecompose,
-                PassId::kOperandSimplify,     PassId::kProductIdentityCollapse,
-                PassId::kXorLowering,
-            };
         }
 
         void ScheduleFoldedAst(
@@ -235,6 +230,7 @@ namespace cobra {
             auto route = item.features.classification ? item.features.classification->route
                                                       : Route::kBitwiseOnly;
 
+            // --- kOriginal: semilinear pass only ---
             if (prov == Provenance::kOriginal) {
                 if (item.features.classification
                     && item.features.classification->semantic == SemanticClass::kSemilinear)
@@ -244,41 +240,41 @@ namespace cobra {
                 return;
             }
 
+            // --- kLowered: initial pipeline ---
             if (prov == Provenance::kLowered) {
                 if (route == Route::kUnsupported) { return; }
 
-                if (route != Route::kMixedRewrite || !policy.strict_route_faithful) {
-                    if (policy.allow_reroute && route == Route::kMixedRewrite) {
-                        passes = FullBand1Passes();
-                    } else {
-                        passes.push_back(PassId::kBuildSignatureState);
-                    }
+                if (route != Route::kMixedRewrite) {
+                    passes.push_back(PassId::kBuildSignatureState);
                     return;
                 }
 
-                // Strict MixedRewrite: stage cursor gates
+                // MixedRewrite: stage-gated in both strict and reroute
                 if (item.stage_cursor <= static_cast< uint32_t >(kMixedRewriteMaxStage)) {
                     passes.push_back(MixedRewriteStagePass(item.stage_cursor));
                 }
                 return;
             }
 
-            // Provenance::kRewritten
-            if (policy.allow_reroute) {
-                passes = FullBand1Passes();
+            // --- kRewritten: post-rewrite routing ---
+            if (route == Route::kUnsupported) { return; }
+
+            if (item.reentry_pending) {
+                // First action after a rewrite: one BuildSig -> SupportedSolve
+                passes.push_back(PassId::kBuildSignatureState);
                 return;
             }
 
-            // Strict MixedRewrite: kRewritten items need a
-            // supported-solve reentry (BuildSignatureState) first.
-            // Beyond stage 5, no more passes are applicable.
-            if (policy.strict_route_faithful && route == Route::kMixedRewrite) {
-                if (item.stage_cursor <= 5) { passes.push_back(PassId::kBuildSignatureState); }
+            if (route != Route::kMixedRewrite) {
+                // Rewritten to a supported route; reentry already
+                // consumed the BuildSig attempt — nothing more to do.
                 return;
             }
 
-            // Non-MixedRewrite kRewritten: supported solve only
-            passes.push_back(PassId::kBuildSignatureState);
+            // Still mixed after reentry: resume the suffix
+            if (item.resume_stage <= static_cast< uint32_t >(kMixedRewriteMaxStage)) {
+                passes.push_back(MixedRewriteStagePass(item.resume_stage));
+            }
         }
     } // namespace
 
@@ -545,6 +541,17 @@ namespace cobra {
             // Candidate acceptance: verified candidates are immediately returned
             if (auto *cand = std::get_if< CandidatePayload >(&item.payload)) {
                 if (!cand->needs_original_space_verification) {
+                    // Stamp rewrite_produced_candidate if any rewrite
+                    // pass is in this candidate's lineage.
+                    for (auto h : item.history) {
+                        if (h == PassId::kOperandSimplify
+                            || h == PassId::kProductIdentityCollapse
+                            || h == PassId::kXorLowering)
+                        {
+                            item.metadata.rewrite_produced_candidate = true;
+                            break;
+                        }
+                    }
                     telemetry.queue_high_water = worklist.HighWaterMark();
                     return Ok(
                         OrchestratorResult{
@@ -597,19 +604,50 @@ namespace cobra {
                         worklist.Push(std::move(next));
                     }
 
-                    // Stage advancement: when a pass retains the source
-                    // item, re-push it at the next stage so the pipeline
-                    // continues if the emitted children fail. Depth is
-                    // set to item.depth+2 so the children (at depth+1)
-                    // are processed first — the fallback stage only runs
-                    // if no child solves the expression.
+                    // Stage advancement for kLowered mixed items:
+                    // re-push the source at the next stage so the
+                    // pipeline continues if the emitted children fail.
                     if (pr.disposition == ItemDisposition::kRetainCurrent
-                        && IsStrictMixedRewriteItem(item, policy)
+                        && IsMixedRewritePipelineItem(item)
+                        && item.features.provenance == Provenance::kLowered
                         && item.stage_cursor < static_cast< uint32_t >(kMixedRewriteMaxStage))
                     {
                         auto retained         = CloneWorkItem(item);
                         retained.stage_cursor = item.stage_cursor + 1;
                         retained.depth        = item.depth + 2;
+                        worklist.Push(std::move(retained));
+                        retained_for_stage = true;
+                    }
+
+                    // Stage advancement for kRewritten suffix items:
+                    // re-push at the next suffix stage so the mixed
+                    // pipeline continues after the emitted children.
+                    if (pr.disposition == ItemDisposition::kRetainCurrent
+                        && IsMixedRewritePipelineItem(item)
+                        && item.features.provenance == Provenance::kRewritten
+                        && !item.reentry_pending
+                        && item.resume_stage < static_cast< uint32_t >(kMixedRewriteMaxStage))
+                    {
+                        auto retained         = CloneWorkItem(item);
+                        retained.resume_stage = item.resume_stage + 1;
+                        retained.stage_cursor = retained.resume_stage;
+                        retained.depth        = item.depth + 2;
+                        worklist.Push(std::move(retained));
+                        retained_for_stage = true;
+                    }
+
+                    // Rewritten reentry: after BuildSig runs on a
+                    // reentry_pending item, re-push the parent with
+                    // reentry consumed so the scheduler routes it to
+                    // resume_stage suffix (or terminates).
+                    if (pr.disposition == ItemDisposition::kRetainCurrent
+                        && item.features.provenance == Provenance::kRewritten
+                        && item.reentry_pending && pass_id == PassId::kBuildSignatureState)
+                    {
+                        auto retained            = CloneWorkItem(item);
+                        retained.reentry_pending = false;
+                        retained.stage_cursor    = item.resume_stage;
+                        retained.depth           = item.depth + 2;
                         worklist.Push(std::move(retained));
                         retained_for_stage = true;
                     }
@@ -627,9 +665,7 @@ namespace cobra {
                         best_unsupported->metadata.last_failure = pr.reason;
                     }
                     // Track XOR lowering terminal states for
-                    // MixedRewrite reason-code derivation. Stored
-                    // in a loop-scoped variable so a later
-                    // best_unsupported replacement cannot erase it.
+                    // MixedRewrite reason-code derivation.
                     if (pass_id == PassId::kXorLowering) {
                         auto cat              = pr.reason.top.code.category;
                         xor_lowering_terminal = cat;
@@ -643,9 +679,29 @@ namespace cobra {
                             best_unsupported->metadata.candidate_failed_verification = true;
                         }
                     }
+                    // Worklist-driven verify failure after XOR
+                    // lowering: stamp the same metadata that the
+                    // old inline TryReentryOrContinue path set.
+                    if (pass_id == PassId::kVerifyCandidate
+                        && pr.reason.top.code.category == ReasonCategory::kVerifyFailed)
+                    {
+                        bool xor_in_lineage = false;
+                        for (auto h : item.history) {
+                            if (h == PassId::kXorLowering) {
+                                xor_in_lineage = true;
+                                break;
+                            }
+                        }
+                        if (xor_in_lineage) {
+                            xor_lowering_terminal = ReasonCategory::kVerifyFailed;
+                            item.metadata.rewrite_produced_candidate                 = true;
+                            item.metadata.candidate_failed_verification              = true;
+                            best_unsupported->metadata.rewrite_produced_candidate    = true;
+                            best_unsupported->metadata.candidate_failed_verification = true;
+                        }
+                    }
                     // Accumulate decomposition failure causes for
-                    // the cause chain, matching the legacy's
-                    // decomp_causes accumulation.
+                    // the cause chain.
                     if (pass_id == PassId::kDecompose) {
                         decomp_causes.push_back(pr.reason.top);
                         for (const auto &c : pr.reason.causes) { decomp_causes.push_back(c); }
@@ -654,13 +710,50 @@ namespace cobra {
             }
 
             // All scheduled passes exhausted without progress:
-            // advance the stage cursor so the next MixedRewrite step
-            // fires on the next iteration.
-            if (!progressed && !retained_for_stage && IsStrictMixedRewriteItem(item, policy)
+            // advance the stage cursor so the next MixedRewrite
+            // step fires on the next iteration.
+            if (!progressed && !retained_for_stage && IsMixedRewritePipelineItem(item)
+                && item.features.provenance == Provenance::kLowered
                 && item.stage_cursor < static_cast< uint32_t >(kMixedRewriteMaxStage))
             {
                 item.stage_cursor++;
                 worklist.Push(std::move(item));
+            }
+
+            // kRewritten suffix items: advance resume_stage when
+            // the current suffix pass exhausted without progress.
+            if (!progressed && !retained_for_stage && IsMixedRewritePipelineItem(item)
+                && item.features.provenance == Provenance::kRewritten && !item.reentry_pending
+                && item.resume_stage < static_cast< uint32_t >(kMixedRewriteMaxStage))
+            {
+                item.resume_stage++;
+                item.stage_cursor = item.resume_stage;
+                worklist.Push(std::move(item));
+            }
+
+            // kRewritten item from XOR lowering that exhausted
+            // without solving: the old inline path would have
+            // reported kVerifyFailed. Track it so the final
+            // reason-code derivation picks it up.
+            if (!progressed && !retained_for_stage
+                && item.features.provenance == Provenance::kRewritten && !xor_lowering_terminal)
+            {
+                bool xor_in_lineage = false;
+                for (auto h : item.history) {
+                    if (h == PassId::kXorLowering) {
+                        xor_in_lineage = true;
+                        break;
+                    }
+                }
+                if (xor_in_lineage) {
+                    xor_lowering_terminal                       = ReasonCategory::kVerifyFailed;
+                    item.metadata.rewrite_produced_candidate    = true;
+                    item.metadata.candidate_failed_verification = true;
+                    if (best_unsupported) {
+                        best_unsupported->metadata.rewrite_produced_candidate    = true;
+                        best_unsupported->metadata.candidate_failed_verification = true;
+                    }
+                }
             }
         }
 
