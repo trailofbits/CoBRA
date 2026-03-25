@@ -419,7 +419,7 @@ namespace cobra {
                 .expr                              = decomp.TakeExpr(),
                 .real_vars                         = decomp.RealVars(),
                 .cost                              = cost_info.cost,
-                .producing_pass                    = PassId::kDecompose,
+                .producing_pass                    = PassId::kExtractProductCore,
                 .needs_original_space_verification = false,
             };
             cand_item.features              = item.features;
@@ -656,7 +656,7 @@ namespace cobra {
              .run = RunTrySemilinearPass,
              },
             {
-             .id         = PassId::kDecompose,
+             .id         = PassId::kExtractProductCore,
              .consumes   = StateKind::kFoldedAst,
              .tag        = PassTag::kSolver,
              .applicable = [](const WorkItem &item,       const OrchestratorContext & /*ctx*/)

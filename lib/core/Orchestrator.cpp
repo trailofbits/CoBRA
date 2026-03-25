@@ -187,11 +187,11 @@ namespace cobra {
         }
 
         constexpr FoldedAstPassEntry kFoldedAstPasses[] = {
-            {     PassId::kBuildSignatureState,                       0, 0, false },
-            {               PassId::kDecompose,                       0, 1, false },
-            {         PassId::kOperandSimplify, Bit(PassId::kDecompose), 2,  true },
-            { PassId::kProductIdentityCollapse, Bit(PassId::kDecompose), 3,  true },
-            {             PassId::kXorLowering,                       0, 4,  true },
+            {     PassId::kBuildSignatureState,                                0, 0, false },
+            {      PassId::kExtractProductCore,                                0, 1, false },
+            {         PassId::kOperandSimplify, Bit(PassId::kExtractProductCore), 2,  true },
+            { PassId::kProductIdentityCollapse, Bit(PassId::kExtractProductCore), 3,  true },
+            {             PassId::kXorLowering,                                0, 4,  true },
         };
 
     } // namespace
@@ -664,7 +664,7 @@ namespace cobra {
                     }
                 }
                 // Accumulate decomposition cause chain
-                if (*pass_id == PassId::kDecompose) {
+                if (IsDecompositionFamilyPass(*pass_id)) {
                     decomp_causes.push_back(pr.reason.top);
                     for (const auto &c : pr.reason.causes) { decomp_causes.push_back(c); }
                 }

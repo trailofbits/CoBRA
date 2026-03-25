@@ -17,12 +17,32 @@ namespace cobra {
         kBuildSignatureState,
         kSupportedSolve,
         kTrySemilinearPass,
-        kDecompose,
+        // Decomposition extractors
+        kExtractProductCore,
+        kExtractPolyCoreD2,
+        kExtractTemplateCore,
+        kExtractPolyCoreD3,
+        kExtractPolyCoreD4,
+        // Decomposition residual prep
+        kPrepareDirectResidual,
+        kPrepareResidualFromCore,
+        // Decomposition residual solvers
+        kResidualSupported,
+        kResidualPolyRecovery,
+        kResidualGhost,
+        kResidualFactoredGhost,
+        kResidualFactoredGhostEscalated,
+        kResidualTemplate,
+        // Structural rewrites
         kOperandSimplify,
         kProductIdentityCollapse,
         kXorLowering,
         kVerifyCandidate,
     };
+
+    inline bool IsDecompositionFamilyPass(PassId id) {
+        return id >= PassId::kExtractProductCore && id <= PassId::kResidualTemplate;
+    }
 
     // ---------------------------------------------------------------
     // PassTag — broad category for each pass
