@@ -488,6 +488,9 @@ namespace cobra {
         uint32_t verifications = 0;
         std::optional< UnsupportedCandidate > best_unsupported;
         std::vector< ReasonFrame > decomp_causes;
+        // Strongest structural-transform terminal observed across
+        // all lineages. Survives best_unsupported replacements.
+        std::optional< TransformTerminalSignal > strongest_transform_terminal;
 
         // Main loop
         while (!worklist.Empty() && expansions < policy.max_expansions) {
@@ -507,6 +510,20 @@ namespace cobra {
             };
             if (!best_unsupported || UnsupportedRankBetter(current, *best_unsupported)) {
                 best_unsupported = current;
+            }
+            // Promote lineage-local terminal to loop-level tracker
+            if (item.metadata.structural_transform_terminal) {
+                auto &sig  = *item.metadata.structural_transform_terminal;
+                auto trank = [](ReasonCategory c) -> int {
+                    if (c == ReasonCategory::kVerifyFailed) { return 2; }
+                    if (c == ReasonCategory::kRepresentationGap) { return 1; }
+                    return 0;
+                };
+                if (!strongest_transform_terminal
+                    || trank(sig.category) > trank(strongest_transform_terminal->category))
+                {
+                    strongest_transform_terminal = sig;
+                }
             }
 
             // Candidate acceptance: verified candidates are immediately returned
@@ -573,7 +590,12 @@ namespace cobra {
                 }
             } else {
                 // kBlocked / kNoProgress
-                if (!pr.reason.top.message.empty()) { item.metadata.last_failure = pr.reason; }
+                if (!pr.reason.top.message.empty()) {
+                    item.metadata.last_failure = pr.reason;
+                    if (best_unsupported) {
+                        best_unsupported->metadata.last_failure = pr.reason;
+                    }
+                }
                 // XOR lowering terminal attribution (lineage-local)
                 if (*pass_id == PassId::kXorLowering) {
                     auto cat = pr.reason.top.code.category;
@@ -584,6 +606,12 @@ namespace cobra {
                     } else if (cat == ReasonCategory::kVerifyFailed) {
                         item.metadata.transform_produced_candidate  = true;
                         item.metadata.candidate_failed_verification = true;
+                    }
+                    if (best_unsupported) {
+                        best_unsupported->metadata.transform_produced_candidate =
+                            item.metadata.transform_produced_candidate;
+                        best_unsupported->metadata.candidate_failed_verification =
+                            item.metadata.candidate_failed_verification;
                     }
                 }
                 // Verify failure after XOR lowering (lineage-local)
@@ -597,6 +625,10 @@ namespace cobra {
                                                          ReasonCategory::kVerifyFailed };
                             item.metadata.transform_produced_candidate  = true;
                             item.metadata.candidate_failed_verification = true;
+                            if (best_unsupported) {
+                                best_unsupported->metadata.transform_produced_candidate  = true;
+                                best_unsupported->metadata.candidate_failed_verification = true;
+                            }
                             break;
                         }
                     }
@@ -634,11 +666,11 @@ namespace cobra {
             IsFoldedAstExplorationCandidate(context.run_metadata.input_classification)
             || final_meta.structural_transform_rounds > 0
             || final_meta.transform_produced_candidate
-            || final_meta.structural_transform_terminal.has_value();
+            || strongest_transform_terminal.has_value();
 
         if (used_folded_ast_exploration && !final_meta.reason_code.has_value()) {
-            if (final_meta.structural_transform_terminal) {
-                auto cat = final_meta.structural_transform_terminal->category;
+            if (strongest_transform_terminal) {
+                auto cat = strongest_transform_terminal->category;
                 final_meta.reason_code =
                     ReasonCode{ cat, ReasonDomain::kStructuralTransform, 0 };
                 if (cat == ReasonCategory::kVerifyFailed) {

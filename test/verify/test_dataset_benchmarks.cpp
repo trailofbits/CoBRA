@@ -444,9 +444,11 @@ TEST(OSESDataset, Fast) {
     // Every unsupported result carries a structured reason code.
     EXPECT_EQ(stats.has_structured_reason, stats.unsupported);
     // FW verification failures dominate.
-    EXPECT_EQ(stats.by_category[ReasonCategory::kVerifyFailed], 40);
+    // DAG scheduler: minor category redistribution vs staged model
+    // (total unsupported unchanged at 68).
+    EXPECT_EQ(stats.by_category[ReasonCategory::kVerifyFailed], 41);
     EXPECT_EQ(stats.by_category[ReasonCategory::kRepresentationGap], 23);
-    EXPECT_EQ(stats.by_category[ReasonCategory::kSearchExhausted], 5);
+    EXPECT_EQ(stats.by_category[ReasonCategory::kSearchExhausted], 4);
     EXPECT_GT(stats.by_triple[kOrchestratorVerify], 0)
         << "No orchestrator-level FW verification failures recorded";
 }
