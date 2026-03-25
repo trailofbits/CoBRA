@@ -412,7 +412,7 @@ TEST(SelectNextPass, OriginalSemilinearGetsSemilinear) {
     PassAttemptCache cache;
     auto pass = SelectNextPass(item, policy, 0, cache);
     ASSERT_TRUE(pass.has_value());
-    EXPECT_EQ(*pass, PassId::kTrySemilinearPass);
+    EXPECT_EQ(*pass, PassId::kSemilinearNormalize);
 }
 
 TEST(SelectNextPass, CoreCandidateGetsPrepareResidual) {
@@ -529,4 +529,46 @@ TEST(Fingerprint, SemilinearDifferentStateKindDifferentFingerprint) {
     auto fa = ComputeFingerprint(a, 64);
     auto fb = ComputeFingerprint(b, 64);
     EXPECT_NE(fa, fb);
+}
+
+TEST(SelectNextPass, NormalizedSemilinearGetsCheck) {
+    WorkItem item;
+    SemilinearIR ir;
+    ir.bitwidth  = 64;
+    item.payload = NormalizedSemilinearPayload{
+        .ctx = SemilinearContext{ .ir = std::move(ir) },
+    };
+    OrchestratorPolicy policy;
+    PassAttemptCache cache;
+    auto pass = SelectNextPass(item, policy, 0, cache);
+    ASSERT_TRUE(pass.has_value());
+    EXPECT_EQ(*pass, PassId::kSemilinearCheck);
+}
+
+TEST(SelectNextPass, CheckedSemilinearGetsRewrite) {
+    WorkItem item;
+    SemilinearIR ir;
+    ir.bitwidth  = 64;
+    item.payload = CheckedSemilinearPayload{
+        .ctx = SemilinearContext{ .ir = std::move(ir) },
+    };
+    OrchestratorPolicy policy;
+    PassAttemptCache cache;
+    auto pass = SelectNextPass(item, policy, 0, cache);
+    ASSERT_TRUE(pass.has_value());
+    EXPECT_EQ(*pass, PassId::kSemilinearRewrite);
+}
+
+TEST(SelectNextPass, RewrittenSemilinearGetsReconstruct) {
+    WorkItem item;
+    SemilinearIR ir;
+    ir.bitwidth  = 64;
+    item.payload = RewrittenSemilinearPayload{
+        .ctx = SemilinearContext{ .ir = std::move(ir) },
+    };
+    OrchestratorPolicy policy;
+    PassAttemptCache cache;
+    auto pass = SelectNextPass(item, policy, 0, cache);
+    ASSERT_TRUE(pass.has_value());
+    EXPECT_EQ(*pass, PassId::kSemilinearReconstruct);
 }

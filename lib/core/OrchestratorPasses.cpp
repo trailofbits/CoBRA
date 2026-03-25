@@ -1,5 +1,6 @@
 #include "OrchestratorPasses.h"
 #include "DecompositionPassHelpers.h"
+#include "SemilinearPasses.h"
 #include "SimplifierInternal.h"
 #include "cobra/core/AuxVarEliminator.h"
 #include "cobra/core/Classifier.h"
@@ -10,7 +11,6 @@
 #include "cobra/core/OperandSimplifier.h"
 #include "cobra/core/PatternMatcher.h"
 #include "cobra/core/ProductIdentityRecoverer.h"
-#include "cobra/core/SemilinearSignature.h"
 #include "cobra/core/SignatureEval.h"
 #include "cobra/core/SignatureSimplifier.h"
 
@@ -311,64 +311,6 @@ namespace cobra {
         );
     }
 
-    Result< PassResult > RunTrySemilinearPass(const WorkItem &item, OrchestratorContext &ctx) {
-        if (!IsAstKind(item)) {
-            return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
-        }
-
-        const auto &ast = std::get< AstPayload >(item.payload);
-        if (ast.provenance == Provenance::kLowered) {
-            return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
-        }
-
-        if (!ast.classification || ast.classification->semantic != SemanticClass::kSemilinear) {
-            return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
-        }
-
-        const auto num_vars = static_cast< uint32_t >(ctx.original_vars.size());
-        if (IsLinearShortcut(*ast.expr, num_vars, ctx.bitwidth)) {
-            return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
-        }
-
-        auto semi = internal::TrySemilinearPipeline(*ast.expr, ctx.original_vars, ctx.opts);
-
-        if (semi.Succeeded()) {
-            auto cost_info = ComputeCost(semi.GetExpr());
-
-            WorkItem cand_item;
-            cand_item.payload = CandidatePayload{
-                .expr                              = semi.TakeExpr(),
-                .real_vars                         = semi.RealVars(),
-                .cost                              = cost_info.cost,
-                .producing_pass                    = PassId::kTrySemilinearPass,
-                .needs_original_space_verification = false,
-            };
-            cand_item.features              = item.features;
-            cand_item.metadata              = item.metadata;
-            cand_item.metadata.verification = VerificationState::kVerified;
-            cand_item.depth                 = item.depth;
-            cand_item.rewrite_gen           = item.rewrite_gen;
-            cand_item.attempted_mask        = item.attempted_mask;
-            cand_item.history               = item.history;
-
-            PassResult result;
-            result.decision    = PassDecision::kSolvedCandidate;
-            result.disposition = ItemDisposition::kRetainCurrent;
-            result.next.push_back(std::move(cand_item));
-            return Ok(std::move(result));
-        }
-
-        auto failure_reason                 = semi.Reason();
-        ctx.run_metadata.semilinear_failure = failure_reason;
-        return Ok(
-            PassResult{
-                .decision    = PassDecision::kBlocked,
-                .disposition = ItemDisposition::kRetainCurrent,
-                .reason      = std::move(failure_reason),
-            }
-        );
-    }
-
     // ---------------------------------------------------------------
     // Rewrite passes and verification (Task 11)
     // ---------------------------------------------------------------
@@ -547,72 +489,99 @@ namespace cobra {
              .id         = PassId::kClassifyAst,
              .consumes   = StateKind::kFoldedAst,
              .tag        = PassTag::kAnalysis,
-             .applicable = [](const WorkItem &item,       const OrchestratorContext & /*ctx*/)
-       -> bool { return IsAstKind(item); },
+             .applicable = [](const WorkItem &item,                                    const OrchestratorContext & /*ctx*/)
+                                    -> bool { return IsAstKind(item); },
              .run = RunClassifyAst,
              },
             {
              .id         = PassId::kBuildSignatureState,
              .consumes   = StateKind::kFoldedAst,
              .tag        = PassTag::kAnalysis,
-             .applicable = [](const WorkItem &item,       const OrchestratorContext & /*ctx*/)
-       -> bool { return IsAstKind(item); },
+             .applicable = [](const WorkItem &item,                                    const OrchestratorContext & /*ctx*/)
+                                    -> bool { return IsAstKind(item); },
              .run = RunBuildSignatureState,
              },
             {
              .id         = PassId::kSupportedSolve,
              .consumes   = StateKind::kSignatureState,
              .tag        = PassTag::kSolver,
-             .applicable = [](const WorkItem &item, const OrchestratorContext & /*ctx*/)
- -> bool { return IsSignatureKind(item); },
+             .applicable = [](const WorkItem &item,                              const OrchestratorContext & /*ctx*/)
+                              -> bool { return IsSignatureKind(item); },
              .run = RunSupportedSolve,
              },
             {
-             .id         = PassId::kTrySemilinearPass,
+             .id         = PassId::kSemilinearNormalize,
              .consumes   = StateKind::kFoldedAst,
+             .tag        = PassTag::kAnalysis,
+             .applicable = [](const WorkItem &item, const OrchestratorContext & /*ctx*/)
+ -> bool { return std::holds_alternative< AstPayload >(item.payload); },
+             .run = RunSemilinearNormalize,
+             },
+            {
+             .id         = PassId::kSemilinearCheck,
+             .consumes   = StateKind::kSemilinearNormalizedIr,
+             .tag        = PassTag::kAnalysis,
+             .applicable = [](const WorkItem &item,
+             const OrchestratorContext & /*ctx*/) -> bool {
+             return std::holds_alternative< NormalizedSemilinearPayload >(item.payload);
+             },                .run = RunSemilinearCheck,
+             },
+            {
+             .id         = PassId::kSemilinearRewrite,
+             .consumes   = StateKind::kSemilinearCheckedIr,
+             .tag        = PassTag::kRewrite,
+             .applicable = [](const WorkItem &item,
+             const OrchestratorContext & /*ctx*/) -> bool {
+             return std::holds_alternative< CheckedSemilinearPayload >(item.payload);
+             },              .run = RunSemilinearRewrite,
+             },
+            {
+             .id         = PassId::kSemilinearReconstruct,
+             .consumes   = StateKind::kSemilinearRewrittenIr,
              .tag        = PassTag::kSolver,
-             .applicable = [](const WorkItem &item,       const OrchestratorContext & /*ctx*/)
-       -> bool { return IsAstKind(item); },
-             .run = RunTrySemilinearPass,
+             .applicable = [](const WorkItem &item,
+             const OrchestratorContext & /*ctx*/) -> bool {
+             return std::holds_alternative< RewrittenSemilinearPayload >(item.payload);
+             },          .run = RunSemilinearReconstruct,
              },
             {
              .id         = PassId::kExtractProductCore,
              .consumes   = StateKind::kFoldedAst,
              .tag        = PassTag::kSolver,
-             .applicable = [](const WorkItem &item,       const OrchestratorContext & /*ctx*/)
-       -> bool { return IsAstKind(item); },
+             .applicable = [](const WorkItem &item,                                    const OrchestratorContext & /*ctx*/)
+                                    -> bool { return IsAstKind(item); },
              .run = RunExtractProductCore,
              },
             {
              .id         = PassId::kExtractPolyCoreD2,
              .consumes   = StateKind::kFoldedAst,
              .tag        = PassTag::kSolver,
-             .applicable = [](const WorkItem &item,       const OrchestratorContext & /*ctx*/)
-       -> bool { return IsAstKind(item); },
+             .applicable = [](const WorkItem &item,                                    const OrchestratorContext & /*ctx*/)
+                                    -> bool { return IsAstKind(item); },
              .run = RunExtractPolyCoreD2,
              },
             {
              .id         = PassId::kExtractTemplateCore,
              .consumes   = StateKind::kFoldedAst,
              .tag        = PassTag::kSolver,
-             .applicable = [](const WorkItem &item,       const OrchestratorContext & /*ctx*/)
-       -> bool { return IsAstKind(item); },
+             .applicable = [](const WorkItem &item,                                    const OrchestratorContext & /*ctx*/)
+                                    -> bool { return IsAstKind(item); },
              .run = RunExtractTemplateCore,
              },
             {
              .id         = PassId::kExtractPolyCoreD3,
              .consumes   = StateKind::kFoldedAst,
              .tag        = PassTag::kSolver,
-             .applicable = [](const WorkItem &item,       const OrchestratorContext & /*ctx*/)
-       -> bool { return IsAstKind(item); },
+             .applicable = [](const WorkItem &item,                                    const OrchestratorContext & /*ctx*/)
+                                    -> bool { return IsAstKind(item); },
              .run = RunExtractPolyCoreD3,
              },
             {
              .id         = PassId::kExtractPolyCoreD4,
              .consumes   = StateKind::kFoldedAst,
              .tag        = PassTag::kSolver,
-             .applicable = [](const WorkItem &item,       const OrchestratorContext & /*ctx*/)
-       -> bool { return IsAstKind(item); },
+             .applicable = [](const WorkItem &item,                                    const OrchestratorContext & /*ctx*/)
+                                    -> bool { return IsAstKind(item); },
              .run = RunExtractPolyCoreD4,
              },
             // Decomposition prep passes
@@ -620,8 +589,8 @@ namespace cobra {
              .id         = PassId::kPrepareDirectResidual,
              .consumes   = StateKind::kFoldedAst,
              .tag        = PassTag::kAnalysis,
-             .applicable = [](const WorkItem &item,       const OrchestratorContext & /*ctx*/)
-       -> bool { return IsAstKind(item); },
+             .applicable = [](const WorkItem &item,                                    const OrchestratorContext & /*ctx*/)
+                                    -> bool { return IsAstKind(item); },
              .run = RunPrepareDirectResidual,
              },
             {
@@ -692,32 +661,32 @@ namespace cobra {
              .id         = PassId::kOperandSimplify,
              .consumes   = StateKind::kFoldedAst,
              .tag        = PassTag::kRewrite,
-             .applicable = [](const WorkItem &item,       const OrchestratorContext & /*ctx*/)
-       -> bool { return IsAstKind(item); },
+             .applicable = [](const WorkItem &item,                                    const OrchestratorContext & /*ctx*/)
+                                    -> bool { return IsAstKind(item); },
              .run = RunOperandSimplify,
              },
             {
              .id         = PassId::kProductIdentityCollapse,
              .consumes   = StateKind::kFoldedAst,
              .tag        = PassTag::kRewrite,
-             .applicable = [](const WorkItem &item,       const OrchestratorContext & /*ctx*/)
-       -> bool { return IsAstKind(item); },
+             .applicable = [](const WorkItem &item,                                    const OrchestratorContext & /*ctx*/)
+                                    -> bool { return IsAstKind(item); },
              .run = RunProductIdentityCollapse,
              },
             {
              .id         = PassId::kXorLowering,
              .consumes   = StateKind::kFoldedAst,
              .tag        = PassTag::kRewrite,
-             .applicable = [](const WorkItem &item,       const OrchestratorContext & /*ctx*/)
-       -> bool { return IsAstKind(item); },
+             .applicable = [](const WorkItem &item,                                    const OrchestratorContext & /*ctx*/)
+                                    -> bool { return IsAstKind(item); },
              .run = RunXorLowering,
              },
             {
              .id         = PassId::kVerifyCandidate,
              .consumes   = StateKind::kCandidateExpr,
              .tag        = PassTag::kVerifier,
-             .applicable = [](const WorkItem &item, const OrchestratorContext & /*ctx*/)
- -> bool { return IsCandidateKind(item); },
+             .applicable = [](const WorkItem &item,                              const OrchestratorContext & /*ctx*/)
+                              -> bool { return IsCandidateKind(item); },
              .run = RunVerifyCandidate,
              },
         };

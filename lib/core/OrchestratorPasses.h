@@ -16,7 +16,6 @@ namespace cobra {
         kClassifyAst,
         kBuildSignatureState,
         kSupportedSolve,
-        kTrySemilinearPass,
         // Semilinear passes
         kSemilinearNormalize,
         kSemilinearCheck,
@@ -94,7 +93,6 @@ namespace cobra {
     Result< PassResult > RunClassifyAst(const WorkItem &, OrchestratorContext &);
     Result< PassResult > RunBuildSignatureState(const WorkItem &, OrchestratorContext &);
     Result< PassResult > RunSupportedSolve(const WorkItem &, OrchestratorContext &);
-    Result< PassResult > RunTrySemilinearPass(const WorkItem &, OrchestratorContext &);
 
     Result< PassResult > RunOperandSimplify(const WorkItem &, OrchestratorContext &);
     Result< PassResult > RunProductIdentityCollapse(const WorkItem &, OrchestratorContext &);

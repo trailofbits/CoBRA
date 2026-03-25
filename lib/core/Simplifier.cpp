@@ -1,22 +1,12 @@
 #include "cobra/core/Simplifier.h"
-#include "SemilinearPasses.h"
 #include "SimplifierInternal.h"
-#include "cobra/core/AtomSimplifier.h"
 #include "cobra/core/AuxVarEliminator.h"
-#include "cobra/core/BitPartitioner.h"
-#include "cobra/core/BitWidth.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/ExprUtils.h"
-#include "cobra/core/MaskedAtomReconstructor.h"
 #include "cobra/core/PatternMatcher.h"
 #include "cobra/core/Result.h"
-#include "cobra/core/SelfCheck.h"
-#include "cobra/core/SemilinearIR.h"
-#include "cobra/core/SemilinearNormalizer.h"
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/SignatureSimplifier.h"
-#include "cobra/core/StructureRecovery.h"
-#include "cobra/core/TermRefiner.h"
 #include "cobra/core/Trace.h"
 #include <algorithm>
 #include <cstddef>
@@ -97,119 +87,6 @@ namespace cobra {
             }
 
             return e;
-        }
-
-        PassOutcome TrySemilinearPipeline(
-            const Expr &ast, const std::vector< std::string > &vars, const Options &opts
-        ) {
-            const auto kNumVars = static_cast< uint32_t >(vars.size());
-            COBRA_TRACE(
-                "Simplifier", "TrySemilinearPipeline: vars={} bitwidth={}", vars.size(),
-                opts.bitwidth
-            );
-
-            if (kNumVars > opts.max_vars) {
-                return PassOutcome::Inapplicable(
-                    ReasonDetail{
-                        .top = { .code    = { ReasonCategory::kGuardFailed,
-                                              ReasonDomain::kSemilinear,
-                                              semilinear_pass::kTooManyVars },
-                                .message = "too many variables for semilinear pipeline" }
-                }
-                );
-            }
-
-            auto ir_result = NormalizeToSemilinear(ast, vars, opts.bitwidth);
-            if (!ir_result.has_value()) {
-                COBRA_TRACE(
-                    "Simplifier", "TrySemilinearPipeline: normalization failed: {}",
-                    ir_result.error().message
-                );
-                return PassOutcome::Blocked(
-                    ReasonDetail{
-                        .top = { .code    = { ReasonCategory::kRepresentationGap,
-                                              ReasonDomain::kSemilinear,
-                                              semilinear_pass::kNormalizeFailed },
-                                .message = "semilinear normalization failed: "
-                                     + ir_result.error().message }
-                }
-                );
-            }
-            auto &ir = ir_result.value();
-
-            SimplifyStructure(ir);
-
-            auto plain = ReconstructMaskedAtoms(ir, {});
-            auto check = SelfCheckSemilinear(ir, *plain, vars, opts.bitwidth);
-            if (!check.passed) {
-                COBRA_TRACE(
-                    "Simplifier", "TrySemilinearPipeline: self-check failed: {}",
-                    check.mismatch_detail
-                );
-                return PassOutcome::Blocked(
-                    ReasonDetail{
-                        .top = { .code    = { ReasonCategory::kInternalInvariant,
-                                              ReasonDomain::kSemilinear,
-                                              semilinear_pass::kSelfCheckFailed },
-                                .message = "semilinear self-check failed" }
-                }
-                );
-            }
-
-            if (FlattenComplexAtoms(ir)) { CoalesceTerms(ir); }
-            RecoverStructure(ir);
-            RefineTerms(ir);
-            CoalesceTerms(ir);
-
-            if (opts.evaluator) {
-                auto probe_expr = ReconstructMaskedAtoms(ir, {});
-                auto probe      = FullWidthCheckEval(
-                    opts.evaluator, kNumVars, *probe_expr, opts.bitwidth, 16
-                );
-                if (!probe.passed) {
-                    COBRA_TRACE(
-                        "Simplifier", "TrySemilinearPipeline: post-rewrite probe failed"
-                    );
-                    return PassOutcome::VerifyFailed(
-                        std::move(probe_expr), vars,
-                        ReasonDetail{
-                            .top = { .code    = { ReasonCategory::kVerifyFailed,
-                                                  ReasonDomain::kSemilinear,
-                                                  semilinear_pass::kPostRewriteProbe },
-                                    .message = "post-rewrite probe verification failed" }
-                    }
-                    );
-                }
-            }
-
-            CompactAtomTable(ir);
-            auto partitions = ComputePartitions(ir);
-            auto simplified = ReconstructMaskedAtoms(ir, partitions);
-            simplified      = SimplifyXorConstant(std::move(simplified), opts.bitwidth);
-
-            if (opts.evaluator) {
-                auto final_check =
-                    FullWidthCheckEval(opts.evaluator, kNumVars, *simplified, opts.bitwidth);
-                if (!final_check.passed) {
-                    COBRA_TRACE(
-                        "Simplifier", "TrySemilinearPipeline: final verification failed"
-                    );
-                    return PassOutcome::VerifyFailed(
-                        std::move(simplified), vars,
-                        ReasonDetail{
-                            .top = { .code    = { ReasonCategory::kVerifyFailed,
-                                                  ReasonDomain::kSemilinear,
-                                                  semilinear_pass::kFinalVerifyFail },
-                                    .message = "final full-width verification failed" }
-                    }
-                    );
-                }
-            }
-
-            COBRA_TRACE("Simplifier", "TrySemilinearPipeline: success");
-            return PassOutcome::Success(
-                std::move(simplified), vars, VerificationState::kVerified
-            );
         }
 
     } // namespace internal

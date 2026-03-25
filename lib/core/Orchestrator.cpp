@@ -351,12 +351,36 @@ namespace cobra {
             return std::nullopt;
         }
 
-        // 5. Original provenance + semilinear → kTrySemilinearPass
+        // 5. SemilinearNormalizedIr → kSemilinearCheck
+        if (kind == StateKind::kSemilinearNormalizedIr) {
+            auto pass = PassId::kSemilinearCheck;
+            if ((item.attempted_mask & Bit(pass)) != 0) { return std::nullopt; }
+            if (cache.HasAttempted(fp, pass)) { return std::nullopt; }
+            return pass;
+        }
+
+        // 6. SemilinearCheckedIr → kSemilinearRewrite
+        if (kind == StateKind::kSemilinearCheckedIr) {
+            auto pass = PassId::kSemilinearRewrite;
+            if ((item.attempted_mask & Bit(pass)) != 0) { return std::nullopt; }
+            if (cache.HasAttempted(fp, pass)) { return std::nullopt; }
+            return pass;
+        }
+
+        // 7. SemilinearRewrittenIr → kSemilinearReconstruct
+        if (kind == StateKind::kSemilinearRewrittenIr) {
+            auto pass = PassId::kSemilinearReconstruct;
+            if ((item.attempted_mask & Bit(pass)) != 0) { return std::nullopt; }
+            if (cache.HasAttempted(fp, pass)) { return std::nullopt; }
+            return pass;
+        }
+
+        // 8. Original provenance + semilinear → kSemilinearNormalize
         if (item.features.provenance == Provenance::kOriginal) {
             if (item.features.classification
                 && item.features.classification->semantic == SemanticClass::kSemilinear)
             {
-                auto pass = PassId::kTrySemilinearPass;
+                auto pass = PassId::kSemilinearNormalize;
                 if ((item.attempted_mask & Bit(pass)) != 0) { return std::nullopt; }
                 if (cache.HasAttempted(fp, pass)) { return std::nullopt; }
                 return pass;
@@ -364,12 +388,12 @@ namespace cobra {
             return std::nullopt;
         }
 
-        // 6. Non-original: must have classification and no unknown shape
+        // 9. Non-original: must have classification and no unknown shape
         if (!item.features.classification) { return std::nullopt; }
         const auto &cls = *item.features.classification;
         if (HasFlag(cls.flags, kSfHasUnknownShape)) { return std::nullopt; }
 
-        // 7. Non-exploration candidates → only kBuildSignatureState
+        // 10. Non-exploration candidates → only kBuildSignatureState
         if (!IsFoldedAstExplorationCandidate(cls)) {
             auto pass = PassId::kBuildSignatureState;
             if ((item.attempted_mask & Bit(pass)) != 0) { return std::nullopt; }
@@ -377,7 +401,7 @@ namespace cobra {
             return pass;
         }
 
-        // 8. Exploration candidates → iterate the pass table
+        // 11. Exploration candidates → iterate the pass table
         for (const auto &entry : kFoldedAstPasses) {
             if ((item.attempted_mask & Bit(entry.id)) != 0) { continue; }
             if ((item.attempted_mask & entry.prereq_mask) != entry.prereq_mask) { continue; }
@@ -388,7 +412,7 @@ namespace cobra {
             return entry.id;
         }
 
-        // 9. No eligible pass
+        // 12. No eligible pass
         return std::nullopt;
     }
 

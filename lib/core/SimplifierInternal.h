@@ -16,10 +16,6 @@ namespace cobra::internal {
 
     std::unique_ptr< Expr > LowerNotOverArith(std::unique_ptr< Expr > e, uint32_t bitwidth);
 
-    PassOutcome TrySemilinearPipeline(
-        const Expr &ast, const std::vector< std::string > &vars, const Options &opts
-    );
-
     CheckResult VerifyInOriginalSpace(
         const Evaluator &eval, const std::vector< std::string > &all_vars,
         const std::vector< std::string > &real_vars, const Expr &reduced_expr, uint32_t bitwidth
