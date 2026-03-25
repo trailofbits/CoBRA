@@ -6,6 +6,7 @@
 #include "cobra/core/Expr.h"
 #include "cobra/core/ExprCost.h"
 #include "cobra/core/PassContract.h"
+#include "cobra/core/SemilinearIR.h"
 #include "cobra/core/Simplifier.h"
 
 #include <cstdint>
@@ -27,6 +28,9 @@ namespace cobra {
         kSignatureState,
         kCoreCandidate,
         kResidualState,
+        kSemilinearNormalizedIr,
+        kSemilinearCheckedIr,
+        kSemilinearRewrittenIr,
         kCandidateExpr,
     };
 
@@ -111,8 +115,29 @@ namespace cobra {
         uint8_t degree_floor = 2;
     };
 
+    struct SemilinearContext
+    {
+        SemilinearIR ir;
+    };
+
+    struct NormalizedSemilinearPayload
+    {
+        SemilinearContext ctx;
+    };
+
+    struct CheckedSemilinearPayload
+    {
+        SemilinearContext ctx;
+    };
+
+    struct RewrittenSemilinearPayload
+    {
+        SemilinearContext ctx;
+    };
+
     using StateData = std::variant<
         AstPayload, SignatureStatePayload, CoreCandidatePayload, ResidualStatePayload,
+        NormalizedSemilinearPayload, CheckedSemilinearPayload, RewrittenSemilinearPayload,
         CandidatePayload >;
 
     // ---------------------------------------------------------------
