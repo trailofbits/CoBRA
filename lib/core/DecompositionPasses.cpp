@@ -1,8 +1,12 @@
 #include "DecompositionPassHelpers.h"
 #include "OrchestratorPasses.h"
+#include "cobra/core/AuxVarEliminator.h"
 #include "cobra/core/DecompositionEngine.h"
 #include "cobra/core/ExprCost.h"
+#include "cobra/core/ExprUtils.h"
+#include "cobra/core/GhostResidualSolver.h"
 #include "cobra/core/SignatureChecker.h"
+#include "cobra/core/SignatureEval.h"
 
 namespace cobra {
 
@@ -177,6 +181,153 @@ namespace cobra {
             item, ctx, PassId::kExtractPolyCoreD4, ExtractorKind::kPolynomial,
             [](const DecompositionContext &dctx) { return ExtractPolyCore(dctx, 4); }
         );
+    }
+
+    Result< PassResult >
+    RunPrepareDirectResidual(const WorkItem &item, OrchestratorContext &ctx) {
+        if (!IsAstKind(item)) {
+            return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
+        }
+        if (!ctx.evaluator) {
+            return Ok(
+                PassResult{
+                    .decision = PassDecision::kBlocked,
+                    .reason =
+                        ReasonDetail{
+                                     .top = { .code    = { ReasonCategory::kGuardFailed,
+                                                  ReasonDomain::kDecomposition },
+                                     .message = "Decomposition requires evaluator" },
+                                     },
+            }
+            );
+        }
+
+        const auto &ast     = std::get< AstPayload >(item.payload);
+        auto decomp_sig     = ComputeDecompositionSignature(ast, ctx, item.rewrite_gen);
+        const auto num_vars = static_cast< uint32_t >(ctx.original_vars.size());
+
+        auto elim =
+            EliminateAuxVars(decomp_sig, ctx.original_vars, *ctx.evaluator, ctx.bitwidth);
+        auto support = BuildVarSupport(ctx.original_vars, elim.real_vars);
+
+        bool is_bn =
+            IsBooleanNullResidual(*ctx.evaluator, support, num_vars, ctx.bitwidth, decomp_sig);
+
+        if (!is_bn) {
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kNotApplicable,
+                    .disposition = ItemDisposition::kRetainCurrent,
+                }
+            );
+        }
+
+        WorkItem residual_item;
+        residual_item.payload = ResidualStatePayload{
+            .origin           = ResidualOrigin::kDirectBooleanNull,
+            .core_expr        = nullptr,
+            .core_degree      = 0,
+            .residual_eval    = *ctx.evaluator,
+            .source_sig       = decomp_sig,
+            .residual_sig     = decomp_sig,
+            .residual_elim    = std::move(elim),
+            .residual_support = std::move(support),
+            .is_boolean_null  = true,
+            .degree_floor     = 2,
+        };
+        residual_item.features       = item.features;
+        residual_item.metadata       = item.metadata;
+        residual_item.depth          = item.depth;
+        residual_item.rewrite_gen    = item.rewrite_gen;
+        residual_item.attempted_mask = item.attempted_mask;
+        residual_item.history        = item.history;
+
+        PassResult result;
+        result.decision    = PassDecision::kAdvance;
+        result.disposition = ItemDisposition::kRetainCurrent;
+        result.next.push_back(std::move(residual_item));
+        return Ok(std::move(result));
+    }
+
+    Result< PassResult >
+    RunPrepareResidualFromCore(const WorkItem &item, OrchestratorContext &ctx) {
+        if (!std::holds_alternative< CoreCandidatePayload >(item.payload)) {
+            return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
+        }
+        if (!ctx.evaluator) {
+            return Ok(
+                PassResult{
+                    .decision = PassDecision::kBlocked,
+                    .reason =
+                        ReasonDetail{
+                                     .top = { .code    = { ReasonCategory::kGuardFailed,
+                                                  ReasonDomain::kDecomposition },
+                                     .message = "Decomposition requires evaluator" },
+                                     },
+            }
+            );
+        }
+
+        const auto &core    = std::get< CoreCandidatePayload >(item.payload);
+        const auto num_vars = static_cast< uint32_t >(ctx.original_vars.size());
+
+        auto residual_eval =
+            BuildResidualEvaluator(*ctx.evaluator, *core.core_expr, ctx.bitwidth);
+
+        auto residual_sig = EvaluateBooleanSignature(residual_eval, num_vars, ctx.bitwidth);
+
+        auto elim =
+            EliminateAuxVars(residual_sig, ctx.original_vars, residual_eval, ctx.bitwidth);
+        auto support = BuildVarSupport(ctx.original_vars, elim.real_vars);
+
+        bool is_bn =
+            IsBooleanNullResidual(residual_eval, support, num_vars, ctx.bitwidth, residual_sig);
+
+        ResidualOrigin origin;
+        switch (core.extractor_kind) {
+            case ExtractorKind::kProductAST:
+                origin = ResidualOrigin::kProductCore;
+                break;
+            case ExtractorKind::kPolynomial:
+                origin = ResidualOrigin::kPolynomialCore;
+                break;
+            case ExtractorKind::kTemplate:
+                origin = ResidualOrigin::kTemplateCore;
+                break;
+            case ExtractorKind::kBooleanNullDirect:
+                origin = ResidualOrigin::kDirectBooleanNull;
+                break;
+        }
+
+        uint8_t degree_floor = (core.extractor_kind == ExtractorKind::kPolynomial)
+            ? static_cast< uint8_t >(core.degree_used + 1)
+            : 2;
+
+        WorkItem residual_item;
+        residual_item.payload = ResidualStatePayload{
+            .origin           = origin,
+            .core_expr        = CloneExpr(*core.core_expr),
+            .core_degree      = core.degree_used,
+            .residual_eval    = std::move(residual_eval),
+            .source_sig       = core.source_sig,
+            .residual_sig     = std::move(residual_sig),
+            .residual_elim    = std::move(elim),
+            .residual_support = std::move(support),
+            .is_boolean_null  = is_bn,
+            .degree_floor     = degree_floor,
+        };
+        residual_item.features       = item.features;
+        residual_item.metadata       = item.metadata;
+        residual_item.depth          = item.depth;
+        residual_item.rewrite_gen    = item.rewrite_gen;
+        residual_item.attempted_mask = item.attempted_mask;
+        residual_item.history        = item.history;
+
+        PassResult result;
+        result.decision    = PassDecision::kAdvance;
+        result.disposition = ItemDisposition::kConsumeCurrent;
+        result.next.push_back(std::move(residual_item));
+        return Ok(std::move(result));
     }
 
 } // namespace cobra

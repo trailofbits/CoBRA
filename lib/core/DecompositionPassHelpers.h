@@ -24,4 +24,9 @@ namespace cobra {
     Result< PassResult > RunExtractPolyCoreD3(const WorkItem &, OrchestratorContext &);
     Result< PassResult > RunExtractPolyCoreD4(const WorkItem &, OrchestratorContext &);
 
+    // Decomposition residual prep passes: prepare ResidualStatePayload
+    // for downstream solver passes.
+    Result< PassResult > RunPrepareDirectResidual(const WorkItem &, OrchestratorContext &);
+    Result< PassResult > RunPrepareResidualFromCore(const WorkItem &, OrchestratorContext &);
+
 } // namespace cobra
