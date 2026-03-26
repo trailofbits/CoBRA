@@ -49,8 +49,23 @@ namespace cobra {
         fp.provenance     = item.features.provenance;
         fp.attempted_mask = item.attempted_mask;
 
+        // Fold Phase 3 control state into signature-family hashes so
+        // the pass-attempt cache distinguishes subproblems that share
+        // the same signature but differ in group, recursion depth,
+        // or evaluator (residual-origin children).
+        auto fold_control = [&](size_t h) -> size_t {
+            h = detail::hash_combine(
+                h, std::hash< uint32_t >{}(item.group_id.value_or(UINT32_MAX))
+            );
+            h = detail::hash_combine(h, std::hash< uint8_t >{}(item.signature_recursion_depth));
+            h = detail::hash_combine(
+                h, std::hash< bool >{}(item.evaluator_override.has_value())
+            );
+            return h;
+        };
+
         std::visit(
-            [&fp](const auto &payload) {
+            [&fp, &fold_control](const auto &payload) {
                 using T = std::decay_t< decltype(payload) >;
                 if constexpr (std::is_same_v< T, AstPayload >) {
                     fp.payload_hash = std::hash< Expr >{}(*payload.expr);
@@ -60,7 +75,7 @@ namespace cobra {
                     for (uint64_t v : payload.ctx.sig) {
                         h = detail::hash_combine(h, std::hash< uint64_t >{}(v));
                     }
-                    fp.payload_hash = h;
+                    fp.payload_hash = fold_control(h);
                     fp.vars         = payload.ctx.real_vars;
                 } else if constexpr (std::is_same_v< T, SignatureCoeffStatePayload >) {
                     size_t h = std::hash< size_t >{}(payload.ctx.sig.size());
@@ -70,7 +85,7 @@ namespace cobra {
                     for (uint64_t c : payload.coeffs) {
                         h = detail::hash_combine(h, std::hash< uint64_t >{}(c));
                     }
-                    fp.payload_hash = h;
+                    fp.payload_hash = fold_control(h);
                     fp.vars         = payload.ctx.real_vars;
                 } else if constexpr (std::is_same_v< T, CoreCandidatePayload >) {
                     size_t h = std::hash< Expr >{}(*payload.core_expr);

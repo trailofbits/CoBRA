@@ -286,7 +286,7 @@ namespace cobra {
 
     struct OrchestratorPolicy
     {
-        uint32_t max_expansions  = 512;
+        uint32_t max_expansions  = 1024;
         uint32_t max_rewrite_gen = 3;
         uint32_t max_candidates  = 8;
     };
