@@ -1,5 +1,8 @@
 #include "OrchestratorPasses.h"
+#include "CompetitionGroup.h"
+#include "ContinuationTypes.h"
 #include "DecompositionPassHelpers.h"
+#include "JoinState.h"
 #include "SemilinearPasses.h"
 #include "SignaturePasses.h"
 #include "SimplifierInternal.h"
@@ -9,10 +12,13 @@
 #include "cobra/core/ExprCost.h"
 #include "cobra/core/ExprUtils.h"
 #include "cobra/core/MixedProductRewriter.h"
-#include "cobra/core/OperandSimplifier.h"
 #include "cobra/core/PatternMatcher.h"
 #include "cobra/core/ProductIdentityRecoverer.h"
 #include "cobra/core/SignatureEval.h"
+
+#include <functional>
+#include <numeric>
+#include <optional>
 
 namespace cobra {
 
@@ -24,6 +30,38 @@ namespace cobra {
 
         bool IsCandidateKind(const WorkItem &item) {
             return std::holds_alternative< CandidatePayload >(item.payload);
+        }
+
+        struct OperandSite
+        {
+            const Expr *mul;
+            size_t mul_hash;
+            bool lhs_bitwise;
+            bool rhs_bitwise;
+        };
+
+        std::optional< OperandSite > FindFirstOperandSite(const Expr &root) {
+            if (root.kind == Expr::Kind::kMul && root.children.size() == 2) {
+                bool lhs_vd = HasVarDep(*root.children[0]);
+                bool rhs_vd = HasVarDep(*root.children[1]);
+                if (lhs_vd && rhs_vd) {
+                    bool lhs_bw = HasNonleafBitwise(*root.children[0]);
+                    bool rhs_bw = HasNonleafBitwise(*root.children[1]);
+                    if (lhs_bw || rhs_bw) {
+                        return OperandSite{
+                            .mul         = &root,
+                            .mul_hash    = std::hash< Expr >{}(root),
+                            .lhs_bitwise = lhs_bw,
+                            .rhs_bitwise = rhs_bw,
+                        };
+                    }
+                }
+            }
+            for (const auto &child : root.children) {
+                auto result = FindFirstOperandSite(*child);
+                if (result.has_value()) { return result; }
+            }
+            return std::nullopt;
         }
 
     } // namespace
@@ -215,11 +253,10 @@ namespace cobra {
         if (!IsAstKind(item)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
-
         const auto &ast = std::get< AstPayload >(item.payload);
-        auto opsimpl = SimplifyMixedOperands(CloneExpr(*ast.expr), ctx.original_vars, ctx.opts);
 
-        if (!opsimpl.changed) {
+        auto site = FindFirstOperandSite(*ast.expr);
+        if (!site.has_value()) {
             return Ok(
                 PassResult{
                     .decision    = PassDecision::kNoProgress,
@@ -228,27 +265,72 @@ namespace cobra {
             );
         }
 
-        auto new_cls = ClassifyStructural(*opsimpl.expr);
+        const auto &vars    = ctx.original_vars;
+        const auto num_vars = static_cast< uint32_t >(vars.size());
+        auto baseline_cost  = ComputeCost(*site->mul).cost;
 
-        WorkItem rewritten;
-        rewritten.payload = AstPayload{
-            .expr           = std::move(opsimpl.expr),
-            .classification = new_cls,
-            .provenance     = Provenance::kRewritten,
-        };
-        rewritten.features                = item.features;
-        rewritten.features.classification = new_cls;
-        rewritten.features.provenance     = Provenance::kRewritten;
-        rewritten.metadata                = item.metadata;
-        rewritten.depth                   = item.depth;
-        rewritten.rewrite_gen             = item.rewrite_gen + 1;
-        rewritten.attempted_mask          = 0;
-        rewritten.history                 = item.history;
+        OperandJoinState join;
+        join.full_ast      = CloneExpr(*ast.expr);
+        join.original_mul  = CloneExpr(*site->mul);
+        join.target_hash   = site->mul_hash;
+        join.baseline_cost = baseline_cost;
+        join.vars          = vars;
+        join.bitwidth      = ctx.bitwidth;
+        join.rewrite_gen   = item.rewrite_gen;
+
+        auto join_id =
+            CreateJoin(ctx.join_states, ctx.next_join_id, JoinState{ std::move(join) });
+
+        // Pre-resolve non-bitwise sides so ResolveOperandRewrite
+        // does not wait forever for a child that was never emitted.
+        auto &stored_join = std::get< OperandJoinState >(ctx.join_states.at(join_id));
+        if (!site->lhs_bitwise) { stored_join.lhs_resolved = true; }
+        if (!site->rhs_bitwise) { stored_join.rhs_resolved = true; }
 
         PassResult result;
         result.decision    = PassDecision::kAdvance;
-        result.disposition = ItemDisposition::kReplaceCurrent;
-        result.next.push_back(std::move(rewritten));
+        result.disposition = ItemDisposition::kConsumeCurrent;
+
+        auto emit_child = [&](const Expr &operand, OperandRewriteCont::OperandRole role) {
+            auto sig = EvaluateBooleanSignature(operand, num_vars, ctx.bitwidth);
+
+            auto group_id      = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+            auto &group        = ctx.competition_groups.at(group_id);
+            group.continuation = OperandRewriteCont{
+                .join_id = join_id,
+                .role    = role,
+            };
+
+            std::vector< uint32_t > indices(num_vars);
+            std::iota(indices.begin(), indices.end(), 0U);
+
+            WorkItem child;
+            child.payload = SignatureStatePayload{
+                    .ctx = {
+                        .sig              = std::move(sig),
+                        .real_vars        = vars,
+                        .elimination      = { .reduced_sig = {}, .real_vars = vars },
+                        .original_indices = std::move(indices),
+                        .needs_original_space_verification = false,
+                    },
+                };
+            child.features              = item.features;
+            child.metadata              = item.metadata;
+            child.group_id              = group_id;
+            // Copy sig into elimination.reduced_sig for technique passes.
+            auto &sub                   = std::get< SignatureStatePayload >(child.payload).ctx;
+            sub.elimination.reduced_sig = sub.sig;
+
+            result.next.push_back(std::move(child));
+        };
+
+        if (site->lhs_bitwise) {
+            emit_child(*site->mul->children[0], OperandRewriteCont::OperandRole::kLhs);
+        }
+        if (site->rhs_bitwise) {
+            emit_child(*site->mul->children[1], OperandRewriteCont::OperandRole::kRhs);
+        }
+
         return Ok(std::move(result));
     }
 

@@ -1358,3 +1358,103 @@ TEST(ResidualEmission, BlockedWhenVarsOutOfRange) {
     EXPECT_EQ(result.value().decision, PassDecision::kBlocked);
     EXPECT_EQ(result.value().disposition, ItemDisposition::kRetainCurrent);
 }
+
+// --- OperandEmission tests ---
+
+TEST(OperandEmission, FindsFirstEligibleMulAndEmitsChildren) {
+    // Build Mul(And(a,b), Or(c,d)) — both sides are bitwise.
+    std::vector< std::string > vars = { "x0", "x1" };
+    Options opts;
+    opts.bitwidth = 64;
+    auto ctx      = MakeCtx(opts, vars);
+
+    auto mul_expr = Expr::Mul(
+        Expr::BitwiseAnd(Expr::Variable(0), Expr::Variable(1)),
+        Expr::BitwiseOr(Expr::Variable(0), Expr::Variable(1))
+    );
+
+    WorkItem item;
+    item.payload = AstPayload{
+        .expr       = std::move(mul_expr),
+        .provenance = Provenance::kOriginal,
+    };
+
+    auto result = RunOperandSimplify(item, ctx);
+    ASSERT_TRUE(result.has_value());
+    auto &pr = result.value();
+
+    EXPECT_EQ(pr.decision, PassDecision::kAdvance);
+    EXPECT_EQ(pr.disposition, ItemDisposition::kConsumeCurrent);
+    EXPECT_EQ(pr.next.size(), 2);
+
+    for (const auto &child : pr.next) {
+        EXPECT_EQ(GetStateKind(child.payload), StateKind::kSignatureState);
+        EXPECT_TRUE(child.group_id.has_value());
+    }
+
+    EXPECT_EQ(ctx.join_states.size(), 1);
+    EXPECT_EQ(ctx.competition_groups.size(), 2);
+
+    // Verify continuations are OperandRewriteCont
+    for (auto &[gid, group] : ctx.competition_groups) {
+        ASSERT_TRUE(group.continuation.has_value());
+        EXPECT_TRUE(std::holds_alternative< OperandRewriteCont >(*group.continuation));
+    }
+}
+
+TEST(OperandEmission, SkipsNonBitwiseOperand) {
+    // Build Mul(And(a,b), Add(a,b)) — only lhs is bitwise.
+    std::vector< std::string > vars = { "x0", "x1" };
+    Options opts;
+    opts.bitwidth = 64;
+    auto ctx      = MakeCtx(opts, vars);
+
+    auto mul_expr = Expr::Mul(
+        Expr::BitwiseAnd(Expr::Variable(0), Expr::Variable(1)),
+        Expr::Add(Expr::Variable(0), Expr::Variable(1))
+    );
+
+    WorkItem item;
+    item.payload = AstPayload{
+        .expr       = std::move(mul_expr),
+        .provenance = Provenance::kOriginal,
+    };
+
+    auto result = RunOperandSimplify(item, ctx);
+    ASSERT_TRUE(result.has_value());
+    auto &pr = result.value();
+
+    EXPECT_EQ(pr.decision, PassDecision::kAdvance);
+    EXPECT_EQ(pr.next.size(), 1);
+
+    // The join should have rhs pre-resolved since rhs is not bitwise
+    EXPECT_EQ(ctx.join_states.size(), 1);
+    auto &join_var = ctx.join_states.begin()->second;
+    auto *join     = std::get_if< OperandJoinState >(&join_var);
+    ASSERT_NE(join, nullptr);
+    EXPECT_FALSE(join->lhs_resolved);
+    EXPECT_TRUE(join->rhs_resolved);
+}
+
+TEST(OperandEmission, NoEligibleSiteReturnsNoProgress) {
+    // Build Add(a, b) — no eligible Mul.
+    std::vector< std::string > vars = { "x0", "x1" };
+    Options opts;
+    opts.bitwidth = 64;
+    auto ctx      = MakeCtx(opts, vars);
+
+    auto add_expr = Expr::Add(Expr::Variable(0), Expr::Variable(1));
+
+    WorkItem item;
+    item.payload = AstPayload{
+        .expr       = std::move(add_expr),
+        .provenance = Provenance::kOriginal,
+    };
+
+    auto result = RunOperandSimplify(item, ctx);
+    ASSERT_TRUE(result.has_value());
+    auto &pr = result.value();
+
+    EXPECT_EQ(pr.decision, PassDecision::kNoProgress);
+    EXPECT_EQ(pr.disposition, ItemDisposition::kRetainCurrent);
+}
