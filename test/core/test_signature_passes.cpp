@@ -1,5 +1,6 @@
 #include "CompetitionGroup.h"
 #include "ContinuationTypes.h"
+#include "JoinState.h"
 #include "Orchestrator.h"
 #include "OrchestratorPasses.h"
 #include "SignaturePasses.h"
@@ -10,6 +11,7 @@
 #include "cobra/core/ExprCost.h"
 #include "cobra/core/ExprUtils.h"
 #include "cobra/core/HybridDecomposer.h"
+#include "cobra/core/SignatureChecker.h"
 #include "cobra/core/SignatureEval.h"
 #include <gtest/gtest.h>
 
@@ -730,4 +732,300 @@ TEST(SignaturePass, HybridComposeContResolution) {
         ctx.competition_groups.at(parent_gid).best->source_pass,
         PassId::kSignatureHybridDecompose
     );
+}
+
+// --- OperandRewriteCont resolution tests ---
+
+TEST(SignaturePass, OperandJoinResolveBothSides) {
+    // Build: Mul(x0 ^ x1, x0 | x1) — both operands are bitwise.
+    // The join should produce a rewritten AST when both sides resolve.
+    std::vector< std::string > vars = { "x0", "x1" };
+    Options opts;
+    opts.bitwidth = 64;
+    auto ctx      = MakeCtx(opts, vars);
+
+    // Original Mul: (x0 ^ x1) * (x0 | x1)
+    auto orig_mul = Expr::Mul(
+        Expr::BitwiseXor(Expr::Variable(0), Expr::Variable(1)),
+        Expr::BitwiseOr(Expr::Variable(0), Expr::Variable(1))
+    );
+    auto baseline = ComputeCost(*orig_mul).cost;
+
+    OperandJoinState join;
+    join.full_ast      = CloneExpr(*orig_mul);
+    join.original_mul  = CloneExpr(*orig_mul);
+    join.target_hash   = std::hash< Expr >{}(*orig_mul);
+    join.baseline_cost = baseline;
+    join.vars          = vars;
+    join.bitwidth      = 64;
+    join.rewrite_gen   = 0;
+    join.lhs_resolved  = false;
+    join.rhs_resolved  = false;
+
+    auto join_id = CreateJoin(ctx.join_states, ctx.next_join_id, JoinState{ std::move(join) });
+
+    // Create LHS child group with OperandRewriteCont
+    auto lhs_gid = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+    ctx.competition_groups.at(lhs_gid).continuation = ContinuationData{
+        OperandRewriteCont{
+                           .join_id = join_id,
+                           .role    = OperandRewriteCont::OperandRole::kLhs,
+                           }
+    };
+
+    // Submit x0 + x1 as the LHS winner (cheaper than x0 ^ x1)
+    CandidateRecord lhs_rec;
+    lhs_rec.expr        = Expr::Add(Expr::Variable(0), Expr::Variable(1));
+    lhs_rec.cost        = ComputeCost(*lhs_rec.expr).cost;
+    lhs_rec.source_pass = PassId::kSignaturePatternMatch;
+    SubmitCandidate(ctx.competition_groups, lhs_gid, std::move(lhs_rec));
+
+    // Resolve LHS
+    WorkItem lhs_resolved;
+    lhs_resolved.payload = CompetitionResolvedPayload{ .group_id = lhs_gid };
+    auto r1              = RunResolveCompetition(lhs_resolved, ctx);
+    ASSERT_TRUE(r1.has_value());
+
+    // LHS resolved but RHS not yet — join state should still exist
+    EXPECT_EQ(ctx.join_states.count(join_id), 1);
+
+    // Create RHS child group
+    auto rhs_gid = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+    ctx.competition_groups.at(rhs_gid).continuation = ContinuationData{
+        OperandRewriteCont{
+                           .join_id = join_id,
+                           .role    = OperandRewriteCont::OperandRole::kRhs,
+                           }
+    };
+
+    // Submit x0 + x1 as the RHS winner too (for simplicity)
+    CandidateRecord rhs_rec;
+    rhs_rec.expr        = Expr::Add(Expr::Variable(0), Expr::Variable(1));
+    rhs_rec.cost        = ComputeCost(*rhs_rec.expr).cost;
+    rhs_rec.source_pass = PassId::kSignaturePatternMatch;
+    SubmitCandidate(ctx.competition_groups, rhs_gid, std::move(rhs_rec));
+
+    // Resolve RHS
+    WorkItem rhs_resolved;
+    rhs_resolved.payload = CompetitionResolvedPayload{ .group_id = rhs_gid };
+    auto r2              = RunResolveCompetition(rhs_resolved, ctx);
+    ASSERT_TRUE(r2.has_value());
+    auto &pr = r2.value();
+
+    // Both resolved — join state should be cleaned up
+    EXPECT_EQ(ctx.join_states.count(join_id), 0);
+
+    // Should emit a rewritten AST
+    EXPECT_EQ(pr.decision, PassDecision::kAdvance);
+    // If a candidate was emitted (cost gate passed), check it
+    if (!pr.next.empty()) {
+        EXPECT_EQ(GetStateKind(pr.next[0].payload), StateKind::kFoldedAst);
+        auto &ast = std::get< AstPayload >(pr.next[0].payload);
+        EXPECT_EQ(ast.provenance, Provenance::kRewritten);
+        EXPECT_EQ(pr.next[0].rewrite_gen, 1);
+    }
+}
+
+// --- ProductCollapseCont resolution tests ---
+
+TEST(SignaturePass, ProductJoinResolveBothFactors) {
+    // Build: Add(Mul(x&y, x|y), Mul(x&~y, ~x&y)) = x*y
+    // Factor sigs: x = {0,1,0,1}, y = {0,0,1,1}
+    std::vector< std::string > vars = { "x0", "x1" };
+    Options opts;
+    opts.bitwidth = 64;
+    auto ctx      = MakeCtx(opts, vars);
+
+    auto orig = Expr::Add(
+        Expr::Mul(
+            Expr::BitwiseAnd(Expr::Variable(0), Expr::Variable(1)),
+            Expr::BitwiseOr(Expr::Variable(0), Expr::Variable(1))
+        ),
+        Expr::Mul(
+            Expr::BitwiseAnd(Expr::Variable(0), Expr::BitwiseNot(Expr::Variable(1))),
+            Expr::BitwiseAnd(Expr::BitwiseNot(Expr::Variable(0)), Expr::Variable(1))
+        )
+    );
+    auto baseline = ComputeCost(*orig).cost;
+
+    ProductJoinState join;
+    join.original_expr = CloneExpr(*orig);
+    join.baseline_cost = baseline;
+    join.vars          = vars;
+    join.bitwidth      = 64;
+    join.rewrite_gen   = 0;
+
+    auto join_id = CreateJoin(ctx.join_states, ctx.next_join_id, JoinState{ std::move(join) });
+
+    // X factor group
+    auto x_gid = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+    ctx.competition_groups.at(x_gid).continuation = ContinuationData{
+        ProductCollapseCont{
+                            .join_id = join_id,
+                            .role    = ProductCollapseCont::FactorRole::kX,
+                            }
+    };
+
+    CandidateRecord x_rec;
+    x_rec.expr        = Expr::Variable(0);
+    x_rec.cost        = ComputeCost(*x_rec.expr).cost;
+    x_rec.source_pass = PassId::kSignaturePatternMatch;
+    SubmitCandidate(ctx.competition_groups, x_gid, std::move(x_rec));
+
+    // Y factor group
+    auto y_gid = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+    ctx.competition_groups.at(y_gid).continuation = ContinuationData{
+        ProductCollapseCont{
+                            .join_id = join_id,
+                            .role    = ProductCollapseCont::FactorRole::kY,
+                            }
+    };
+
+    CandidateRecord y_rec;
+    y_rec.expr        = Expr::Variable(1);
+    y_rec.cost        = ComputeCost(*y_rec.expr).cost;
+    y_rec.source_pass = PassId::kSignaturePatternMatch;
+    SubmitCandidate(ctx.competition_groups, y_gid, std::move(y_rec));
+
+    // Resolve X
+    WorkItem x_resolved;
+    x_resolved.payload = CompetitionResolvedPayload{ .group_id = x_gid };
+    auto r1            = RunResolveCompetition(x_resolved, ctx);
+    ASSERT_TRUE(r1.has_value());
+    EXPECT_EQ(ctx.join_states.count(join_id), 1);
+
+    // Resolve Y
+    WorkItem y_resolved;
+    y_resolved.payload = CompetitionResolvedPayload{ .group_id = y_gid };
+    auto r2            = RunResolveCompetition(y_resolved, ctx);
+    ASSERT_TRUE(r2.has_value());
+
+    // Join cleaned up
+    EXPECT_EQ(ctx.join_states.count(join_id), 0);
+
+    auto &pr = r2.value();
+    EXPECT_EQ(pr.decision, PassDecision::kAdvance);
+
+    // Should emit Mul(x0, x1) which is cheaper than
+    // Add(Mul(x&y, x|y), Mul(x&~y, ~x&y))
+    ASSERT_GE(pr.next.size(), 1);
+    EXPECT_EQ(GetStateKind(pr.next[0].payload), StateKind::kFoldedAst);
+    auto &ast = std::get< AstPayload >(pr.next[0].payload);
+    EXPECT_EQ(ast.provenance, Provenance::kRewritten);
+    EXPECT_EQ(pr.next[0].rewrite_gen, 1);
+
+    // Verify the rewritten expr is x0 * x1
+    EXPECT_EQ(ast.expr->kind, Expr::Kind::kMul);
+}
+
+TEST(SignaturePass, ProductJoinOneFactorNoWinner) {
+    // When one factor has no winner, no rewrite should be emitted.
+    std::vector< std::string > vars = { "x0", "x1" };
+    Options opts;
+    opts.bitwidth = 64;
+    auto ctx      = MakeCtx(opts, vars);
+
+    auto orig = Expr::Add(
+        Expr::Mul(
+            Expr::BitwiseAnd(Expr::Variable(0), Expr::Variable(1)),
+            Expr::BitwiseOr(Expr::Variable(0), Expr::Variable(1))
+        ),
+        Expr::Mul(
+            Expr::BitwiseAnd(Expr::Variable(0), Expr::BitwiseNot(Expr::Variable(1))),
+            Expr::BitwiseAnd(Expr::BitwiseNot(Expr::Variable(0)), Expr::Variable(1))
+        )
+    );
+    auto baseline = ComputeCost(*orig).cost;
+
+    ProductJoinState join;
+    join.original_expr = CloneExpr(*orig);
+    join.baseline_cost = baseline;
+    join.vars          = vars;
+    join.bitwidth      = 64;
+    join.rewrite_gen   = 0;
+
+    auto join_id = CreateJoin(ctx.join_states, ctx.next_join_id, JoinState{ std::move(join) });
+
+    // X factor group — has a winner
+    auto x_gid = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+    ctx.competition_groups.at(x_gid).continuation = ContinuationData{
+        ProductCollapseCont{
+                            .join_id = join_id,
+                            .role    = ProductCollapseCont::FactorRole::kX,
+                            }
+    };
+
+    CandidateRecord x_rec;
+    x_rec.expr        = Expr::Variable(0);
+    x_rec.cost        = ComputeCost(*x_rec.expr).cost;
+    x_rec.source_pass = PassId::kSignaturePatternMatch;
+    SubmitCandidate(ctx.competition_groups, x_gid, std::move(x_rec));
+
+    // Y factor group — NO winner
+    auto y_gid = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+    ctx.competition_groups.at(y_gid).continuation = ContinuationData{
+        ProductCollapseCont{
+                            .join_id = join_id,
+                            .role    = ProductCollapseCont::FactorRole::kY,
+                            }
+    };
+    // No candidate submitted for Y
+
+    // Resolve X
+    WorkItem x_resolved;
+    x_resolved.payload = CompetitionResolvedPayload{ .group_id = x_gid };
+    RunResolveCompetition(x_resolved, ctx);
+
+    // Resolve Y (no winner)
+    WorkItem y_resolved;
+    y_resolved.payload = CompetitionResolvedPayload{ .group_id = y_gid };
+    auto r2            = RunResolveCompetition(y_resolved, ctx);
+    ASSERT_TRUE(r2.has_value());
+
+    auto &pr = r2.value();
+    // No rewrite emitted when one factor has no winner
+    EXPECT_TRUE(pr.next.empty());
+    // Join state cleaned up
+    EXPECT_EQ(ctx.join_states.count(join_id), 0);
+}
+
+TEST(SignaturePass, JoinCleanupAfterResolution) {
+    // Verify join state is removed after both sides resolve.
+    std::vector< std::string > vars = { "x0" };
+    Options opts;
+    opts.bitwidth = 64;
+    auto ctx      = MakeCtx(opts, vars);
+
+    OperandJoinState join;
+    join.full_ast      = Expr::Mul(Expr::Variable(0), Expr::Variable(0));
+    join.original_mul  = Expr::Mul(Expr::Variable(0), Expr::Variable(0));
+    join.target_hash   = std::hash< Expr >{}(*join.original_mul);
+    join.baseline_cost = ComputeCost(*join.original_mul).cost;
+    join.vars          = vars;
+    join.bitwidth      = 64;
+    join.rewrite_gen   = 0;
+    join.lhs_resolved  = true; // one side already resolved (no bitwise)
+    join.rhs_resolved  = false;
+
+    auto join_id = CreateJoin(ctx.join_states, ctx.next_join_id, JoinState{ std::move(join) });
+    EXPECT_EQ(ctx.join_states.count(join_id), 1);
+
+    // Create RHS group
+    auto rhs_gid = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+    ctx.competition_groups.at(rhs_gid).continuation = ContinuationData{
+        OperandRewriteCont{
+                           .join_id = join_id,
+                           .role    = OperandRewriteCont::OperandRole::kRhs,
+                           }
+    };
+    // No winner for RHS
+
+    // Resolve
+    WorkItem resolved;
+    resolved.payload = CompetitionResolvedPayload{ .group_id = rhs_gid };
+    auto r           = RunResolveCompetition(resolved, ctx);
+    ASSERT_TRUE(r.has_value());
+
+    // Join state should be cleaned up
+    EXPECT_EQ(ctx.join_states.count(join_id), 0);
 }

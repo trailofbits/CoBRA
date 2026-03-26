@@ -1,12 +1,14 @@
 #include "SignaturePasses.h"
 #include "CompetitionGroup.h"
 #include "ContinuationTypes.h"
+#include "JoinState.h"
 #include "OrchestratorPasses.h"
 #include "cobra/core/AnfTransform.h"
 #include "cobra/core/ArithmeticLowering.h"
 #include "cobra/core/BitWidth.h"
 #include "cobra/core/BitwiseDecomposer.h"
 #include "cobra/core/Classification.h"
+#include "cobra/core/Classifier.h"
 #include "cobra/core/CoBExprBuilder.h"
 #include "cobra/core/CoeffInterpolator.h"
 #include "cobra/core/CoefficientSplitter.h"
@@ -28,6 +30,7 @@
 #include <cstdint>
 #include <numeric>
 #include <optional>
+#include <random>
 #include <utility>
 #include <vector>
 
@@ -198,6 +201,195 @@ namespace cobra {
             return pr;
         }
 
+        PassResult ResolveOperandRewrite(
+            const OperandRewriteCont &cont, CompetitionGroup &group, const WorkItem &item,
+            OrchestratorContext &ctx
+        ) {
+            PassResult pr;
+            pr.disposition = ItemDisposition::kConsumeCurrent;
+            pr.decision    = PassDecision::kAdvance;
+
+            auto join_it = ctx.join_states.find(cont.join_id);
+            if (join_it == ctx.join_states.end()) { return pr; }
+            auto *join = std::get_if< OperandJoinState >(&join_it->second);
+            if (join == nullptr) { return pr; }
+
+            if (cont.role == OperandRewriteCont::OperandRole::kLhs) {
+                join->lhs_resolved = true;
+                if (group.best.has_value()) {
+                    join->lhs_winner = CandidateRecord{
+                        .expr        = CloneExpr(*group.best->expr),
+                        .cost        = group.best->cost,
+                        .source_pass = group.best->source_pass,
+                    };
+                }
+            } else {
+                join->rhs_resolved = true;
+                if (group.best.has_value()) {
+                    join->rhs_winner = CandidateRecord{
+                        .expr        = CloneExpr(*group.best->expr),
+                        .cost        = group.best->cost,
+                        .source_pass = group.best->source_pass,
+                    };
+                }
+            }
+
+            if (!join->lhs_resolved || !join->rhs_resolved) { return pr; }
+
+            // Both resolved. Build up to 3 candidates.
+            const auto &orig       = *join->original_mul;
+            auto baseline          = join->baseline_cost;
+            const auto bw          = join->bitwidth;
+            const auto num_vars    = static_cast< uint32_t >(join->vars.size());
+            const uint64_t fw_mask = Bitmask(bw);
+
+            struct Candidate
+            {
+                std::unique_ptr< Expr > expr;
+                ExprCost cost;
+            };
+
+            std::optional< Candidate > best;
+
+            auto try_cand = [&](std::unique_ptr< Expr > lhs, std::unique_ptr< Expr > rhs) {
+                auto mul = Expr::Mul(std::move(lhs), std::move(rhs));
+                auto c   = ComputeCost(*mul).cost;
+                if (!IsBetter(c, baseline)) { return; }
+                if (best.has_value() && !IsBetter(c, best->cost)) { return; }
+
+                // 8-probe FW check matching OperandSimplifier lines 166-173
+                std::mt19937_64 rng(0xCA5E + num_vars);
+                constexpr int kProbes = 8;
+                std::vector< uint64_t > pt(num_vars);
+                for (int p = 0; p < kProbes; ++p) {
+                    for (uint32_t vi = 0; vi < num_vars; ++vi) { pt[vi] = rng() & fw_mask; }
+                    uint64_t orig_val = EvalExpr(orig, pt, bw) & fw_mask;
+                    uint64_t simp_val = EvalExpr(*mul, pt, bw) & fw_mask;
+                    if (orig_val != simp_val) { return; }
+                }
+
+                best = Candidate{ .expr = std::move(mul), .cost = c };
+            };
+
+            if (join->lhs_winner.has_value()) {
+                try_cand(CloneExpr(*join->lhs_winner->expr), CloneExpr(*orig.children[1]));
+            }
+            if (join->rhs_winner.has_value()) {
+                try_cand(CloneExpr(*orig.children[0]), CloneExpr(*join->rhs_winner->expr));
+            }
+            if (join->lhs_winner.has_value() && join->rhs_winner.has_value()) {
+                try_cand(
+                    CloneExpr(*join->lhs_winner->expr), CloneExpr(*join->rhs_winner->expr)
+                );
+            }
+
+            if (best.has_value()) {
+                // Splice the replacement Mul into the full AST.
+                auto rebuilt_ast = CloneExpr(*join->full_ast);
+                bool replaced    = false;
+                rebuilt_ast      = ReplaceByHash(
+                    std::move(rebuilt_ast), join->target_hash, best->expr, replaced
+                );
+
+                auto new_cls = ClassifyStructural(*rebuilt_ast);
+
+                WorkItem rewritten;
+                rewritten.payload = AstPayload{
+                    .expr           = std::move(rebuilt_ast),
+                    .classification = new_cls,
+                    .provenance     = Provenance::kRewritten,
+                };
+                rewritten.features                = item.features;
+                rewritten.features.classification = new_cls;
+                rewritten.features.provenance     = Provenance::kRewritten;
+                rewritten.metadata                = item.metadata;
+                rewritten.depth                   = item.depth;
+                rewritten.rewrite_gen             = join->rewrite_gen + 1;
+                rewritten.attempted_mask          = 0;
+                rewritten.history                 = item.history;
+
+                pr.next.push_back(std::move(rewritten));
+            }
+
+            ctx.join_states.erase(join_it);
+            return pr;
+        }
+
+        PassResult ResolveProductCollapse(
+            const ProductCollapseCont &cont, CompetitionGroup &group, const WorkItem &item,
+            OrchestratorContext &ctx
+        ) {
+            PassResult pr;
+            pr.disposition = ItemDisposition::kConsumeCurrent;
+            pr.decision    = PassDecision::kAdvance;
+
+            auto join_it = ctx.join_states.find(cont.join_id);
+            if (join_it == ctx.join_states.end()) { return pr; }
+            auto *join = std::get_if< ProductJoinState >(&join_it->second);
+            if (join == nullptr) { return pr; }
+
+            if (cont.role == ProductCollapseCont::FactorRole::kX) {
+                join->x_resolved = true;
+                if (group.best.has_value()) {
+                    join->x_winner = CandidateRecord{
+                        .expr        = CloneExpr(*group.best->expr),
+                        .cost        = group.best->cost,
+                        .source_pass = group.best->source_pass,
+                    };
+                }
+            } else {
+                join->y_resolved = true;
+                if (group.best.has_value()) {
+                    join->y_winner = CandidateRecord{
+                        .expr        = CloneExpr(*group.best->expr),
+                        .cost        = group.best->cost,
+                        .source_pass = group.best->source_pass,
+                    };
+                }
+            }
+
+            if (!join->x_resolved || !join->y_resolved) { return pr; }
+
+            // Both resolved. Product collapse requires BOTH factors.
+            if (join->x_winner.has_value() && join->y_winner.has_value()) {
+                auto candidate = Expr::Mul(
+                    CloneExpr(*join->x_winner->expr), CloneExpr(*join->y_winner->expr)
+                );
+
+                const auto &orig    = *join->original_expr;
+                const auto bw       = join->bitwidth;
+                const auto num_vars = static_cast< uint32_t >(join->vars.size());
+
+                auto check = FullWidthCheck(orig, num_vars, *candidate, {}, bw);
+                if (check.passed) {
+                    auto cand_cost = ComputeCost(*candidate).cost;
+                    if (IsBetter(cand_cost, join->baseline_cost)) {
+                        auto new_cls = ClassifyStructural(*candidate);
+
+                        WorkItem rewritten;
+                        rewritten.payload = AstPayload{
+                            .expr           = std::move(candidate),
+                            .classification = new_cls,
+                            .provenance     = Provenance::kRewritten,
+                        };
+                        rewritten.features                = item.features;
+                        rewritten.features.classification = new_cls;
+                        rewritten.features.provenance     = Provenance::kRewritten;
+                        rewritten.metadata                = item.metadata;
+                        rewritten.depth                   = item.depth;
+                        rewritten.rewrite_gen             = join->rewrite_gen + 1;
+                        rewritten.attempted_mask          = 0;
+                        rewritten.history                 = item.history;
+
+                        pr.next.push_back(std::move(rewritten));
+                    }
+                }
+            }
+
+            ctx.join_states.erase(join_it);
+            return pr;
+        }
+
     } // namespace
 
     // ---------------------------------------------------------------
@@ -272,6 +464,10 @@ namespace cobra {
                     return ResolveBitwiseCompose(c, group, item, ctx);
                 } else if constexpr (std::is_same_v< T, HybridComposeCont >) {
                     return ResolveHybridCompose(c, group, item, ctx);
+                } else if constexpr (std::is_same_v< T, OperandRewriteCont >) {
+                    return ResolveOperandRewrite(c, group, item, ctx);
+                } else if constexpr (std::is_same_v< T, ProductCollapseCont >) {
+                    return ResolveProductCollapse(c, group, item, ctx);
                 } else {
                     return PassResult{
                         .decision    = PassDecision::kBlocked,

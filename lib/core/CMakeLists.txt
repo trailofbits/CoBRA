@@ -47,6 +47,7 @@ target_sources(cobra-core PRIVATE
     StructureRecovery.cpp
     PassContract.cpp
     CompetitionGroup.cpp
+    JoinState.cpp
     Orchestrator.cpp
     OrchestratorPasses.cpp
     DecompositionPassHelpers.cpp

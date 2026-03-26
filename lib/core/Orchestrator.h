@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CompetitionGroup.h"
+#include "JoinState.h"
 #include "cobra/core/AuxVarEliminator.h"
 #include "cobra/core/Classification.h"
 #include "cobra/core/DecompositionEngine.h"
@@ -323,6 +324,9 @@ namespace cobra {
         // Competition group registry for Phase 3 technique competition.
         std::unordered_map< GroupId, CompetitionGroup > competition_groups;
         GroupId next_group_id = 0;
+        // Join state registry for multi-operand rewrites.
+        std::unordered_map< JoinId, JoinState > join_states;
+        JoinId next_join_id = 0;
     };
 
     // ---------------------------------------------------------------
