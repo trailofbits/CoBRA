@@ -1,5 +1,6 @@
 #include "CompetitionGroup.h"
 #include "ContinuationTypes.h"
+#include "DecompositionPassHelpers.h"
 #include "JoinState.h"
 #include "Orchestrator.h"
 #include "OrchestratorPasses.h"
@@ -1278,4 +1279,82 @@ TEST(SignaturePass, ResidualRecombineWithVarRemap) {
     // The remapped expression should use Variable(1), not Variable(0)
     auto &cand = std::get< CandidatePayload >(pr.next[0].payload);
     EXPECT_EQ(cand.real_vars, vars);
+}
+
+// --- RunResidualSupported emission tests ---
+
+TEST(ResidualEmission, EmitsSignatureStateChildWithContinuation) {
+    // f(x0, x1) = 2*x0 + 3*x1 — residual for the whole function.
+    std::vector< std::string > vars = { "x0", "x1" };
+    Options opts;
+    opts.bitwidth  = 64;
+    opts.evaluator = [](const std::vector< uint64_t > &vals) -> uint64_t {
+        return 2 * vals[0] + 3 * vals[1];
+    };
+    auto ctx = MakeCtx(opts, vars);
+
+    // Build a ResidualStatePayload (direct boolean-null).
+    auto sig  = EvaluateBooleanSignature(opts.evaluator, 2, 64);
+    auto elim = EliminateAuxVars(sig, vars);
+
+    WorkItem item;
+    item.payload = ResidualStatePayload{
+        .origin           = ResidualOrigin::kDirectBooleanNull,
+        .core_expr        = nullptr,
+        .core_degree      = 0,
+        .residual_eval    = opts.evaluator,
+        .source_sig       = sig,
+        .residual_sig     = sig,
+        .residual_elim    = elim,
+        .residual_support = BuildVarSupport(vars, elim.real_vars),
+        .is_boolean_null  = true,
+    };
+
+    auto result = RunResidualSupported(item, ctx);
+    ASSERT_TRUE(result.has_value());
+    auto &pr = result.value();
+
+    // 1. decision == kAdvance
+    EXPECT_EQ(pr.decision, PassDecision::kAdvance);
+    // 2. disposition == kRetainCurrent
+    EXPECT_EQ(pr.disposition, ItemDisposition::kRetainCurrent);
+    // 3. Exactly one child emitted
+    ASSERT_EQ(pr.next.size(), 1);
+    // 4. Child holds SignatureStatePayload
+    EXPECT_EQ(GetStateKind(pr.next[0].payload), StateKind::kSignatureState);
+    // 5. Child has a group_id
+    ASSERT_TRUE(pr.next[0].group_id.has_value());
+    // 6. Child has evaluator_override
+    EXPECT_TRUE(pr.next[0].evaluator_override.has_value());
+    // 7. Exactly one competition group created
+    EXPECT_EQ(ctx.competition_groups.size(), 1);
+    // 8. The group's continuation is ResidualRecombineCont
+    auto &group = ctx.competition_groups.at(*pr.next[0].group_id);
+    ASSERT_TRUE(group.continuation.has_value());
+    EXPECT_TRUE(std::holds_alternative< ResidualRecombineCont >(*group.continuation));
+}
+
+TEST(ResidualEmission, BlockedWhenVarsOutOfRange) {
+    // All vars eliminated => real_var_count == 0 => blocked.
+    std::vector< std::string > vars = { "x0" };
+    Options opts;
+    opts.bitwidth = 64;
+    auto ctx      = MakeCtx(opts, vars);
+
+    // Constant signature: f(x0) = 42 on {0,1}.
+    std::vector< uint64_t > sig = { 42, 42 };
+    auto elim                   = EliminateAuxVars(sig, vars);
+
+    WorkItem item;
+    item.payload = ResidualStatePayload{
+        .origin           = ResidualOrigin::kDirectBooleanNull,
+        .residual_sig     = sig,
+        .residual_elim    = elim,
+        .residual_support = {},
+    };
+
+    auto result = RunResidualSupported(item, ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result.value().decision, PassDecision::kBlocked);
+    EXPECT_EQ(result.value().disposition, ItemDisposition::kRetainCurrent);
 }

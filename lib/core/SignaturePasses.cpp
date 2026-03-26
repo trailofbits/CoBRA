@@ -823,6 +823,7 @@ namespace cobra {
         child.attempted_mask            = 0;
         child.signature_recursion_depth = item.signature_recursion_depth;
         child.group_id                  = item.group_id;
+        child.evaluator_override        = item.evaluator_override;
         child.history                   = item.history;
 
         PassResult result;

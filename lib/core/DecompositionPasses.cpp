@@ -1,3 +1,5 @@
+#include "CompetitionGroup.h"
+#include "ContinuationTypes.h"
 #include "DecompositionPassHelpers.h"
 #include "OrchestratorPasses.h"
 #include "cobra/core/AuxVarEliminator.h"
@@ -646,79 +648,64 @@ namespace cobra {
         }
         const auto &residual = std::get< ResidualStatePayload >(item.payload);
 
-        Options residual_opts   = ctx.opts;
-        residual_opts.evaluator = residual.residual_eval;
-
-        auto res_pass =
-            RunSupportedPass(residual.residual_sig, ctx.original_vars, residual_opts);
-        if (!res_pass.has_value() || !res_pass.value().Succeeded()) {
-            ReasonDetail reason;
-            if (res_pass.has_value() && !res_pass.value().Succeeded()) {
-                reason = res_pass.value().Reason();
-            } else {
-                reason.top = {
-                    .code    = { ReasonCategory::kNoSolution, ReasonDomain::kDecomposition,
-                                decomposition::kResidualFailed },
-                    .message = "supported pipeline returned error for residual",
-                };
-            }
-            return Ok(
-                PassResult{
-                    .decision    = PassDecision::kBlocked,
-                    .disposition = ItemDisposition::kRetainCurrent,
-                    .reason      = std::move(reason),
-                }
-            );
-        }
-
-        auto solved_expr      = res_pass.value().TakeExpr();
-        const auto &real_vars = res_pass.value().RealVars();
-        if (!real_vars.empty() && real_vars.size() < ctx.original_vars.size()) {
-            auto idx_map = BuildVarSupport(ctx.original_vars, real_vars);
-            RemapVarIndices(*solved_expr, idx_map);
-        }
-
-        const auto num_vars = static_cast< uint32_t >(ctx.original_vars.size());
-        auto res_check      = FullWidthCheckEval(
-            residual.residual_eval, num_vars, *solved_expr, ctx.bitwidth, 64
-        );
-        if (!res_check.passed) {
+        // Aux-var elimination on residual signature (matching RunSupportedPass).
+        // The residual_sig lives in the original variable space, so we
+        // eliminate from ctx.original_vars — identical to what
+        // RunSupportedPass(residual_sig, ctx.original_vars, ...) did.
+        auto elim                 = EliminateAuxVars(residual.residual_sig, ctx.original_vars);
+        const auto real_var_count = static_cast< uint32_t >(elim.real_vars.size());
+        if (real_var_count == 0 || real_var_count > ctx.opts.max_vars) {
             return Ok(
                 PassResult{
                     .decision    = PassDecision::kBlocked,
                     .disposition = ItemDisposition::kRetainCurrent,
                     .reason =
                         ReasonDetail{
-                                     .top = { .code    = { ReasonCategory::kVerifyFailed,
+                                     .top = { .code    = { ReasonCategory::kNoSolution,
                                                   ReasonDomain::kDecomposition,
                                                   decomposition::kResidualFailed },
-                                     .message = "supported residual candidate failed "
-                                                "strengthened verification" },
+                                     .message = "residual variable count out of range" },
                                      },
             }
             );
         }
 
-        auto recombined = TryRecombineAndEmit(
-            residual, std::move(solved_expr), ctx.original_vars, item, ctx,
-            PassId::kResidualSupported, ResidualSolverKind::kSupportedPipeline
-        );
-        if (recombined) { return Ok(std::move(*recombined)); }
+        auto original_indices = BuildVarSupport(ctx.original_vars, elim.real_vars);
 
-        return Ok(
-            PassResult{
-                .decision    = PassDecision::kBlocked,
-                .disposition = ItemDisposition::kRetainCurrent,
-                .reason =
-                    ReasonDetail{
-                                 .top = { .code    = { ReasonCategory::kVerifyFailed,
-                                              ReasonDomain::kDecomposition,
-                                              decomposition::kResidualFailed },
-                                 .message = "supported residual recombination "
-                                            "failed full-width verification" },
-                                 },
-        }
-        );
+        // Create competition group with ResidualRecombineCont.
+        auto group_id      = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+        auto &group        = ctx.competition_groups.at(group_id);
+        group.continuation = ResidualRecombineCont{
+            .core_expr        = residual.core_expr ? CloneExpr(*residual.core_expr) : nullptr,
+            .origin           = residual.origin,
+            .residual_eval    = residual.residual_eval,
+            .source_sig       = residual.source_sig,
+            .residual_support = residual.residual_support,
+            .core_degree      = residual.core_degree,
+            .parent_group_id  = std::nullopt,
+        };
+
+        // Emit kSignatureState child with the residual evaluator override.
+        WorkItem child;
+        child.payload = SignatureStatePayload{
+            .ctx = {
+                .sig              = elim.reduced_sig,
+                .real_vars        = elim.real_vars,
+                .elimination      = std::move(elim),
+                .original_indices = std::move(original_indices),
+                .needs_original_space_verification = true,
+            },
+        };
+        child.features           = item.features;
+        child.metadata           = item.metadata;
+        child.group_id           = group_id;
+        child.evaluator_override = residual.residual_eval;
+
+        PassResult result;
+        result.decision    = PassDecision::kAdvance;
+        result.disposition = ItemDisposition::kRetainCurrent;
+        result.next.push_back(std::move(child));
+        return Ok(std::move(result));
     }
 
     Result< PassResult > RunResidualTemplate(const WorkItem &item, OrchestratorContext &ctx) {

@@ -388,20 +388,22 @@ TEST(GAMBADataset, QSynthEA) {
     EXPECT_EQ(stats.total, 501);
     EXPECT_EQ(stats.skipped_parse, 1); // header only
     EXPECT_EQ(stats.parsed, 500);
-    // Fanout passes (bitwise/hybrid decomposition) add 2 passes to
-    // the signature state table, consuming expansion budget. One
-    // expression regresses (370 vs 371) due to budget pressure.
-    EXPECT_EQ(stats.simplified, 370);
-    EXPECT_EQ(stats.unsupported, 130);
+    // Residual path now emits kSignatureState children (full technique
+    // DAG) instead of calling RunSupportedPass synchronously. Combined
+    // with the expansion budget increase (256 -> 512), one more
+    // expression is simplified (371 vs 370).
+    EXPECT_EQ(stats.simplified, 371);
+    EXPECT_EQ(stats.unsupported, 129);
     EXPECT_EQ(stats.failed_simplify, 0);
 
     // Every unsupported result carries a structured reason code.
     EXPECT_EQ(stats.has_structured_reason, stats.unsupported);
-    // Fanout passes shift failure categories: more expressions
-    // exhaust the search budget before reaching other conclusions.
-    EXPECT_EQ(stats.by_category[ReasonCategory::kVerifyFailed], 21);
-    EXPECT_EQ(stats.by_category[ReasonCategory::kRepresentationGap], 14);
-    EXPECT_EQ(stats.by_category[ReasonCategory::kSearchExhausted], 95);
+    // Residual-to-DAG rewrite shifts failure categories: FW-verify
+    // failures eliminated (previously misattributed via synchronous
+    // RunSupportedPass), representation gaps exposed accurately.
+    EXPECT_EQ(stats.by_category[ReasonCategory::kVerifyFailed], 0);
+    EXPECT_EQ(stats.by_category[ReasonCategory::kRepresentationGap], 63);
+    EXPECT_EQ(stats.by_category[ReasonCategory::kSearchExhausted], 66);
 
     // Decomposition cause frames propagated into cause_chain.
     // MixedRewrite unsupported outcomes should carry delegated
