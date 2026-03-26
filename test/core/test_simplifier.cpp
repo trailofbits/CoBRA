@@ -1017,7 +1017,7 @@ TEST(SimplifierTest, AnfNotUsedForNonBoolean) {
 
 TEST(SimplifierTest, BitwiseOverPolyDOrCA) {
     // Ground truth: d | (c * a), vars: d=0, c=1, a=2
-    // Technique DAG: bitwise-over-poly needs BitwiseDecomposer (Task 6)
+    // Handle-counted bitwise fanout now resolves this.
     auto eval = [](const std::vector< uint64_t > &v) -> uint64_t {
         return v[0] | (v[1] * v[2]);
     };
@@ -1032,12 +1032,16 @@ TEST(SimplifierTest, BitwiseOverPolyDOrCA) {
 
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kUnchangedUnsupported);
+    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
+    auto fw = FullWidthCheckEval(eval, 3, *result.value().expr, 64);
+    EXPECT_TRUE(fw.passed);
 }
 
 TEST(SimplifierTest, BitwiseOverPolyEEAndD) {
-    // Ground truth: (e*e) & d
-    // Technique DAG: bitwise-over-poly needs BitwiseDecomposer (Task 6)
+    // Ground truth: (e*e) & d — AND-gated polynomial. On {0,1},
+    // e*e == e&e so the boolean signature is degenerate. Bitwise
+    // decomposition finds AND(e, d) which is {0,1}-correct but
+    // diverges at full width. Unsupported until lifted-skeleton.
     auto eval = [](const std::vector< uint64_t > &v) -> uint64_t {
         return (v[0] * v[0]) & v[1];
     };
@@ -1057,7 +1061,7 @@ TEST(SimplifierTest, BitwiseOverPolyEEAndD) {
 
 TEST(SimplifierTest, BitwiseOverPolyDSquaredXorA) {
     // Ground truth: (d*d) ^ a
-    // Technique DAG: bitwise-over-poly needs BitwiseDecomposer (Task 6)
+    // Handle-counted bitwise fanout now resolves this.
     auto eval = [](const std::vector< uint64_t > &v) -> uint64_t {
         return (v[0] * v[0]) ^ v[1];
     };
@@ -1072,13 +1076,15 @@ TEST(SimplifierTest, BitwiseOverPolyDSquaredXorA) {
 
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kUnchangedUnsupported);
+    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
+    auto fw = FullWidthCheckEval(eval, 2, *result.value().expr, 64);
+    EXPECT_TRUE(fw.passed);
 }
 
 TEST(SimplifierTest, BitwiseDecompDisabledPreservesBaseline) {
-    // d | (c*a): bitwise-over-poly. Old SimplifyFromSignature used
-    // internal coefficient splitting to recover polynomial parts.
-    // Technique DAG needs BitwiseDecomposer (Task 6) for this.
+    // d | (c*a): with expanded budget (256), the non-recursive
+    // technique DAG (SingletonPolyRecovery) recovers this even
+    // without bitwise fanout.
     auto eval = [](const std::vector< uint64_t > &v) -> uint64_t {
         return v[0] | (v[1] * v[2]);
     };
@@ -1096,7 +1102,9 @@ TEST(SimplifierTest, BitwiseDecompDisabledPreservesBaseline) {
 
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kUnchangedUnsupported);
+    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
+    auto fw = FullWidthCheckEval(eval, 3, *result.value().expr, 64);
+    EXPECT_TRUE(fw.passed);
 }
 
 // --- Operand simplification integration ---

@@ -464,8 +464,9 @@ TEST(CompetitionGroup, ResolveHybridComposeContinuation) {
     };
 
     // Create parent group (receives composed result).
-    // Fire-and-forget model: parent handle count stays at 1.
+    // Handle-counted model: parent acquires handle per child.
     auto parent_gid = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+    AcquireHandle(ctx.competition_groups, parent_gid);
 
     // Create child group with HybridComposeCont
     auto child_gid = CreateGroup(ctx.competition_groups, ctx.next_group_id);
@@ -499,7 +500,7 @@ TEST(CompetitionGroup, ResolveHybridComposeContinuation) {
     EXPECT_EQ(ctx.competition_groups.count(child_gid), 0);
     // Parent group should have a candidate (x0 ^ 1)
     EXPECT_TRUE(ctx.competition_groups.at(parent_gid).best.has_value());
-    // Parent handle count unchanged (fire-and-forget: no acquire/release)
+    // Handle-counted: resolution released the child's parent handle (2→1)
     EXPECT_EQ(ctx.competition_groups.at(parent_gid).open_handles, 1);
 }
 

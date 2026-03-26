@@ -148,9 +148,10 @@ namespace cobra {
                 }
             }
 
-            // Fire-and-forget: no parent handle to release.
-            // The parent group resolves when its original handle
-            // is released by the sig item exhausting all passes.
+            // Release parent handle — may trigger parent resolution.
+            auto parent_resolved = ReleaseHandle(ctx.competition_groups, cont.parent_group_id);
+            if (parent_resolved.has_value()) { pr.next.push_back(std::move(*parent_resolved)); }
+
             pr.decision = PassDecision::kAdvance;
             return pr;
         }
@@ -196,6 +197,10 @@ namespace cobra {
                     );
                 }
             }
+
+            // Release parent handle — may trigger parent resolution.
+            auto parent_resolved = ReleaseHandle(ctx.competition_groups, cont.parent_group_id);
+            if (parent_resolved.has_value()) { pr.next.push_back(std::move(*parent_resolved)); }
 
             pr.decision = PassDecision::kAdvance;
             return pr;
@@ -1061,20 +1066,6 @@ namespace cobra {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
 
-        // Skip if the competition group already has a candidate from
-        // a direct technique pass (pattern match, ANF, CoB, etc.).
-        if (item.group_id.has_value()) {
-            auto git = ctx.competition_groups.find(*item.group_id);
-            if (git != ctx.competition_groups.end() && git->second.best.has_value()) {
-                return Ok(
-                    PassResult{
-                        .decision    = PassDecision::kNoProgress,
-                        .disposition = ItemDisposition::kRetainCurrent,
-                    }
-                );
-            }
-        }
-
         if (item.signature_recursion_depth >= 2) {
             return Ok(
                 PassResult{
@@ -1199,6 +1190,9 @@ namespace cobra {
                 );
             }
 
+            // Acquire a handle on the parent for this child lineage.
+            AcquireHandle(ctx.competition_groups, parent_group_id);
+
             // Create child competition group with continuation
             auto child_group_id = CreateGroup(ctx.competition_groups, ctx.next_group_id);
             ctx.competition_groups.at(child_group_id).continuation = ContinuationData{
@@ -1254,19 +1248,6 @@ namespace cobra {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
 
-        // Skip if the competition group already has a candidate.
-        if (item.group_id.has_value()) {
-            auto git = ctx.competition_groups.find(*item.group_id);
-            if (git != ctx.competition_groups.end() && git->second.best.has_value()) {
-                return Ok(
-                    PassResult{
-                        .decision    = PassDecision::kNoProgress,
-                        .disposition = ItemDisposition::kRetainCurrent,
-                    }
-                );
-            }
-        }
-
         if (item.signature_recursion_depth >= 1) {
             return Ok(
                 PassResult{
@@ -1320,6 +1301,9 @@ namespace cobra {
         result.disposition = ItemDisposition::kRetainCurrent;
 
         for (const auto &cand : candidates) {
+            // Acquire a handle on the parent for this child lineage.
+            AcquireHandle(ctx.competition_groups, parent_group_id);
+
             // Create child competition group with continuation
             auto child_group_id = CreateGroup(ctx.competition_groups, ctx.next_group_id);
             ctx.competition_groups.at(child_group_id).continuation = ContinuationData{
