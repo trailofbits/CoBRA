@@ -893,6 +893,14 @@ namespace cobra {
             } else {
                 // kBlocked / kNoProgress
                 if (!pr.reason.top.message.empty()) { item.metadata.last_failure = pr.reason; }
+                // Accumulate technique failure into owning competition group
+                // so no-winner resolution produces deterministic diagnostics.
+                if (item.group_id.has_value() && !pr.reason.top.message.empty()) {
+                    auto git = context.competition_groups.find(*item.group_id);
+                    if (git != context.competition_groups.end()) {
+                        git->second.technique_failures.push_back(pr.reason);
+                    }
+                }
                 // XOR lowering terminal attribution (lineage-local)
                 if (*pass_id == PassId::kXorLowering) {
                     auto cat = pr.reason.top.code.category;
