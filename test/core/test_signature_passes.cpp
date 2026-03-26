@@ -1029,3 +1029,253 @@ TEST(SignaturePass, JoinCleanupAfterResolution) {
     // Join state should be cleaned up
     EXPECT_EQ(ctx.join_states.count(join_id), 0);
 }
+
+// --- ResidualRecombineCont resolution tests ---
+
+TEST(SignaturePass, ResidualRecombineDirectBooleanNull) {
+    // Direct boolean-null: core_expr is null, winner IS the full answer.
+    // f(x0) = 2*x0 — the residual IS the function.
+    std::vector< std::string > vars = { "x0" };
+    Options opts;
+    opts.bitwidth  = 64;
+    opts.evaluator = [](const std::vector< uint64_t > &vals) -> uint64_t {
+        return 2 * vals[0];
+    };
+    auto ctx = MakeCtx(opts, vars);
+
+    // Child group: the signature DAG solved the residual to "2*x0"
+    auto child_gid = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+    ctx.competition_groups.at(child_gid).continuation = ContinuationData{
+        ResidualRecombineCont{
+                              .core_expr        = nullptr,
+                              .origin           = ResidualOrigin::kDirectBooleanNull,
+                              .residual_eval    = opts.evaluator,
+                              .source_sig       = { 0, 2 },
+                              .residual_support = {},
+                              .core_degree      = 0,
+                              .parent_group_id  = std::nullopt,
+                              }
+    };
+
+    // Submit 2*x0 as the winner
+    CandidateRecord rec;
+    rec.expr        = Expr::Mul(Expr::Constant(2), Expr::Variable(0));
+    rec.cost        = ComputeCost(*rec.expr).cost;
+    rec.real_vars   = vars;
+    rec.source_pass = PassId::kSignatureCobCandidate;
+    SubmitCandidate(ctx.competition_groups, child_gid, std::move(rec));
+
+    WorkItem resolved_item;
+    resolved_item.payload = CompetitionResolvedPayload{ .group_id = child_gid };
+
+    auto result = RunResolveCompetition(resolved_item, ctx);
+    ASSERT_TRUE(result.has_value());
+    auto &pr = result.value();
+
+    // Should emit a candidate directly (no parent group)
+    EXPECT_EQ(pr.decision, PassDecision::kSolvedCandidate);
+    ASSERT_EQ(pr.next.size(), 1);
+    EXPECT_EQ(GetStateKind(pr.next[0].payload), StateKind::kCandidateExpr);
+
+    auto &cand = std::get< CandidatePayload >(pr.next[0].payload);
+    EXPECT_EQ(cand.producing_pass, PassId::kResidualSupported);
+    EXPECT_FALSE(cand.needs_original_space_verification);
+
+    ASSERT_TRUE(pr.next[0].metadata.decomposition_meta.has_value());
+    auto &dmeta = *pr.next[0].metadata.decomposition_meta;
+    EXPECT_TRUE(dmeta.has_solver);
+    EXPECT_EQ(dmeta.extractor_kind, static_cast< uint8_t >(ExtractorKind::kBooleanNullDirect));
+
+    // Child group should be cleaned up
+    EXPECT_EQ(ctx.competition_groups.count(child_gid), 0);
+}
+
+TEST(SignaturePass, ResidualRecombineWithCoreExpr) {
+    // f(x0, x1) = x0*x1 + (x0 ^ x1)
+    // core_expr = x0*x1, residual = x0 ^ x1
+    std::vector< std::string > vars = { "x0", "x1" };
+    Options opts;
+    opts.bitwidth  = 64;
+    opts.evaluator = [](const std::vector< uint64_t > &vals) -> uint64_t {
+        return vals[0] * vals[1] + (vals[0] ^ vals[1]);
+    };
+    auto ctx = MakeCtx(opts, vars);
+
+    auto core_expr          = Expr::Mul(Expr::Variable(0), Expr::Variable(1));
+    Evaluator residual_eval = [&opts](const std::vector< uint64_t > &vals) -> uint64_t {
+        return vals[0] ^ vals[1];
+    };
+
+    auto child_gid = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+    ctx.competition_groups.at(child_gid).continuation = ContinuationData{
+        ResidualRecombineCont{
+                              .core_expr        = CloneExpr(*core_expr),
+                              .origin           = ResidualOrigin::kProductCore,
+                              .residual_eval    = residual_eval,
+                              .source_sig       = { 0, 1, 1, 0 },
+                              .residual_support = {},
+                              .core_degree      = 0,
+                              .parent_group_id  = std::nullopt,
+                              }
+    };
+
+    // The DAG solved the residual: x0 ^ x1
+    CandidateRecord rec;
+    rec.expr        = Expr::BitwiseXor(Expr::Variable(0), Expr::Variable(1));
+    rec.cost        = ComputeCost(*rec.expr).cost;
+    rec.real_vars   = vars;
+    rec.source_pass = PassId::kSignaturePatternMatch;
+    SubmitCandidate(ctx.competition_groups, child_gid, std::move(rec));
+
+    WorkItem resolved_item;
+    resolved_item.payload = CompetitionResolvedPayload{ .group_id = child_gid };
+
+    auto result = RunResolveCompetition(resolved_item, ctx);
+    ASSERT_TRUE(result.has_value());
+    auto &pr = result.value();
+
+    EXPECT_EQ(pr.decision, PassDecision::kSolvedCandidate);
+    ASSERT_EQ(pr.next.size(), 1);
+
+    auto &cand = std::get< CandidatePayload >(pr.next[0].payload);
+    EXPECT_EQ(cand.producing_pass, PassId::kResidualSupported);
+
+    auto &dmeta = *pr.next[0].metadata.decomposition_meta;
+    EXPECT_EQ(dmeta.extractor_kind, static_cast< uint8_t >(ExtractorKind::kProductAST));
+}
+
+TEST(SignaturePass, ResidualRecombineSubmitsToParentGroup) {
+    // When parent_group_id is set, submit to parent group
+    // instead of emitting directly.
+    std::vector< std::string > vars = { "x0" };
+    Options opts;
+    opts.bitwidth  = 64;
+    opts.evaluator = [](const std::vector< uint64_t > &vals) -> uint64_t {
+        return 3 * vals[0];
+    };
+    auto ctx = MakeCtx(opts, vars);
+
+    auto parent_gid = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+    auto child_gid  = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+
+    Evaluator residual_eval                           = opts.evaluator;
+    ctx.competition_groups.at(child_gid).continuation = ContinuationData{
+        ResidualRecombineCont{
+                              .core_expr        = nullptr,
+                              .origin           = ResidualOrigin::kDirectBooleanNull,
+                              .residual_eval    = residual_eval,
+                              .source_sig       = { 0, 3 },
+                              .residual_support = {},
+                              .core_degree      = 0,
+                              .parent_group_id  = parent_gid,
+                              }
+    };
+
+    CandidateRecord rec;
+    rec.expr        = Expr::Mul(Expr::Constant(3), Expr::Variable(0));
+    rec.cost        = ComputeCost(*rec.expr).cost;
+    rec.real_vars   = vars;
+    rec.source_pass = PassId::kSignatureCobCandidate;
+    SubmitCandidate(ctx.competition_groups, child_gid, std::move(rec));
+
+    WorkItem resolved_item;
+    resolved_item.payload = CompetitionResolvedPayload{ .group_id = child_gid };
+
+    auto result = RunResolveCompetition(resolved_item, ctx);
+    ASSERT_TRUE(result.has_value());
+    auto &pr = result.value();
+
+    // Should advance (submitted to parent), not emit directly
+    EXPECT_EQ(pr.decision, PassDecision::kAdvance);
+    EXPECT_TRUE(pr.next.empty());
+
+    // Parent should have received the candidate
+    ASSERT_TRUE(ctx.competition_groups.at(parent_gid).best.has_value());
+    EXPECT_EQ(
+        ctx.competition_groups.at(parent_gid).best->source_pass, PassId::kResidualSupported
+    );
+}
+
+TEST(SignaturePass, ResidualRecombineNoWinnerAdvances) {
+    // When the child group has no winner, just advance.
+    std::vector< std::string > vars = { "x0" };
+    Options opts;
+    opts.bitwidth  = 64;
+    opts.evaluator = [](const std::vector< uint64_t > &vals) -> uint64_t { return vals[0]; };
+    auto ctx       = MakeCtx(opts, vars);
+
+    auto child_gid = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+    ctx.competition_groups.at(child_gid).continuation = ContinuationData{
+        ResidualRecombineCont{
+                              .core_expr        = nullptr,
+                              .origin           = ResidualOrigin::kDirectBooleanNull,
+                              .residual_eval    = opts.evaluator,
+                              .source_sig       = { 0, 1 },
+                              .residual_support = {},
+                              .core_degree      = 0,
+                              .parent_group_id  = std::nullopt,
+                              }
+    };
+
+    // No candidate submitted — group has no winner
+
+    WorkItem resolved_item;
+    resolved_item.payload = CompetitionResolvedPayload{ .group_id = child_gid };
+
+    auto result = RunResolveCompetition(resolved_item, ctx);
+    ASSERT_TRUE(result.has_value());
+    auto &pr = result.value();
+
+    EXPECT_EQ(pr.decision, PassDecision::kAdvance);
+    EXPECT_TRUE(pr.next.empty());
+}
+
+TEST(SignaturePass, ResidualRecombineWithVarRemap) {
+    // f(x0, x1) depends only on x1 after aux-var elimination.
+    // core_expr = null (direct boolean null).
+    // residual_support = {1} (var 0 in reduced space maps to var 1).
+    // Winner is Variable(0) in reduced 1-var space -> Variable(1).
+    std::vector< std::string > vars = { "x0", "x1" };
+    Options opts;
+    opts.bitwidth  = 64;
+    opts.evaluator = [](const std::vector< uint64_t > &vals) -> uint64_t {
+        return 5 * vals[1];
+    };
+    auto ctx = MakeCtx(opts, vars);
+
+    Evaluator residual_eval = opts.evaluator;
+    auto child_gid          = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+    ctx.competition_groups.at(child_gid).continuation = ContinuationData{
+        ResidualRecombineCont{
+                              .core_expr        = nullptr,
+                              .origin           = ResidualOrigin::kDirectBooleanNull,
+                              .residual_eval    = residual_eval,
+                              .source_sig       = {},
+                              .residual_support = { 1 },
+                              .core_degree      = 0,
+                              .parent_group_id  = std::nullopt,
+                              }
+    };
+
+    // Winner in reduced 1-var space: 5*x0 (but x0 maps to x1)
+    CandidateRecord rec;
+    rec.expr        = Expr::Mul(Expr::Constant(5), Expr::Variable(0));
+    rec.cost        = ComputeCost(*rec.expr).cost;
+    rec.real_vars   = { "x1" };
+    rec.source_pass = PassId::kSignatureCobCandidate;
+    SubmitCandidate(ctx.competition_groups, child_gid, std::move(rec));
+
+    WorkItem resolved_item;
+    resolved_item.payload = CompetitionResolvedPayload{ .group_id = child_gid };
+
+    auto result = RunResolveCompetition(resolved_item, ctx);
+    ASSERT_TRUE(result.has_value());
+    auto &pr = result.value();
+
+    EXPECT_EQ(pr.decision, PassDecision::kSolvedCandidate);
+    ASSERT_EQ(pr.next.size(), 1);
+
+    // The remapped expression should use Variable(1), not Variable(0)
+    auto &cand = std::get< CandidatePayload >(pr.next[0].payload);
+    EXPECT_EQ(cand.real_vars, vars);
+}

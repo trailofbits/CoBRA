@@ -51,6 +51,7 @@ namespace cobra {
         ResidualOrigin origin;
         Evaluator residual_eval;
         std::vector< uint64_t > source_sig;
+        std::vector< uint32_t > residual_support;
         uint8_t core_degree = 0;
         std::optional< GroupId > parent_group_id;
     };
