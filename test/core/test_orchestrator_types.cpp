@@ -331,7 +331,7 @@ TEST(SelectNextPass, CacheBlocksSameState) {
     EXPECT_EQ(*pass, PassId::kPrepareDirectResidual);
 }
 
-TEST(SelectNextPass, SignatureStateGetsSupportedFirst) {
+TEST(SelectNextPass, SignatureStateGetsPatternMatchFirst) {
     WorkItem item;
     item.payload             = SignatureStatePayload{};
     item.features.provenance = Provenance::kOriginal;
@@ -340,7 +340,7 @@ TEST(SelectNextPass, SignatureStateGetsSupportedFirst) {
     PassAttemptCache cache;
     auto pass = SelectNextPass(item, policy, 0, cache);
     ASSERT_TRUE(pass.has_value());
-    EXPECT_EQ(*pass, PassId::kSupportedSolve);
+    EXPECT_EQ(*pass, PassId::kSignaturePatternMatch);
 }
 
 TEST(SelectNextPass, CandidateGetsVerify) {

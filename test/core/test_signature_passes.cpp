@@ -88,32 +88,27 @@ TEST(SignaturePass, SchedulerSignatureStateTable) {
 
     auto p0 = SelectNextPass(item, policy, 0, cache);
     ASSERT_TRUE(p0.has_value());
-    EXPECT_EQ(*p0, PassId::kSupportedSolve);
-
-    item.attempted_mask |= (1ULL << static_cast< uint8_t >(PassId::kSupportedSolve));
-    auto p1              = SelectNextPass(item, policy, 0, cache);
-    ASSERT_TRUE(p1.has_value());
-    EXPECT_EQ(*p1, PassId::kSignaturePatternMatch);
+    EXPECT_EQ(*p0, PassId::kSignaturePatternMatch);
 
     item.attempted_mask |= (1ULL << static_cast< uint8_t >(PassId::kSignaturePatternMatch));
-    auto p2              = SelectNextPass(item, policy, 0, cache);
-    ASSERT_TRUE(p2.has_value());
-    EXPECT_EQ(*p2, PassId::kSignatureAnf);
+    auto p1              = SelectNextPass(item, policy, 0, cache);
+    ASSERT_TRUE(p1.has_value());
+    EXPECT_EQ(*p1, PassId::kSignatureAnf);
 
     item.attempted_mask |= (1ULL << static_cast< uint8_t >(PassId::kSignatureAnf));
-    auto p3              = SelectNextPass(item, policy, 0, cache);
-    ASSERT_TRUE(p3.has_value());
-    EXPECT_EQ(*p3, PassId::kPrepareCoeffModel);
+    auto p2              = SelectNextPass(item, policy, 0, cache);
+    ASSERT_TRUE(p2.has_value());
+    EXPECT_EQ(*p2, PassId::kPrepareCoeffModel);
 
     item.attempted_mask |= (1ULL << static_cast< uint8_t >(PassId::kPrepareCoeffModel));
-    auto p4              = SelectNextPass(item, policy, 0, cache);
-    ASSERT_TRUE(p4.has_value());
-    EXPECT_EQ(*p4, PassId::kSignatureMultivarPolyRecovery);
+    auto p3              = SelectNextPass(item, policy, 0, cache);
+    ASSERT_TRUE(p3.has_value());
+    EXPECT_EQ(*p3, PassId::kSignatureMultivarPolyRecovery);
 
     item.attempted_mask |=
         (1ULL << static_cast< uint8_t >(PassId::kSignatureMultivarPolyRecovery));
-    auto p5 = SelectNextPass(item, policy, 0, cache);
-    EXPECT_FALSE(p5.has_value());
+    auto p4 = SelectNextPass(item, policy, 0, cache);
+    EXPECT_FALSE(p4.has_value());
 }
 
 TEST(SignaturePass, SchedulerCoeffStateTable) {

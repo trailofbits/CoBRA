@@ -510,14 +510,6 @@ namespace cobra {
              .run = RunBuildSignatureState,
              },
             {
-             .id         = PassId::kSupportedSolve,
-             .consumes   = StateKind::kSignatureState,
-             .tag        = PassTag::kSolver,
-             .applicable = [](const WorkItem &item,                              const OrchestratorContext & /*ctx*/)
-                              -> bool { return IsSignatureKind(item); },
-             .run = RunSupportedSolve,
-             },
-            {
              .id         = PassId::kSemilinearNormalize,
              .consumes   = StateKind::kFoldedAst,
              .tag        = PassTag::kAnalysis,

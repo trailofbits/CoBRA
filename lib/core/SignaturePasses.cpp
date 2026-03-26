@@ -393,13 +393,27 @@ namespace cobra {
             if (spot.passed) { vs = VerificationState::kVerified; }
         }
 
-        // Full-width check
+        // Full-width check — reject if evaluator proves mismatch
         auto mapped_eval = BuildMappedEvaluator(ctx, sub_ctx);
         if (mapped_eval) {
             auto fw = FullWidthCheckEval(*mapped_eval, num_vars, *expr, ctx.bitwidth);
-            if (fw.passed) { vs = VerificationState::kVerified; }
-            // CoB is submitted even if FW check fails (unverified).
-            // The competition group picks the best candidate.
+            if (fw.passed) {
+                vs = VerificationState::kVerified;
+            } else {
+                return Ok(
+                    PassResult{
+                        .decision    = PassDecision::kNoProgress,
+                        .disposition = ItemDisposition::kRetainCurrent,
+                        .reason =
+                            ReasonDetail{
+                                         .top = { .code    = { ReasonCategory::kVerifyFailed,
+                                                      ReasonDomain::kSignature },
+                                         .message = "CoB candidate failed full-width "
+                                                    "check" },
+                                         },
+                }
+                );
+            }
         }
 
         auto cost_info = ComputeCost(*expr);

@@ -345,18 +345,17 @@ namespace cobra {
             return pass;
         }
 
-        // 2. SignatureState → kSupportedSolve (primary), then technique passes
+        // 2. SignatureState → technique DAG passes
         if (kind == StateKind::kSignatureState) {
             static constexpr struct
             {
                 PassId id;
                 uint8_t priority;
             } kSignatureStatePasses[] = {
-                {                PassId::kSupportedSolve, 0 },
-                {         PassId::kSignaturePatternMatch, 1 },
-                {                  PassId::kSignatureAnf, 2 },
-                {             PassId::kPrepareCoeffModel, 3 },
-                { PassId::kSignatureMultivarPolyRecovery, 4 },
+                {         PassId::kSignaturePatternMatch, 0 },
+                {                  PassId::kSignatureAnf, 1 },
+                {             PassId::kPrepareCoeffModel, 2 },
+                { PassId::kSignatureMultivarPolyRecovery, 3 },
             };
 
             for (const auto &entry : kSignatureStatePasses) {
