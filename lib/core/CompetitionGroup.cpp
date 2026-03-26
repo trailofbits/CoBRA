@@ -22,7 +22,9 @@ namespace cobra {
         CandidateRecord record
     ) {
         auto it = groups.find(group_id);
-        assert(it != groups.end());
+        // Parent group may already be resolved and erased in
+        // fire-and-forget fanout — silently reject the submission.
+        if (it == groups.end()) { return false; }
         auto &group = it->second;
 
         if (group.baseline_cost && !IsBetter(record.cost, *group.baseline_cost)) {
