@@ -13,7 +13,6 @@
 #include "cobra/core/PatternMatcher.h"
 #include "cobra/core/ProductIdentityRecoverer.h"
 #include "cobra/core/SignatureEval.h"
-#include "cobra/core/SignatureSimplifier.h"
 
 namespace cobra {
 
@@ -21,10 +20,6 @@ namespace cobra {
 
         bool IsAstKind(const WorkItem &item) {
             return std::holds_alternative< AstPayload >(item.payload);
-        }
-
-        bool IsSignatureKind(const WorkItem &item) {
-            return std::holds_alternative< SignatureStatePayload >(item.payload);
         }
 
         bool IsCandidateKind(const WorkItem &item) {
@@ -210,113 +205,6 @@ namespace cobra {
         result.disposition = ItemDisposition::kRetainCurrent;
         result.next.push_back(std::move(sig_item));
         return Ok(std::move(result));
-    }
-
-    // ---------------------------------------------------------------
-    // Solver passes (Task 10)
-    // ---------------------------------------------------------------
-
-    Result< PassResult > RunSupportedSolve(const WorkItem &item, OrchestratorContext &ctx) {
-        if (!IsSignatureKind(item)) {
-            return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
-        }
-
-        const auto &sig_payload = std::get< SignatureStatePayload >(item.payload);
-
-        // Build SignatureContext with mapped evaluator
-        SignatureContext sig_ctx;
-        sig_ctx.vars             = sig_payload.ctx.real_vars;
-        sig_ctx.original_indices = sig_payload.ctx.original_indices;
-
-        if (ctx.evaluator) {
-            if (sig_payload.ctx.real_vars.size() == ctx.original_vars.size()) {
-                sig_ctx.eval = *ctx.evaluator;
-            } else {
-                sig_ctx.eval =
-                    [eval = *ctx.evaluator, idx_map = sig_payload.ctx.original_indices,
-                     original_vals = std::vector< uint64_t >(ctx.original_vars.size(), 0)](
-                        const std::vector< uint64_t > &reduced_vals
-                    ) mutable -> uint64_t {
-                    for (size_t i = 0; i < idx_map.size(); ++i) {
-                        original_vals[idx_map[i]] = reduced_vals[i];
-                    }
-                    uint64_t result = eval(original_vals);
-                    for (size_t i = 0; i < idx_map.size(); ++i) {
-                        original_vals[idx_map[i]] = 0;
-                    }
-                    return result;
-                };
-            }
-        }
-
-        // For non-MixedRewrite routes, propagate structural_flags
-        // from the classification to match the legacy's
-        //   pipeline_opts.structural_flags = cls.flags
-        // in the kBitwiseOnly/kMultilinear/kPowerRecovery branch.
-        Options solve_opts = ctx.opts;
-        if (item.features.classification
-            && item.features.classification->route != Route::kMixedRewrite)
-        {
-            solve_opts.structural_flags = item.features.classification->flags;
-        }
-
-        auto sub = SimplifyFromSignature(
-            sig_payload.ctx.elimination.reduced_sig, sig_ctx, solve_opts, 0
-        );
-
-        if (sub.Succeeded()) {
-            auto payload = sub.TakePayload();
-
-            WorkItem cand_item;
-            cand_item.payload = CandidatePayload{
-                .expr           = std::move(payload.expr),
-                .real_vars      = sig_payload.ctx.real_vars,
-                .cost           = payload.cost,
-                .producing_pass = PassId::kSupportedSolve,
-                .needs_original_space_verification =
-                    sig_payload.ctx.needs_original_space_verification,
-            };
-            cand_item.features              = item.features;
-            cand_item.metadata              = item.metadata;
-            cand_item.metadata.sig_vector   = sig_payload.ctx.elimination.reduced_sig;
-            cand_item.metadata.verification = payload.verification;
-            cand_item.depth                 = item.depth;
-            cand_item.rewrite_gen           = item.rewrite_gen;
-            cand_item.attempted_mask        = item.attempted_mask;
-            cand_item.history               = item.history;
-
-            PassResult result;
-            result.decision    = PassDecision::kSolvedCandidate;
-            result.disposition = ItemDisposition::kConsumeCurrent;
-            result.next.push_back(std::move(cand_item));
-            return Ok(std::move(result));
-        }
-
-        // Translate solver failure
-        ReasonDetail reason = sub.Reason();
-        PassDecision decision;
-        switch (sub.Kind()) {
-            case OutcomeKind::kInapplicable:
-                decision = PassDecision::kNoProgress;
-                break;
-            case OutcomeKind::kBlocked:
-                decision = PassDecision::kBlocked;
-                break;
-            case OutcomeKind::kVerifyFailed:
-                decision = PassDecision::kNoProgress;
-                break;
-            default:
-                decision = PassDecision::kBlocked;
-                break;
-        }
-
-        return Ok(
-            PassResult{
-                .decision    = decision,
-                .disposition = ItemDisposition::kRetainCurrent,
-                .reason      = std::move(reason),
-            }
-        );
     }
 
     // ---------------------------------------------------------------

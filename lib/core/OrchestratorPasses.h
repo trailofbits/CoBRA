@@ -103,7 +103,6 @@ namespace cobra {
     Result< PassResult > RunLowerNotOverArith(const WorkItem &, OrchestratorContext &);
     Result< PassResult > RunClassifyAst(const WorkItem &, OrchestratorContext &);
     Result< PassResult > RunBuildSignatureState(const WorkItem &, OrchestratorContext &);
-    Result< PassResult > RunSupportedSolve(const WorkItem &, OrchestratorContext &);
 
     Result< PassResult > RunOperandSimplify(const WorkItem &, OrchestratorContext &);
     Result< PassResult > RunProductIdentityCollapse(const WorkItem &, OrchestratorContext &);
