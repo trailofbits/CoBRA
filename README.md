@@ -198,7 +198,7 @@ Dataset benchmarks validate against real-world obfuscated expressions from multi
 
 Thanks to [Bas Zweers](https://github.com/AnalogCyberNuke) and the [Back Engineering](https://github.com/backengineering) team for the inspiration and guidance that helped shape this project. Recommended viewing: their re//verse 2026 talk [Deobfuscation of a Real World Binary Obfuscator](https://www.youtube.com/watch?v=3LtwqJM3Qjg).
 
-Additional thanks to [Matteo Favaro](https://github.com/fvrmatteo) for the continual review and testing
+Additional thanks to [Matteo Favaro](https://github.com/fvrmatteo) and other anonymous contributors for the continual review and testing
 
 ## License
 
