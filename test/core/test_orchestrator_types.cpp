@@ -83,7 +83,7 @@ TEST(ItemMetadata, TransformTerminalSignalDefaultEmpty) {
 
 TEST(OrchestratorPolicy, Defaults) {
     OrchestratorPolicy policy;
-    EXPECT_EQ(policy.max_expansions, 64);
+    EXPECT_EQ(policy.max_expansions, 512);
     EXPECT_EQ(policy.max_rewrite_gen, 3);
     EXPECT_EQ(policy.max_candidates, 8);
 }
