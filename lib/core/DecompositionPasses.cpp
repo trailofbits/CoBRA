@@ -648,10 +648,9 @@ namespace cobra {
         }
         const auto &residual = std::get< ResidualStatePayload >(item.payload);
 
-        // Aux-var elimination on residual signature (matching RunSupportedPass).
+        // Aux-var elimination on residual signature.
         // The residual_sig lives in the original variable space, so we
-        // eliminate from ctx.original_vars — identical to what
-        // RunSupportedPass(residual_sig, ctx.original_vars, ...) did.
+        // eliminate from ctx.original_vars.
         auto elim                 = EliminateAuxVars(residual.residual_sig, ctx.original_vars);
         const auto real_var_count = static_cast< uint32_t >(elim.real_vars.size());
         if (real_var_count == 0 || real_var_count > ctx.opts.max_vars) {

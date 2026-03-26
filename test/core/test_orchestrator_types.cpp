@@ -188,7 +188,7 @@ TEST(PassAttemptCache, RecordAndQuery) {
     EXPECT_FALSE(cache.HasAttempted(fp, PassId::kExtractProductCore));
     cache.Record(fp, PassId::kExtractProductCore);
     EXPECT_TRUE(cache.HasAttempted(fp, PassId::kExtractProductCore));
-    EXPECT_FALSE(cache.HasAttempted(fp, PassId::kSupportedSolve));
+    EXPECT_FALSE(cache.HasAttempted(fp, PassId::kSignaturePatternMatch));
 }
 
 // --- SelectNextPass tests ---

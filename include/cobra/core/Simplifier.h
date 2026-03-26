@@ -30,9 +30,8 @@ namespace cobra {
         const Expr *input_expr, const Options &opts
     );
 
-    // Internal: typed pass boundary for the supported-fragment pipeline.
-    // Used by DecompositionEngine's residual solver.
-    // Not part of the public API — use Simplify() for external callers.
+    // Test-only — no production callers after Phase 3 migration.
+    // The orchestrator's technique-level passes replaced this entry point.
     Result< PassOutcome > RunSupportedPass(
         const std::vector< uint64_t > &sig, const std::vector< std::string > &vars,
         const Options &opts

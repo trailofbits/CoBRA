@@ -28,6 +28,8 @@ namespace cobra {
         std::optional< Evaluator > eval;
     };
 
+    // Test-only — no production callers after Phase 3 migration.
+    // The orchestrator's kSignatureState passes replaced this entry point.
     SolverResult< SignaturePayload > SimplifyFromSignature(
         const std::vector< uint64_t > &sig, const SignatureContext &ctx, const Options &opts,
         uint32_t depth, const ExprCost *baseline_cost = nullptr

@@ -50,7 +50,7 @@ TEST(CompetitionGroup, SubmitToEmptyGroupAccepted) {
     CandidateRecord rec;
     rec.expr        = Expr::Constant(42);
     rec.cost        = ExprCost{ .weighted_size = 5 };
-    rec.source_pass = PassId::kSupportedSolve;
+    rec.source_pass = PassId::kSignaturePatternMatch;
 
     EXPECT_TRUE(SubmitCandidate(groups, id, std::move(rec)));
     ASSERT_TRUE(groups.at(id).best.has_value());
@@ -65,13 +65,13 @@ TEST(CompetitionGroup, SubmitWorseRejected) {
     CandidateRecord good;
     good.expr        = Expr::Constant(1);
     good.cost        = ExprCost{ .weighted_size = 3 };
-    good.source_pass = PassId::kSupportedSolve;
+    good.source_pass = PassId::kSignaturePatternMatch;
     EXPECT_TRUE(SubmitCandidate(groups, id, std::move(good)));
 
     CandidateRecord worse;
     worse.expr        = Expr::Constant(2);
     worse.cost        = ExprCost{ .weighted_size = 10 };
-    worse.source_pass = PassId::kSupportedSolve;
+    worse.source_pass = PassId::kSignaturePatternMatch;
     EXPECT_FALSE(SubmitCandidate(groups, id, std::move(worse)));
     EXPECT_EQ(groups.at(id).best->cost.weighted_size, 3);
 }
@@ -84,13 +84,13 @@ TEST(CompetitionGroup, SubmitBetterAccepted) {
     CandidateRecord first;
     first.expr        = Expr::Constant(1);
     first.cost        = ExprCost{ .weighted_size = 10 };
-    first.source_pass = PassId::kSupportedSolve;
+    first.source_pass = PassId::kSignaturePatternMatch;
     EXPECT_TRUE(SubmitCandidate(groups, id, std::move(first)));
 
     CandidateRecord better;
     better.expr        = Expr::Constant(2);
     better.cost        = ExprCost{ .weighted_size = 3 };
-    better.source_pass = PassId::kSupportedSolve;
+    better.source_pass = PassId::kSignaturePatternMatch;
     EXPECT_TRUE(SubmitCandidate(groups, id, std::move(better)));
     EXPECT_EQ(groups.at(id).best->cost.weighted_size, 3);
 }
@@ -104,7 +104,7 @@ TEST(CompetitionGroup, SubmitBelowBaselineRejected) {
     CandidateRecord rec;
     rec.expr        = Expr::Constant(1);
     rec.cost        = ExprCost{ .weighted_size = 8 };
-    rec.source_pass = PassId::kSupportedSolve;
+    rec.source_pass = PassId::kSignaturePatternMatch;
     EXPECT_FALSE(SubmitCandidate(groups, id, std::move(rec)));
     EXPECT_FALSE(groups.at(id).best.has_value());
 }
@@ -118,7 +118,7 @@ TEST(CompetitionGroup, SubmitBetterThanBaselineAccepted) {
     CandidateRecord rec;
     rec.expr        = Expr::Constant(1);
     rec.cost        = ExprCost{ .weighted_size = 3 };
-    rec.source_pass = PassId::kSupportedSolve;
+    rec.source_pass = PassId::kSignaturePatternMatch;
     EXPECT_TRUE(SubmitCandidate(groups, id, std::move(rec)));
     ASSERT_TRUE(groups.at(id).best.has_value());
     EXPECT_EQ(groups.at(id).best->cost.weighted_size, 3);
@@ -132,13 +132,13 @@ TEST(CompetitionGroup, SubmitEqualCostRejected) {
     CandidateRecord first;
     first.expr        = Expr::Constant(1);
     first.cost        = ExprCost{ .weighted_size = 5 };
-    first.source_pass = PassId::kSupportedSolve;
+    first.source_pass = PassId::kSignaturePatternMatch;
     EXPECT_TRUE(SubmitCandidate(groups, id, std::move(first)));
 
     CandidateRecord equal;
     equal.expr        = Expr::Constant(2);
     equal.cost        = ExprCost{ .weighted_size = 5 };
-    equal.source_pass = PassId::kSupportedSolve;
+    equal.source_pass = PassId::kSignaturePatternMatch;
     EXPECT_FALSE(SubmitCandidate(groups, id, std::move(equal)));
 }
 
@@ -354,7 +354,7 @@ TEST(CompetitionGroup, ResolveMonostateWithWinner) {
     rec.cost         = ExprCost{ .weighted_size = 3 };
     rec.verification = VerificationState::kVerified;
     rec.real_vars    = { "x0" };
-    rec.source_pass  = PassId::kSupportedSolve;
+    rec.source_pass  = PassId::kSignaturePatternMatch;
     SubmitCandidate(ctx.competition_groups, gid, std::move(rec));
 
     WorkItem item;
@@ -484,7 +484,7 @@ TEST(CompetitionGroup, ResolveHybridComposeContinuation) {
     CandidateRecord rec;
     rec.expr        = Expr::Constant(1);
     rec.cost        = ExprCost{ .weighted_size = 2 };
-    rec.source_pass = PassId::kSupportedSolve;
+    rec.source_pass = PassId::kSignaturePatternMatch;
     SubmitCandidate(ctx.competition_groups, child_gid, std::move(rec));
 
     WorkItem item;

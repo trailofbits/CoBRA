@@ -15,7 +15,6 @@ namespace cobra {
         kLowerNotOverArith,
         kClassifyAst,
         kBuildSignatureState,
-        kSupportedSolve,
         // Semilinear passes
         kSemilinearNormalize,
         kSemilinearCheck,
