@@ -41,12 +41,7 @@ cobra_add_test(test_singleton_power_expr_builder core/test_singleton_power_expr_
 cobra_add_test(test_signature_eval core/test_signature_eval.cpp)
 cobra_add_test(test_mixed_product_rewriter core/test_mixed_product_rewriter.cpp)
 cobra_add_test(test_expr_cost core/test_expr_cost.cpp)
-cobra_add_test(test_signature_simplifier core/test_signature_simplifier.cpp)
 cobra_add_test(test_multivar_poly_recovery core/test_multivar_poly_recovery.cpp)
-cobra_add_test(test_bitwise_decomposer core/test_bitwise_decomposer.cpp)
-cobra_add_test(test_hybrid_decomposer core/test_hybrid_decomposer.cpp)
-cobra_add_test(test_operand_simplifier core/test_operand_simplifier.cpp)
-cobra_add_test(test_product_identity_recoverer core/test_product_identity_recoverer.cpp)
 cobra_add_test(test_template_decomposer core/test_template_decomposer.cpp)
 cobra_add_test(test_decomposition_engine core/test_decomposition_engine.cpp)
 cobra_add_test(test_ghost_basis core/test_ghost_basis.cpp)
@@ -81,18 +76,6 @@ target_include_directories(test_residual_solver_passes PRIVATE ${PROJECT_SOURCE_
 
 cobra_add_test(test_orchestrator_telemetry core/test_orchestrator_telemetry.cpp)
 
-# ProductIdentityRecoverer diagnostic against real datasets.
-# Not registered with gtest_discover_tests — run manually:
-#   ./test/test_product_identity_diagnostic
-add_executable(test_product_identity_diagnostic
-    core/test_product_identity_diagnostic.cpp
-    ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
-target_link_libraries(test_product_identity_diagnostic PRIVATE
-    cobra-core GTest::gtest_main)
-target_include_directories(test_product_identity_diagnostic PRIVATE
-    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
-target_compile_definitions(test_product_identity_diagnostic PRIVATE
-    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
 cobra_add_test(test_semilinear_integration core/test_semilinear_integration.cpp)
 if(Z3_FOUND)
     target_link_libraries(test_semilinear_integration PRIVATE cobra-verify)
@@ -139,16 +122,6 @@ if(Z3_FOUND)
     target_compile_definitions(test_dataset_z3 PRIVATE
         DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
 endif()
-
-# PLDIPoly diagnostic (manual, not auto-discovered)
-add_executable(test_pldi_poly_diagnostic verify/test_pldi_poly_diagnostic.cpp
-               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
-target_link_libraries(test_pldi_poly_diagnostic PRIVATE
-    cobra-core GTest::gtest_main)
-target_include_directories(test_pldi_poly_diagnostic PRIVATE
-    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
-target_compile_definitions(test_pldi_poly_diagnostic PRIVATE
-    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
 
 # QSynth diagnostic (manual, not auto-discovered)
 add_executable(test_qsynth_diagnostic verify/test_qsynth_diagnostic.cpp
@@ -197,15 +170,6 @@ target_link_libraries(test_msimba_groundtruth PRIVATE cobra-core GTest::gtest_ma
 target_include_directories(test_msimba_groundtruth PRIVATE
     ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
 target_compile_definitions(test_msimba_groundtruth PRIVATE
-    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
-
-# QSynth trace dive (manual, not auto-discovered)
-add_executable(test_qsynth_trace_dive verify/test_qsynth_trace_dive.cpp
-               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
-target_link_libraries(test_qsynth_trace_dive PRIVATE cobra-core GTest::gtest_main)
-target_include_directories(test_qsynth_trace_dive PRIVATE
-    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
-target_compile_definitions(test_qsynth_trace_dive PRIVATE
     DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
 
 # LLVM pass FileCheck tests (only when pass is built)

@@ -30,11 +30,4 @@ namespace cobra {
         const Expr *input_expr, const Options &opts
     );
 
-    // Test-only — no production callers after Phase 3 migration.
-    // The orchestrator's technique-level passes replaced this entry point.
-    Result< PassOutcome > RunSupportedPass(
-        const std::vector< uint64_t > &sig, const std::vector< std::string > &vars,
-        const Options &opts
-    );
-
 } // namespace cobra

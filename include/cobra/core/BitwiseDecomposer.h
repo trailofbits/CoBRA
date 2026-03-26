@@ -1,9 +1,6 @@
 #pragma once
 
 #include "cobra/core/Expr.h"
-#include "cobra/core/ExprCost.h"
-#include "cobra/core/PassContract.h"
-#include "cobra/core/SignatureSimplifier.h"
 #include <cstdint>
 #include <memory>
 #include <utility>
@@ -47,11 +44,6 @@ namespace cobra {
     std::unique_ptr< Expr > Compose(
         GateKind gate, uint32_t original_k, std::unique_ptr< Expr > g_expr,
         uint64_t add_coeff = 0
-    );
-
-    SolverResult< SignaturePayload > TryBitwiseDecomposition(
-        const std::vector< uint64_t > &sig, const SignatureContext &ctx, const Options &opts,
-        uint32_t depth, const ExprCost *baseline_cost
     );
 
 } // namespace cobra

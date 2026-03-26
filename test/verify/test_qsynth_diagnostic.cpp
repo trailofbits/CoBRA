@@ -9,13 +9,12 @@
 #include "cobra/core/GhostResidualSolver.h"
 #include "cobra/core/MathUtils.h"
 #include "cobra/core/MultivarPolyRecovery.h"
-#include "cobra/core/OperandSimplifier.h"
 #include "cobra/core/PolyExprBuilder.h"
-#include "cobra/core/ProductIdentityRecoverer.h"
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/SignatureEval.h"
 #include "cobra/core/SignatureSimplifier.h"
 #include "cobra/core/Simplifier.h"
+#include "cobra/core/SimplifyOutcome.h"
 #include "cobra/core/TemplateDecomposer.h"
 #include "cobra/core/WeightedPolyFit.h"
 #include <algorithm>
@@ -385,16 +384,14 @@ TEST(QSynthDiagnostic, DecompEngineTelemetry) {
             bool sup_solved    = false;
             bool sup_recombine = false;
             bool sup_verified  = false;
-            auto sup           = RunSupportedPass(residual_sig, vars, res_opts);
-            if (sup.has_value() && sup.value().Succeeded()) {
+            auto sup           = Simplify(residual_sig, vars, nullptr, res_opts);
+            if (sup.has_value() && sup->kind == SimplifyOutcome::Kind::kSimplified) {
                 sup_solved       = true;
-                sup_verified     = sup.value().Verification() == VerificationState::kVerified;
-                auto solved_expr = CloneExpr(sup.value().GetExpr());
-                if (!sup.value().RealVars().empty()
-                    && sup.value().RealVars().size() < vars.size())
-                {
+                sup_verified     = sup->verified;
+                auto solved_expr = CloneExpr(*sup->expr);
+                if (!sup->real_vars.empty() && sup->real_vars.size() < vars.size()) {
                     std::vector< uint32_t > idx_map;
-                    for (const auto &rv : sup.value().RealVars()) {
+                    for (const auto &rv : sup->real_vars) {
                         for (uint32_t j = 0; j < kNv; ++j) {
                             if (vars[j] == rv) {
                                 idx_map.push_back(j);
@@ -420,9 +417,9 @@ TEST(QSynthDiagnostic, DecompEngineTelemetry) {
                     std::cerr << "    DEBUG " << name << ": nv=" << kNv
                               << " core_kind=" << static_cast< int >(core.expr->kind)
                               << " sup_real_vars=[";
-                    for (size_t ri = 0; ri < sup.value().RealVars().size(); ++ri) {
+                    for (size_t ri = 0; ri < sup->real_vars.size(); ++ri) {
                         if (ri > 0) { std::cerr << ","; }
-                        std::cerr << sup.value().RealVars()[ri];
+                        std::cerr << sup->real_vars[ri];
                     }
                     std::cerr << "] vars=[";
                     for (size_t ri = 0; ri < vars.size(); ++ri) {
@@ -778,18 +775,12 @@ TEST(QSynthDiagnostic, DirectSuccessProductCoreInvestigation) {
             orig_direct = check.passed;
         }
 
-        // --- Phase B: apply preconditioning (Step 2 + 2.5) ---
+        // --- Phase B: preconditioning removed (now internal to orchestrator) ---
         auto current_expr = CloneExpr(*folded);
-        auto op_result    = SimplifyMixedOperands(std::move(current_expr), vars, opts);
-        current_expr      = std::move(op_result.expr);
-        auto pi_result    = CollapseProductIdentities(std::move(current_expr), vars, opts);
-        current_expr      = std::move(pi_result.expr);
 
         // --- Phase C: product core on post-preconditioning expr ---
         auto post_cls = ClassifyStructural(*current_expr);
-        auto post_sig = (op_result.changed || pi_result.changed)
-            ? EvaluateBooleanSignature(*current_expr, kNv, 64)
-            : sig;
+        auto post_sig = sig;
         DecompositionContext post_dctx{
             .opts         = opts,
             .vars         = vars,
@@ -810,8 +801,7 @@ TEST(QSynthDiagnostic, DirectSuccessProductCoreInvestigation) {
         // TryDecomposition removed — use orchestrator pipeline
 
         std::cerr << "  " << label << " orig_core=" << orig_has_core
-                  << " orig_direct=" << orig_direct << " step2=" << op_result.changed
-                  << " step2.5=" << pi_result.changed << " post_core=" << post_has_core
+                  << " orig_direct=" << orig_direct << " post_core=" << post_has_core
                   << " post_direct=" << post_direct;
         if (orig_has_core) { std::cerr << " orig_expr=" << Render(*orig_prod->expr, vars, 64); }
         if (post_has_core) { std::cerr << " post_expr=" << Render(*post_prod->expr, vars, 64); }
@@ -1156,24 +1146,13 @@ TEST(QSynthDiagnostic, BooleanNullResidualCharacterization) {
         std::cerr << "  Orig top-op: " << kind_str(folded->kind) << " ops: {"
                   << op_signature(*folded) << "}\n";
 
-        // Preconditioning (Step 2 + 2.5)
+        // Preconditioning removed (now internal to orchestrator)
         auto current = CloneExpr(*folded);
-        auto op_res  = SimplifyMixedOperands(std::move(current), vars, opts);
-        current      = std::move(op_res.expr);
-        auto pi_res  = CollapseProductIdentities(std::move(current), vars, opts);
-        current      = std::move(pi_res.expr);
-        bool changed = op_res.changed || pi_res.changed;
-
-        if (changed) {
-            std::cerr << "  Post top-op: " << kind_str(current->kind) << " ops: {"
-                      << op_signature(*current) << "}\n";
-        } else {
-            std::cerr << "  Post: unchanged\n";
-        }
+        std::cerr << "  Post: unchanged (preconditioning removed)\n";
 
         // Extract Poly2 core
         auto post_cls = ClassifyStructural(*current);
-        auto post_sig = changed ? EvaluateBooleanSignature(*current, kNv, 64) : sig;
+        auto post_sig = sig;
         DecompositionContext dctx{
             .opts         = opts,
             .vars         = vars,
@@ -1339,17 +1318,11 @@ TEST(QSynthDiagnostic, NullFactorTelemetry) {
         if (!result.has_value()) { continue; }
         if (result.value().kind != SimplifyOutcome::Kind::kUnchangedUnsupported) { continue; }
 
-        // Preconditioning (Step 2 + 2.5)
+        // Preconditioning removed (now internal to orchestrator)
         auto current = CloneExpr(**folded_ptr);
-        auto op_res  = SimplifyMixedOperands(std::move(current), vars, opts);
-        current      = std::move(op_res.expr);
-        auto pi_res  = CollapseProductIdentities(std::move(current), vars, opts);
-        current      = std::move(pi_res.expr);
 
         auto post_cls = ClassifyStructural(*current);
-        auto post_sig = (op_res.changed || pi_res.changed)
-            ? EvaluateBooleanSignature(*current, kNv, kBw)
-            : sig;
+        auto post_sig = sig;
 
         DecompositionContext dctx{
             .opts         = opts,
@@ -1647,17 +1620,11 @@ TEST(QSynthDiagnostic, MultiWeightNullBasisTelemetry) {
         if (!result.has_value()) { continue; }
         if (result.value().kind != SimplifyOutcome::Kind::kUnchangedUnsupported) { continue; }
 
-        // Preconditioning
+        // Preconditioning removed (now internal to orchestrator)
         auto current = CloneExpr(**folded_ptr);
-        auto op_res  = SimplifyMixedOperands(std::move(current), vars, opts);
-        current      = std::move(op_res.expr);
-        auto pi_res  = CollapseProductIdentities(std::move(current), vars, opts);
-        current      = std::move(pi_res.expr);
 
         auto post_cls = ClassifyStructural(*current);
-        auto post_sig = (op_res.changed || pi_res.changed)
-            ? EvaluateBooleanSignature(*current, kNv, kBw)
-            : sig;
+        auto post_sig = sig;
 
         DecompositionContext dctx{
             .opts         = opts,
@@ -1898,7 +1865,7 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
     int core_bn      = 0;
 
     // Sub-counters for routing_miss
-    int rm_orig_direct = 0; // RunSupportedPass succeeds on original AST
+    int rm_orig_direct = 0; // Simplify succeeds on original AST
     int rm_post_direct = 0; // succeeds after preconditioning
     // TryDecomposition counters removed — use orchestrator pipeline
 
@@ -1984,21 +1951,16 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
                                         .current_expr = folded_ptr->get(),
                                         .cls          = orig_cls };
 
-        auto orig_sup    = RunSupportedPass(sig, vars, opts);
-        bool orig_sup_ok = orig_sup.has_value() && orig_sup->Succeeded();
+        auto orig_sup = Simplify(sig, vars, nullptr, opts);
+        bool orig_sup_ok =
+            orig_sup.has_value() && orig_sup->kind == SimplifyOutcome::Kind::kSimplified;
         (void) orig_sup_ok;
 
-        // Post-preconditioning (Step 2 + 2.5)
+        // Preconditioning removed (now internal to orchestrator)
         auto precond_expr = CloneExpr(**folded_ptr);
-        auto op_result    = SimplifyMixedOperands(std::move(precond_expr), vars, opts);
-        precond_expr      = std::move(op_result.expr);
-        auto pi_result    = CollapseProductIdentities(std::move(precond_expr), vars, opts);
-        precond_expr      = std::move(pi_result.expr);
 
         auto post_cls = ClassifyStructural(*precond_expr);
-        auto post_sig = (op_result.changed || pi_result.changed)
-            ? EvaluateBooleanSignature(*precond_expr, kNv, 64)
-            : sig;
+        auto post_sig = sig;
         DecompositionContext post_dctx{ .opts         = opts,
                                         .vars         = vars,
                                         .sig          = post_sig,
@@ -2139,25 +2101,25 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
         bool sup_solved    = false;
         bool sup_verified  = false;
         bool sup_recombine = false;
-        auto sup           = RunSupportedPass(residual_sig, vars, res_opts);
-        if (sup.has_value() && sup->Succeeded()) {
+        auto sup           = Simplify(residual_sig, vars, nullptr, res_opts);
+        if (sup.has_value() && sup->kind == SimplifyOutcome::Kind::kSimplified) {
             sup_solved   = true;
-            sup_verified = sup->Verification() == VerificationState::kVerified;
+            sup_verified = sup->verified;
 
             // Capture real_vars
-            for (size_t ri = 0; ri < sup->RealVars().size(); ++ri) {
+            for (size_t ri = 0; ri < sup->real_vars.size(); ++ri) {
                 if (ri > 0) { sup_real_vars_str += ","; }
-                sup_real_vars_str += sup->RealVars()[ri];
+                sup_real_vars_str += sup->real_vars[ri];
             }
 
-            auto solved_expr = CloneExpr(sup->GetExpr());
+            auto solved_expr = CloneExpr(*sup->expr);
 
             // Render in reduced-var space before remap
-            sup_rendered = Render(*solved_expr, sup->RealVars(), 64);
+            sup_rendered = Render(*solved_expr, sup->real_vars, 64);
 
-            if (!sup->RealVars().empty() && sup->RealVars().size() < vars.size()) {
+            if (!sup->real_vars.empty() && sup->real_vars.size() < vars.size()) {
                 std::vector< uint32_t > idx_map;
-                for (const auto &rv : sup->RealVars()) {
+                for (const auto &rv : sup->real_vars) {
                     for (uint32_t j = 0; j < kNv; ++j) {
                         if (vars[j] == rv) {
                             idx_map.push_back(j);
@@ -2183,10 +2145,10 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
             // Also clone solved_expr before it's moved, for eval
             if (!sup_recombine) {
                 // Re-clone to get a fresh solved_expr for probing
-                auto probe_solved = CloneExpr(sup->GetExpr());
-                if (!sup->RealVars().empty() && sup->RealVars().size() < vars.size()) {
+                auto probe_solved = CloneExpr(*sup->expr);
+                if (!sup->real_vars.empty() && sup->real_vars.size() < vars.size()) {
                     std::vector< uint32_t > idx_map2;
-                    for (const auto &rv : sup->RealVars()) {
+                    for (const auto &rv : sup->real_vars) {
                         for (uint32_t j = 0; j < kNv; ++j) {
                             if (vars[j] == rv) {
                                 idx_map2.push_back(j);
@@ -2206,8 +2168,8 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
                 }
 
                 // Also check in reduced-var space (pre-remap)
-                auto reduced_solved = CloneExpr(sup->GetExpr());
-                auto reduced_vars   = sup->RealVars();
+                auto reduced_solved = CloneExpr(*sup->expr);
+                auto reduced_vars   = sup->real_vars;
                 auto reduced_nv     = static_cast< uint32_t >(reduced_vars.size());
 
                 // Build reduced-space residual evaluator
@@ -2501,17 +2463,11 @@ TEST(QSynthDiagnostic, NonBnResidualCharacterization) {
             return EvalExpr(**folded_ptr, v, 64);
         };
 
-        // Precondition + extract product core (as in taxonomy)
+        // Preconditioning removed (now internal to orchestrator)
         auto precond_expr = CloneExpr(*folded);
-        auto op_result    = SimplifyMixedOperands(std::move(precond_expr), vars, opts);
-        precond_expr      = std::move(op_result.expr);
-        auto pi_result    = CollapseProductIdentities(std::move(precond_expr), vars, opts);
-        precond_expr      = std::move(pi_result.expr);
 
         auto post_cls = ClassifyStructural(*precond_expr);
-        auto post_sig = (op_result.changed || pi_result.changed)
-            ? EvaluateBooleanSignature(*precond_expr, kNv, 64)
-            : sig;
+        auto post_sig = sig;
         DecompositionContext post_dctx{ .opts         = opts,
                                         .vars         = vars,
                                         .sig          = post_sig,
@@ -2715,7 +2671,7 @@ TEST(QSynthDiagnostic, NonBnResidualCharacterization) {
 
 // Deep characterization of the 44 no_core cases.
 // For each: boolean signature, route classification, polynomial
-// recovery, and whether RunSupportedPass succeeds on
+// recovery, and whether Simplify succeeds on
 // preconditioned AST.
 TEST(QSynthDiagnostic, NoCoreCharacterization) {
     std::ifstream file(DATASET_DIR "/gamba/qsynth_ea.txt");
@@ -2803,12 +2759,8 @@ TEST(QSynthDiagnostic, NoCoreCharacterization) {
 
         total++;
 
-        // 1. Route classification
+        // 1. Route classification (preconditioning removed, now internal)
         auto precond_expr = CloneExpr(**folded_shared);
-        auto op_result    = SimplifyMixedOperands(std::move(precond_expr), vars, opts);
-        precond_expr      = std::move(op_result.expr);
-        auto pi_result    = CollapseProductIdentities(std::move(precond_expr), vars, opts);
-        precond_expr      = std::move(pi_result.expr);
         auto cls          = ClassifyStructural(*precond_expr);
 
         // 2. Boolean signature string
@@ -2835,15 +2787,14 @@ TEST(QSynthDiagnostic, NoCoreCharacterization) {
         };
         bool hm = has_mul_fn(*precond_expr);
 
-        // 5. RunSupportedPass on preconditioned AST sig
-        auto post_sig   = (op_result.changed || pi_result.changed)
-            ? EvaluateBooleanSignature(*precond_expr, kNv, 64)
-            : sig;
-        auto sup_result = RunSupportedPass(post_sig, vars, opts);
-        bool sp         = sup_result.has_value() && sup_result->Succeeded();
+        // 5. Simplify on preconditioned AST sig
+        auto post_sig   = sig;
+        auto sup_result = Simplify(post_sig, vars, nullptr, opts);
+        bool sp =
+            sup_result.has_value() && sup_result->kind == SimplifyOutcome::Kind::kSimplified;
         if (sp) {
             // Verify the result
-            auto check = FullWidthCheckEval(opts.evaluator, kNv, sup_result->GetExpr(), 64, 64);
+            auto check = FullWidthCheckEval(opts.evaluator, kNv, *sup_result->expr, 64, 64);
             sp         = check.passed;
         }
 
@@ -3025,30 +2976,20 @@ TEST(QSynthDiagnostic, RecoverableCaseTrace) {
         std::cerr << "truth: " << truth << "\n";
         std::cerr << "obf folded: " << Render(**folded_shared, vars, 64) << "\n";
 
-        // Step 2: OperandSimplifier
+        // Preconditioning removed (now internal to orchestrator)
         auto precond = CloneExpr(**folded_shared);
-        auto op      = SimplifyMixedOperands(std::move(precond), vars, opts);
-        std::cerr << "after OperandSimp (changed=" << op.changed
-                  << "): " << Render(*op.expr, vars, 64) << "\n";
-
-        // Step 2.5: ProductIdentityCollapse
-        auto pi = CollapseProductIdentities(std::move(op.expr), vars, opts);
-        std::cerr << "after ProdIdentity (changed=" << pi.changed
-                  << "): " << Render(*pi.expr, vars, 64) << "\n";
+        std::cerr << "preconditioning removed (now internal to orchestrator)\n";
 
         // Classification
-        auto cls = ClassifyStructural(*pi.expr);
+        auto cls = ClassifyStructural(*precond);
         std::cerr << "route: " << static_cast< int >(cls.route) << "\n";
 
-        // TryDecomposition removed — use orchestrator pipeline
-
-        auto post_sig =
-            (op.changed || pi.changed) ? EvaluateBooleanSignature(*pi.expr, kNv, 64) : sig;
+        auto post_sig = sig;
         DecompositionContext post_dctx{
             .opts         = opts,
             .vars         = vars,
             .sig          = post_sig,
-            .current_expr = pi.expr.get(),
+            .current_expr = precond.get(),
             .cls          = cls,
         };
 
@@ -3426,13 +3367,13 @@ TEST(QSynthDiagnostic, AtomLiftingTelemetry) {
         // No evaluator — we'll do FW check manually after substitution
         // against the original evaluator.
 
-        auto sup_result = RunSupportedPass(lifted_sig, ext_vars, lift_opts);
-        if (sup_result.has_value() && sup_result.value().Succeeded()) {
+        auto sup_result = Simplify(lifted_sig, ext_vars, nullptr, lift_opts);
+        if (sup_result.has_value() && sup_result->kind == SimplifyOutcome::Kind::kSimplified) {
             detail.skeleton_ok = true;
             skeleton_solved++;
 
             // Step 4: Substitute atoms back
-            auto reconstructed = SubstituteBack(sup_result.value().GetExpr(), idx_to_atom, kNv);
+            auto reconstructed = SubstituteBack(*sup_result->expr, idx_to_atom, kNv);
 
             // Step 5: Full-width verify against original evaluator
             auto check = FullWidthCheckEval(orig_eval, kNv, *reconstructed, kBw, 64);

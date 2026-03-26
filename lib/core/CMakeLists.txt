@@ -33,8 +33,6 @@ target_sources(cobra-core PRIVATE
     SignatureEval.cpp
     MixedProductRewriter.cpp
     ExprCost.cpp
-    OperandSimplifier.cpp
-    ProductIdentityRecoverer.cpp
     SignatureSimplifier.cpp
     BitwiseDecomposer.cpp
     HybridDecomposer.cpp
