@@ -23,4 +23,10 @@ namespace cobra {
     Result< PassResult >
     RunSignatureMultivarPolyRecovery(const WorkItem &item, OrchestratorContext &ctx);
 
+    Result< PassResult >
+    RunSignatureBitwiseDecompose(const WorkItem &item, OrchestratorContext &ctx);
+
+    Result< PassResult >
+    RunSignatureHybridDecompose(const WorkItem &item, OrchestratorContext &ctx);
+
 } // namespace cobra

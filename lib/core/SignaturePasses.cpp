@@ -5,12 +5,14 @@
 #include "cobra/core/AnfTransform.h"
 #include "cobra/core/ArithmeticLowering.h"
 #include "cobra/core/BitWidth.h"
+#include "cobra/core/BitwiseDecomposer.h"
 #include "cobra/core/Classification.h"
 #include "cobra/core/CoBExprBuilder.h"
 #include "cobra/core/CoeffInterpolator.h"
 #include "cobra/core/CoefficientSplitter.h"
 #include "cobra/core/ExprCost.h"
 #include "cobra/core/ExprUtils.h"
+#include "cobra/core/HybridDecomposer.h"
 #include "cobra/core/MultivarPolyRecovery.h"
 #include "cobra/core/PatternMatcher.h"
 #include "cobra/core/PolyExprBuilder.h"
@@ -26,6 +28,7 @@
 #include <cstdint>
 #include <numeric>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace cobra {
@@ -68,6 +71,131 @@ namespace cobra {
                 sum = (sum + (term.coeff * 2)) & mask;
             }
             return sum;
+        }
+
+        // Resolve a child competition group whose continuation is
+        // BitwiseComposeCont: remap winner, compose with split var,
+        // FW-verify, submit to parent group, release parent handle.
+        // Build a mapped evaluator for verification in the parent's
+        // reduced variable space.
+        std::optional< Evaluator > BuildParentMappedEvaluator(
+            const OrchestratorContext &ctx,
+            const std::vector< uint32_t > &parent_original_indices, uint32_t parent_num_vars
+        ) {
+            if (!ctx.evaluator) { return std::nullopt; }
+            if (parent_num_vars == ctx.original_vars.size()) { return *ctx.evaluator; }
+            return Evaluator(
+                [eval = *ctx.evaluator, idx_map = parent_original_indices,
+                 original_vals = std::vector< uint64_t >(ctx.original_vars.size(), 0)](
+                    const std::vector< uint64_t > &reduced_vals
+                ) mutable -> uint64_t {
+                    for (size_t i = 0; i < idx_map.size(); ++i) {
+                        original_vals[idx_map[i]] = reduced_vals[i];
+                    }
+                    uint64_t result = eval(original_vals);
+                    for (size_t i = 0; i < idx_map.size(); ++i) {
+                        original_vals[idx_map[i]] = 0;
+                    }
+                    return result;
+                }
+            );
+        }
+
+        PassResult ResolveBitwiseCompose(
+            const BitwiseComposeCont &cont, CompetitionGroup &group, const WorkItem &item,
+            OrchestratorContext &ctx
+        ) {
+            PassResult pr;
+            pr.disposition = ItemDisposition::kConsumeCurrent;
+
+            if (group.best.has_value()) {
+                auto &winner  = *group.best;
+                auto remapped = RemapVars(*winner.expr, cont.active_context_indices);
+                auto composed =
+                    Compose(cont.gate, cont.var_k, std::move(remapped), cont.add_coeff);
+
+                // FW-verify in parent's reduced variable space
+                auto mapped_eval = BuildParentMappedEvaluator(
+                    ctx, cont.parent_original_indices, cont.parent_num_vars
+                );
+                bool fw_ok = true;
+                if (mapped_eval) {
+                    auto check = FullWidthCheckEval(
+                        *mapped_eval, cont.parent_num_vars, *composed, ctx.bitwidth
+                    );
+                    fw_ok = check.passed;
+                }
+
+                if (fw_ok) {
+                    auto cost_info = ComputeCost(*composed);
+                    bool needs_osv = !cont.parent_original_indices.empty()
+                        && cont.parent_num_vars != ctx.original_vars.size();
+                    SubmitCandidate(
+                        ctx.competition_groups, cont.parent_group_id,
+                        CandidateRecord{
+                            .expr         = std::move(composed),
+                            .cost         = cost_info.cost,
+                            .verification = mapped_eval ? VerificationState::kVerified
+                                                        : VerificationState::kUnverified,
+                            .real_vars    = cont.parent_real_vars,
+                            .source_pass  = PassId::kSignatureBitwiseDecompose,
+                            .needs_original_space_verification = needs_osv,
+                        }
+                    );
+                }
+            }
+
+            // Fire-and-forget: no parent handle to release.
+            // The parent group resolves when its original handle
+            // is released by the sig item exhausting all passes.
+            pr.decision = PassDecision::kAdvance;
+            return pr;
+        }
+
+        PassResult ResolveHybridCompose(
+            const HybridComposeCont &cont, CompetitionGroup &group, const WorkItem &item,
+            OrchestratorContext &ctx
+        ) {
+            PassResult pr;
+            pr.disposition = ItemDisposition::kConsumeCurrent;
+
+            if (group.best.has_value()) {
+                auto &winner  = *group.best;
+                auto composed = ComposeExtraction(cont.op, cont.var_k, CloneExpr(*winner.expr));
+
+                // FW-verify in parent's reduced variable space
+                auto mapped_eval = BuildParentMappedEvaluator(
+                    ctx, cont.parent_original_indices, cont.parent_num_vars
+                );
+                bool fw_ok = true;
+                if (mapped_eval) {
+                    auto check = FullWidthCheckEval(
+                        *mapped_eval, cont.parent_num_vars, *composed, ctx.bitwidth
+                    );
+                    fw_ok = check.passed;
+                }
+
+                if (fw_ok) {
+                    auto cost_info = ComputeCost(*composed);
+                    bool needs_osv = !cont.parent_original_indices.empty()
+                        && cont.parent_num_vars != ctx.original_vars.size();
+                    SubmitCandidate(
+                        ctx.competition_groups, cont.parent_group_id,
+                        CandidateRecord{
+                            .expr         = std::move(composed),
+                            .cost         = cost_info.cost,
+                            .verification = mapped_eval ? VerificationState::kVerified
+                                                        : VerificationState::kUnverified,
+                            .real_vars    = cont.parent_real_vars,
+                            .source_pass  = PassId::kSignatureHybridDecompose,
+                            .needs_original_space_verification = needs_osv,
+                        }
+                    );
+                }
+            }
+
+            pr.decision = PassDecision::kAdvance;
+            return pr;
         }
 
     } // namespace
@@ -140,28 +268,20 @@ namespace cobra {
                         .disposition = ItemDisposition::kConsumeCurrent,
                         .reason      = std::move(reason),
                     };
+                } else if constexpr (std::is_same_v< T, BitwiseComposeCont >) {
+                    return ResolveBitwiseCompose(c, group, item, ctx);
+                } else if constexpr (std::is_same_v< T, HybridComposeCont >) {
+                    return ResolveHybridCompose(c, group, item, ctx);
                 } else {
                     return PassResult{
-                        .decision = PassDecision::kBlocked,
-                        .disposition =
-                            ItemDisposition::kConsumeCurrent,
+                        .decision    = PassDecision::kBlocked,
+                        .disposition = ItemDisposition::kConsumeCurrent,
                         .reason =
                             ReasonDetail{
-                                .top =
-                                    {
-                                        .code =
-                                            {
-                                                ReasonCategory::
-                                                    kInapplicable,
-                                                ReasonDomain::
-                                                    kOrchestrator,
-                                            },
-                                        .message =
-                                            "Continuation type not "
-                                            "yet "
-                                            "implemented",
-                                    },
-                            },
+                                         .top = { .code    = { ReasonCategory::kInapplicable,
+                                                      ReasonDomain::kOrchestrator },
+                                         .message = "Continuation type not yet implemented" },
+                                         },
                     };
                 }
             },
@@ -629,6 +749,317 @@ namespace cobra {
                 .disposition = ItemDisposition::kRetainCurrent,
             }
         );
+    }
+
+    // ---------------------------------------------------------------
+    // kSignatureBitwiseDecompose — fanout pass
+    // ---------------------------------------------------------------
+
+    Result< PassResult >
+    RunSignatureBitwiseDecompose(const WorkItem &item, OrchestratorContext &ctx) {
+        if (!std::holds_alternative< SignatureStatePayload >(item.payload)) {
+            return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
+        }
+
+        // Skip if the competition group already has a candidate from
+        // a direct technique pass (pattern match, ANF, CoB, etc.).
+        if (item.group_id.has_value()) {
+            auto git = ctx.competition_groups.find(*item.group_id);
+            if (git != ctx.competition_groups.end() && git->second.best.has_value()) {
+                return Ok(
+                    PassResult{
+                        .decision    = PassDecision::kNoProgress,
+                        .disposition = ItemDisposition::kRetainCurrent,
+                    }
+                );
+            }
+        }
+
+        if (item.signature_recursion_depth >= 2) {
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kNoProgress,
+                    .disposition = ItemDisposition::kRetainCurrent,
+                }
+            );
+        }
+
+        if (!ctx.evaluator) {
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kNoProgress,
+                    .disposition = ItemDisposition::kRetainCurrent,
+                }
+            );
+        }
+
+        const auto &sig_payload = std::get< SignatureStatePayload >(item.payload);
+        const auto &sub_ctx     = sig_payload.ctx;
+        const auto &sig         = sub_ctx.elimination.reduced_sig;
+        const auto num_vars     = static_cast< uint32_t >(sub_ctx.real_vars.size());
+
+        if (sig.size() < 2 || num_vars > 6) {
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kNoProgress,
+                    .disposition = ItemDisposition::kRetainCurrent,
+                }
+            );
+        }
+
+        auto candidates = EnumerateBitwiseCandidates(sig, num_vars);
+        if (candidates.empty()) {
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kNoProgress,
+                    .disposition = ItemDisposition::kRetainCurrent,
+                }
+            );
+        }
+
+        constexpr size_t kMaxCandidates = 8;
+        if (candidates.size() > kMaxCandidates) { candidates.resize(kMaxCandidates); }
+
+        assert(item.group_id.has_value());
+        const auto parent_group_id = *item.group_id;
+
+        PassResult result;
+        result.decision    = PassDecision::kAdvance;
+        result.disposition = ItemDisposition::kRetainCurrent;
+
+        for (const auto &cand : candidates) {
+            std::vector< uint32_t > g_context_indices;
+            for (uint32_t v = 0; v < num_vars; ++v) {
+                if (v == cand.var_k) { continue; }
+                g_context_indices.push_back(v);
+            }
+
+            const auto n_g = static_cast< uint32_t >(g_context_indices.size());
+            auto [compacted_sig, active_var_indices] = CompactSignature(cand.g_sig, n_g);
+
+            std::vector< uint32_t > active_context_indices;
+            for (const uint32_t ai : active_var_indices) {
+                active_context_indices.push_back(g_context_indices[ai]);
+            }
+
+            // Handle constant g_sig inline (no child needed)
+            if (active_var_indices.empty()) {
+                auto g_expr = Expr::Constant(cand.g_sig[0]);
+                auto composed =
+                    Compose(cand.gate, cand.var_k, std::move(g_expr), cand.add_coeff);
+
+                auto fw = FullWidthCheckEval(
+                    *ctx.evaluator, static_cast< uint32_t >(ctx.original_vars.size()),
+                    *composed, ctx.bitwidth
+                );
+                if (!fw.passed) { continue; }
+
+                auto cost_info = ComputeCost(*composed);
+                SubmitCandidate(
+                    ctx.competition_groups, parent_group_id,
+                    CandidateRecord{
+                        .expr                              = std::move(composed),
+                        .cost                              = cost_info.cost,
+                        .verification                      = VerificationState::kVerified,
+                        .real_vars                         = ctx.original_vars,
+                        .source_pass                       = PassId::kSignatureBitwiseDecompose,
+                        .needs_original_space_verification = false,
+                    }
+                );
+                continue;
+            }
+
+            // Build active-variable context for the child
+            std::vector< std::string > active_vars;
+            std::vector< uint32_t > child_original_indices;
+            for (const uint32_t ai : active_var_indices) {
+                active_vars.push_back(sub_ctx.real_vars[g_context_indices[ai]]);
+                child_original_indices.push_back(
+                    sub_ctx.original_indices[g_context_indices[ai]]
+                );
+            }
+
+            // Build sub-evaluator for the compacted child
+            uint64_t fixed_val = 0;
+            if (cand.gate == GateKind::kAnd) {
+                fixed_val = (ctx.bitwidth == 64) ? UINT64_MAX : ((1ULL << ctx.bitwidth) - 1);
+            } else if (cand.gate == GateKind::kMul) {
+                fixed_val = 1;
+            }
+
+            std::vector< uint32_t > compact_to_parent;
+            compact_to_parent.reserve(active_var_indices.size());
+            for (const uint32_t ai : active_var_indices) {
+                const uint32_t parent_idx = (g_context_indices[ai] < cand.var_k)
+                    ? g_context_indices[ai]
+                    : (g_context_indices[ai] + 1);
+                compact_to_parent.push_back(
+                    sub_ctx.original_indices
+                        [parent_idx < num_vars ? parent_idx : g_context_indices[ai]]
+                );
+            }
+
+            // Create child competition group with continuation
+            auto child_group_id = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+            ctx.competition_groups.at(child_group_id).continuation = ContinuationData{
+                BitwiseComposeCont{
+                                   .var_k                   = cand.var_k,
+                                   .gate                    = cand.gate,
+                                   .add_coeff               = cand.add_coeff,
+                                   .active_context_indices  = active_context_indices,
+                                   .parent_group_id         = parent_group_id,
+                                   .parent_real_vars        = sub_ctx.real_vars,
+                                   .parent_original_indices = sub_ctx.original_indices,
+                                   .parent_num_vars         = num_vars,
+                                   }
+            };
+
+            // Build child elimination result for the compacted sig
+            EliminationResult child_elim;
+            child_elim.reduced_sig = compacted_sig;
+            child_elim.real_vars   = active_vars;
+
+            WorkItem child;
+            child.payload = SignatureStatePayload{
+                .ctx = {
+                    .sig                               = compacted_sig,
+                    .real_vars                         = active_vars,
+                    .elimination                       = std::move(child_elim),
+                    .original_indices                  = child_original_indices,
+                    .needs_original_space_verification = false,
+                },
+            };
+            child.features                  = item.features;
+            child.metadata                  = item.metadata;
+            child.depth                     = item.depth;
+            child.rewrite_gen               = item.rewrite_gen;
+            child.attempted_mask            = 0;
+            child.signature_recursion_depth = item.signature_recursion_depth + 1;
+            child.group_id                  = child_group_id;
+            child.history                   = item.history;
+
+            result.next.push_back(std::move(child));
+        }
+
+        return Ok(std::move(result));
+    }
+
+    // ---------------------------------------------------------------
+    // kSignatureHybridDecompose — fanout pass
+    // ---------------------------------------------------------------
+
+    Result< PassResult >
+    RunSignatureHybridDecompose(const WorkItem &item, OrchestratorContext &ctx) {
+        if (!std::holds_alternative< SignatureStatePayload >(item.payload)) {
+            return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
+        }
+
+        // Skip if the competition group already has a candidate.
+        if (item.group_id.has_value()) {
+            auto git = ctx.competition_groups.find(*item.group_id);
+            if (git != ctx.competition_groups.end() && git->second.best.has_value()) {
+                return Ok(
+                    PassResult{
+                        .decision    = PassDecision::kNoProgress,
+                        .disposition = ItemDisposition::kRetainCurrent,
+                    }
+                );
+            }
+        }
+
+        if (item.signature_recursion_depth >= 1) {
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kNoProgress,
+                    .disposition = ItemDisposition::kRetainCurrent,
+                }
+            );
+        }
+
+        if (!ctx.evaluator) {
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kNoProgress,
+                    .disposition = ItemDisposition::kRetainCurrent,
+                }
+            );
+        }
+
+        const auto &sig_payload = std::get< SignatureStatePayload >(item.payload);
+        const auto &sub_ctx     = sig_payload.ctx;
+        const auto &sig         = sub_ctx.elimination.reduced_sig;
+        const auto num_vars     = static_cast< uint32_t >(sub_ctx.real_vars.size());
+
+        if (sig.size() < 2 || num_vars > 6) {
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kNoProgress,
+                    .disposition = ItemDisposition::kRetainCurrent,
+                }
+            );
+        }
+
+        auto candidates = EnumerateHybridCandidates(sig, num_vars);
+        if (candidates.empty()) {
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kNoProgress,
+                    .disposition = ItemDisposition::kRetainCurrent,
+                }
+            );
+        }
+
+        constexpr size_t kMaxCandidates = 8;
+        if (candidates.size() > kMaxCandidates) { candidates.resize(kMaxCandidates); }
+
+        assert(item.group_id.has_value());
+        const auto parent_group_id = *item.group_id;
+
+        PassResult result;
+        result.decision    = PassDecision::kAdvance;
+        result.disposition = ItemDisposition::kRetainCurrent;
+
+        for (const auto &cand : candidates) {
+            // Create child competition group with continuation
+            auto child_group_id = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+            ctx.competition_groups.at(child_group_id).continuation = ContinuationData{
+                HybridComposeCont{
+                                  .var_k                   = cand.var_k,
+                                  .op                      = cand.op,
+                                  .parent_group_id         = parent_group_id,
+                                  .parent_real_vars        = sub_ctx.real_vars,
+                                  .parent_original_indices = sub_ctx.original_indices,
+                                  .parent_num_vars         = num_vars,
+                                  }
+            };
+
+            // Hybrid uses full variable space (no compaction)
+            WorkItem child;
+            child.payload = SignatureStatePayload{
+                .ctx = {
+                    .sig                               = cand.r_sig,
+                    .real_vars                         = sub_ctx.real_vars,
+                    .elimination = {
+                        .reduced_sig = cand.r_sig,
+                        .real_vars   = sub_ctx.real_vars,
+                    },
+                    .original_indices                  = sub_ctx.original_indices,
+                    .needs_original_space_verification = false,
+                },
+            };
+            child.features                  = item.features;
+            child.metadata                  = item.metadata;
+            child.depth                     = item.depth;
+            child.rewrite_gen               = item.rewrite_gen;
+            child.attempted_mask            = 0;
+            child.signature_recursion_depth = item.signature_recursion_depth + 1;
+            child.group_id                  = child_group_id;
+            child.history                   = item.history;
+
+            result.next.push_back(std::move(child));
+        }
+
+        return Ok(std::move(result));
     }
 
 } // namespace cobra

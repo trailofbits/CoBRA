@@ -46,6 +46,8 @@ namespace cobra {
         kSignatureCobCandidate,
         kSignatureSingletonPolyRecovery,
         kSignatureMultivarPolyRecovery,
+        kSignatureBitwiseDecompose,
+        kSignatureHybridDecompose,
         // Structural rewrites
         kOperandSimplify,
         kProductIdentityCollapse,

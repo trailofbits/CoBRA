@@ -356,6 +356,8 @@ namespace cobra {
                 {                  PassId::kSignatureAnf, 1 },
                 {             PassId::kPrepareCoeffModel, 2 },
                 { PassId::kSignatureMultivarPolyRecovery, 3 },
+                {     PassId::kSignatureBitwiseDecompose, 4 },
+                {      PassId::kSignatureHybridDecompose, 5 },
             };
 
             for (const auto &entry : kSignatureStatePasses) {

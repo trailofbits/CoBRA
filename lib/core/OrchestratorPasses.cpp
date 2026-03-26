@@ -609,6 +609,24 @@ namespace cobra {
              },  .run = RunSignatureMultivarPolyRecovery,
              },
             {
+             .id         = PassId::kSignatureBitwiseDecompose,
+             .consumes   = StateKind::kSignatureState,
+             .tag        = PassTag::kSolver,
+             .applicable = [](const WorkItem &item,
+             const OrchestratorContext & /*ctx*/) -> bool {
+             return std::holds_alternative< SignatureStatePayload >(item.payload);
+             },      .run = RunSignatureBitwiseDecompose,
+             },
+            {
+             .id         = PassId::kSignatureHybridDecompose,
+             .consumes   = StateKind::kSignatureState,
+             .tag        = PassTag::kSolver,
+             .applicable = [](const WorkItem &item,
+             const OrchestratorContext & /*ctx*/) -> bool {
+             return std::holds_alternative< SignatureStatePayload >(item.payload);
+             },       .run = RunSignatureHybridDecompose,
+             },
+            {
              .id         = PassId::kExtractProductCore,
              .consumes   = StateKind::kFoldedAst,
              .tag        = PassTag::kSolver,

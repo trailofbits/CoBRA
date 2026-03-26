@@ -1,7 +1,9 @@
 #pragma once
 
+#include "cobra/core/BitwiseDecomposer.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/ExprCost.h"
+#include "cobra/core/HybridDecomposer.h"
 #include "cobra/core/Simplifier.h"
 
 #include <cstdint>
@@ -21,15 +23,16 @@ namespace cobra {
 
     using JoinId = uint32_t;
 
-    enum class ExtractOp : uint8_t { kXor, kAdd };
-
     struct BitwiseComposeCont
     {
         uint32_t var_k;
-        Expr::Kind gate;
+        GateKind gate;
         uint64_t add_coeff;
         std::vector< uint32_t > active_context_indices;
         GroupId parent_group_id;
+        std::vector< std::string > parent_real_vars;
+        std::vector< uint32_t > parent_original_indices;
+        uint32_t parent_num_vars = 0;
     };
 
     struct HybridComposeCont
@@ -37,6 +40,9 @@ namespace cobra {
         uint32_t var_k;
         ExtractOp op;
         GroupId parent_group_id;
+        std::vector< std::string > parent_real_vars;
+        std::vector< uint32_t > parent_original_indices;
+        uint32_t parent_num_vars = 0;
     };
 
     struct ResidualRecombineCont

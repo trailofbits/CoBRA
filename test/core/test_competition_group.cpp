@@ -316,7 +316,7 @@ TEST(CompetitionGroup, ContinuationBitwiseCompose) {
     groups.at(id).continuation = ContinuationData{
         BitwiseComposeCont{
                            .var_k                  = 2,
-                           .gate                   = Expr::Kind::kXor,
+                           .gate                   = GateKind::kXor,
                            .add_coeff              = 0,
                            .active_context_indices = { 0, 1 },
                            .parent_group_id        = 99,
@@ -454,7 +454,7 @@ TEST(CompetitionGroup, ResolveCleansUpGroup) {
     EXPECT_EQ(ctx.competition_groups.count(gid1), 1);
 }
 
-TEST(CompetitionGroup, ResolveWithContinuationStubReturnsBlocked) {
+TEST(CompetitionGroup, ResolveHybridComposeContinuation) {
     Options opts                    = MakeDefaultOpts();
     std::vector< std::string > vars = { "x0" };
     OrchestratorContext ctx{
@@ -463,12 +463,20 @@ TEST(CompetitionGroup, ResolveWithContinuationStubReturnsBlocked) {
         .bitwidth      = 64,
     };
 
-    auto gid = CreateGroup(ctx.competition_groups, ctx.next_group_id);
-    ctx.competition_groups.at(gid).continuation = ContinuationData{
+    // Create parent group (receives composed result).
+    // Fire-and-forget model: parent handle count stays at 1.
+    auto parent_gid = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+
+    // Create child group with HybridComposeCont
+    auto child_gid = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+    ctx.competition_groups.at(child_gid).continuation = ContinuationData{
         HybridComposeCont{
-                          .var_k           = 0,
-                          .op              = ExtractOp::kXor,
-                          .parent_group_id = 0,
+                          .var_k                   = 0,
+                          .op                      = ExtractOp::kXor,
+                          .parent_group_id         = parent_gid,
+                          .parent_real_vars        = vars,
+                          .parent_original_indices = { 0 },
+                          .parent_num_vars         = 1,
                           }
     };
 
@@ -476,17 +484,23 @@ TEST(CompetitionGroup, ResolveWithContinuationStubReturnsBlocked) {
     rec.expr        = Expr::Constant(1);
     rec.cost        = ExprCost{ .weighted_size = 2 };
     rec.source_pass = PassId::kSupportedSolve;
-    SubmitCandidate(ctx.competition_groups, gid, std::move(rec));
+    SubmitCandidate(ctx.competition_groups, child_gid, std::move(rec));
 
     WorkItem item;
-    item.payload = CompetitionResolvedPayload{ .group_id = gid };
+    item.payload = CompetitionResolvedPayload{ .group_id = child_gid };
 
     auto result = RunResolveCompetition(item, ctx);
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->decision, PassDecision::kBlocked);
-    EXPECT_EQ(result->reason.top.code.category, ReasonCategory::kInapplicable);
 
-    EXPECT_EQ(ctx.competition_groups.count(gid), 0);
+    // Fire-and-forget: resolution composes x0 ^ 1 and submits to parent.
+    EXPECT_EQ(result->decision, PassDecision::kAdvance);
+
+    // Child group should be erased
+    EXPECT_EQ(ctx.competition_groups.count(child_gid), 0);
+    // Parent group should have a candidate (x0 ^ 1)
+    EXPECT_TRUE(ctx.competition_groups.at(parent_gid).best.has_value());
+    // Parent handle count unchanged (fire-and-forget: no acquire/release)
+    EXPECT_EQ(ctx.competition_groups.at(parent_gid).open_handles, 1);
 }
 
 TEST(CompetitionGroup, ResolveNotApplicableForNonResolved) {

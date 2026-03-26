@@ -1,12 +1,15 @@
 #include "CompetitionGroup.h"
+#include "ContinuationTypes.h"
 #include "Orchestrator.h"
 #include "OrchestratorPasses.h"
 #include "SignaturePasses.h"
 #include "cobra/core/AuxVarEliminator.h"
+#include "cobra/core/BitwiseDecomposer.h"
 #include "cobra/core/Classification.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/ExprCost.h"
 #include "cobra/core/ExprUtils.h"
+#include "cobra/core/HybridDecomposer.h"
 #include "cobra/core/SignatureEval.h"
 #include <gtest/gtest.h>
 
@@ -108,7 +111,17 @@ TEST(SignaturePass, SchedulerSignatureStateTable) {
     item.attempted_mask |=
         (1ULL << static_cast< uint8_t >(PassId::kSignatureMultivarPolyRecovery));
     auto p4 = SelectNextPass(item, policy, 0, cache);
-    EXPECT_FALSE(p4.has_value());
+    ASSERT_TRUE(p4.has_value());
+    EXPECT_EQ(*p4, PassId::kSignatureBitwiseDecompose);
+
+    item.attempted_mask |= (1ULL << static_cast< uint8_t >(PassId::kSignatureBitwiseDecompose));
+    auto p5              = SelectNextPass(item, policy, 0, cache);
+    ASSERT_TRUE(p5.has_value());
+    EXPECT_EQ(*p5, PassId::kSignatureHybridDecompose);
+
+    item.attempted_mask |= (1ULL << static_cast< uint8_t >(PassId::kSignatureHybridDecompose));
+    auto p6              = SelectNextPass(item, policy, 0, cache);
+    EXPECT_FALSE(p6.has_value());
 }
 
 TEST(SignaturePass, SchedulerCoeffStateTable) {
@@ -448,4 +461,273 @@ TEST(SignaturePass, NewPassIdsNotInDecompositionRange) {
     EXPECT_FALSE(IsDecompositionFamilyPass(PassId::kSignatureCobCandidate));
     EXPECT_FALSE(IsDecompositionFamilyPass(PassId::kSignatureSingletonPolyRecovery));
     EXPECT_FALSE(IsDecompositionFamilyPass(PassId::kSignatureMultivarPolyRecovery));
+    EXPECT_FALSE(IsDecompositionFamilyPass(PassId::kSignatureBitwiseDecompose));
+    EXPECT_FALSE(IsDecompositionFamilyPass(PassId::kSignatureHybridDecompose));
+}
+
+// --- BitwiseDecompose fanout tests ---
+
+TEST(SignaturePass, BitwiseFanoutEmitsChildren) {
+    // sig for x0 & x1: {0, 0, 0, 1}
+    // cofactor split on k=0: cof0={0,0} cof1={0,1}
+    // all cof0 zero => AND candidate with g_sig={0,1}
+    std::vector< uint64_t > sig     = { 0, 0, 0, 1 };
+    std::vector< std::string > vars = { "x0", "x1" };
+    Options opts;
+    opts.bitwidth  = 64;
+    opts.evaluator = [](const std::vector< uint64_t > &vals) -> uint64_t {
+        return vals[0] & vals[1];
+    };
+    auto ctx = MakeCtx(opts, vars);
+
+    auto item   = MakeSignatureItem(sig, vars, ctx);
+    auto result = RunSignatureBitwiseDecompose(item, ctx);
+    ASSERT_TRUE(result.has_value());
+    auto &pr = result.value();
+
+    EXPECT_EQ(pr.decision, PassDecision::kAdvance);
+    EXPECT_EQ(pr.disposition, ItemDisposition::kRetainCurrent);
+    // Should emit at least one child (AND candidate)
+    EXPECT_GE(pr.next.size(), 1);
+
+    // Each child should be a SignatureStatePayload with a group_id
+    for (const auto &child : pr.next) {
+        EXPECT_EQ(GetStateKind(child.payload), StateKind::kSignatureState);
+        EXPECT_TRUE(child.group_id.has_value());
+        EXPECT_EQ(child.signature_recursion_depth, 1);
+    }
+}
+
+TEST(SignaturePass, BitwiseFanoutDepthGuard) {
+    std::vector< uint64_t > sig     = { 0, 0, 0, 1 };
+    std::vector< std::string > vars = { "x0", "x1" };
+    Options opts;
+    opts.bitwidth  = 64;
+    opts.evaluator = [](const std::vector< uint64_t > &vals) -> uint64_t {
+        return vals[0] & vals[1];
+    };
+    auto ctx = MakeCtx(opts, vars);
+
+    auto item                      = MakeSignatureItem(sig, vars, ctx);
+    item.signature_recursion_depth = 2;
+    auto result                    = RunSignatureBitwiseDecompose(item, ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result.value().decision, PassDecision::kNoProgress);
+}
+
+TEST(SignaturePass, BitwiseFanoutNoEvaluatorGuard) {
+    std::vector< uint64_t > sig     = { 0, 0, 0, 1 };
+    std::vector< std::string > vars = { "x0", "x1" };
+    Options opts;
+    opts.bitwidth = 64;
+    auto ctx      = MakeCtx(opts, vars);
+
+    auto item   = MakeSignatureItem(sig, vars, ctx);
+    auto result = RunSignatureBitwiseDecompose(item, ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result.value().decision, PassDecision::kNoProgress);
+}
+
+TEST(SignaturePass, BitwiseFanoutCapsAtEight) {
+    // Construct a signature with many AND/MUL cofactor candidates.
+    // f = (x0 & x1) + (x2 & x3) — for k=0, cof0 is all-zero
+    // (in a boolean sense) which gives AND+MUL candidates. With
+    // 4 vars and symmetric structure, we get multiple candidates.
+    // To ensure > 8 candidates, we use 5 variables with an ADD
+    // structure: f = x0 + 2*x1 + 4*x2 + 8*x3 + 16*x4 at {0,1}.
+    // Each variable k has cof1[j] - cof0[j] = 2^k constant,
+    // giving ADD candidates for all 5 vars = 5 candidates.
+    // To exceed 8, augment with boolean-valued cofactor structure.
+    //
+    // Actually, simpler: construct a 4-var sig where every var
+    // has AND and MUL candidates: f = x0 & x1 & x2 & x3.
+    // For k=0: cof0=all-zero, cof1=x1&x2&x3 => AND+MUL = 2 cands
+    // Similarly for k=1,2,3 => 4*2 = 8 candidates (boolean MUL=AND).
+    // With IsBooleanValued true, both AND and MUL are emitted = 8.
+    //
+    // For > 8, we need more. Use 5 vars:
+    // f = x0 & x1 & x2 & x3 & x4 (5 vars, all-zero cof0 for each)
+    // => 5 * 2 = 10 candidates (AND + MUL for each var)
+    std::vector< uint64_t > sig(32);
+    for (uint32_t i = 0; i < 32; ++i) {
+        sig[i] =
+            ((i >> 0) & 1) & ((i >> 1) & 1) & ((i >> 2) & 1) & ((i >> 3) & 1) & ((i >> 4) & 1);
+    }
+
+    auto candidates = EnumerateBitwiseCandidates(sig, 5);
+    EXPECT_GT(candidates.size(), 8);
+
+    std::vector< std::string > vars = { "x0", "x1", "x2", "x3", "x4" };
+    Options opts;
+    opts.bitwidth  = 64;
+    opts.evaluator = [](const std::vector< uint64_t > &vals) -> uint64_t {
+        return vals[0] & vals[1] & vals[2] & vals[3] & vals[4];
+    };
+    auto ctx = MakeCtx(opts, vars);
+
+    auto item   = MakeSignatureItem(sig, vars, ctx);
+    auto result = RunSignatureBitwiseDecompose(item, ctx);
+    ASSERT_TRUE(result.has_value());
+    auto &pr = result.value();
+    EXPECT_EQ(pr.decision, PassDecision::kAdvance);
+    // Children capped at 8 (some may be constant-g handled inline)
+    EXPECT_LE(pr.next.size(), 8);
+}
+
+// --- HybridDecompose fanout tests ---
+
+TEST(SignaturePass, HybridFanoutEmitsChildren) {
+    // sig for x0 ^ (x0 & x1) = {0, 1, 0, 0}
+    // Extracting x0 with XOR gives residual {0, 0, 0, 1} = x0&x1
+    std::vector< uint64_t > sig     = { 0, 1, 0, 0 };
+    std::vector< std::string > vars = { "x0", "x1" };
+    Options opts;
+    opts.bitwidth  = 64;
+    opts.evaluator = [](const std::vector< uint64_t > &vals) -> uint64_t {
+        return vals[0] ^ (vals[0] & vals[1]);
+    };
+    auto ctx = MakeCtx(opts, vars);
+
+    auto item   = MakeSignatureItem(sig, vars, ctx);
+    auto result = RunSignatureHybridDecompose(item, ctx);
+    ASSERT_TRUE(result.has_value());
+    auto &pr = result.value();
+
+    EXPECT_EQ(pr.decision, PassDecision::kAdvance);
+    EXPECT_EQ(pr.disposition, ItemDisposition::kRetainCurrent);
+    EXPECT_GE(pr.next.size(), 1);
+
+    for (const auto &child : pr.next) {
+        EXPECT_EQ(GetStateKind(child.payload), StateKind::kSignatureState);
+        EXPECT_TRUE(child.group_id.has_value());
+        EXPECT_EQ(child.signature_recursion_depth, 1);
+    }
+}
+
+TEST(SignaturePass, HybridFanoutDepthGuard) {
+    std::vector< uint64_t > sig     = { 0, 1, 0, 0 };
+    std::vector< std::string > vars = { "x0", "x1" };
+    Options opts;
+    opts.bitwidth  = 64;
+    opts.evaluator = [](const std::vector< uint64_t > &vals) -> uint64_t {
+        return vals[0] ^ (vals[0] & vals[1]);
+    };
+    auto ctx = MakeCtx(opts, vars);
+
+    auto item                      = MakeSignatureItem(sig, vars, ctx);
+    item.signature_recursion_depth = 1;
+    auto result                    = RunSignatureHybridDecompose(item, ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result.value().decision, PassDecision::kNoProgress);
+}
+
+TEST(SignaturePass, HybridFanoutNoEvaluatorGuard) {
+    std::vector< uint64_t > sig     = { 0, 1, 0, 0 };
+    std::vector< std::string > vars = { "x0", "x1" };
+    Options opts;
+    opts.bitwidth = 64;
+    auto ctx      = MakeCtx(opts, vars);
+
+    auto item   = MakeSignatureItem(sig, vars, ctx);
+    auto result = RunSignatureHybridDecompose(item, ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result.value().decision, PassDecision::kNoProgress);
+}
+
+// --- BitwiseComposeCont resolution test ---
+
+TEST(SignaturePass, BitwiseComposeContResolution) {
+    std::vector< std::string > vars = { "x0", "x1" };
+    Options opts;
+    opts.bitwidth  = 64;
+    opts.evaluator = [](const std::vector< uint64_t > &vals) -> uint64_t {
+        return vals[0] & vals[1];
+    };
+    auto ctx = MakeCtx(opts, vars);
+
+    // Parent group: where the composed result will land
+    auto parent_gid = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+
+    // Child group: represents the sub-problem for g(rest) = x1
+    auto child_gid = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+    ctx.competition_groups.at(child_gid).continuation = ContinuationData{
+        BitwiseComposeCont{
+                           .var_k                   = 0,
+                           .gate                    = GateKind::kAnd,
+                           .add_coeff               = 0,
+                           .active_context_indices  = { 1 },
+                           .parent_group_id         = parent_gid,
+                           .parent_real_vars        = vars,
+                           .parent_original_indices = { 0, 1 },
+                           .parent_num_vars         = 2,
+                           }
+    };
+
+    // Submit x1 (= Variable(1)) as the winner of the child group
+    CandidateRecord rec;
+    rec.expr        = Expr::Variable(0);
+    rec.cost        = ExprCost{ .weighted_size = 1 };
+    rec.source_pass = PassId::kSignaturePatternMatch;
+    SubmitCandidate(ctx.competition_groups, child_gid, std::move(rec));
+
+    WorkItem resolved_item;
+    resolved_item.payload = CompetitionResolvedPayload{ .group_id = child_gid };
+
+    auto result = RunResolveCompetition(resolved_item, ctx);
+    ASSERT_TRUE(result.has_value());
+
+    // Child group is consumed
+    EXPECT_EQ(ctx.competition_groups.count(child_gid), 0);
+    // Parent group should have received x0 & x1
+    ASSERT_TRUE(ctx.competition_groups.at(parent_gid).best.has_value());
+    EXPECT_EQ(
+        ctx.competition_groups.at(parent_gid).best->source_pass,
+        PassId::kSignatureBitwiseDecompose
+    );
+}
+
+// --- HybridComposeCont resolution test ---
+
+TEST(SignaturePass, HybridComposeContResolution) {
+    std::vector< std::string > vars = { "x0", "x1" };
+    Options opts;
+    opts.bitwidth  = 64;
+    opts.evaluator = [](const std::vector< uint64_t > &vals) -> uint64_t {
+        return vals[0] ^ (vals[0] & vals[1]);
+    };
+    auto ctx = MakeCtx(opts, vars);
+
+    auto parent_gid = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+
+    auto child_gid = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+    ctx.competition_groups.at(child_gid).continuation = ContinuationData{
+        HybridComposeCont{
+                          .var_k                   = 0,
+                          .op                      = ExtractOp::kXor,
+                          .parent_group_id         = parent_gid,
+                          .parent_real_vars        = vars,
+                          .parent_original_indices = { 0, 1 },
+                          .parent_num_vars         = 2,
+                          }
+    };
+
+    // The child's winner is x0 & x1 (= AND(x0, x1))
+    CandidateRecord rec;
+    rec.expr        = Expr::BitwiseAnd(Expr::Variable(0), Expr::Variable(1));
+    rec.cost        = ExprCost{ .weighted_size = 3 };
+    rec.source_pass = PassId::kSignaturePatternMatch;
+    SubmitCandidate(ctx.competition_groups, child_gid, std::move(rec));
+
+    WorkItem resolved_item;
+    resolved_item.payload = CompetitionResolvedPayload{ .group_id = child_gid };
+
+    auto result = RunResolveCompetition(resolved_item, ctx);
+    ASSERT_TRUE(result.has_value());
+
+    EXPECT_EQ(ctx.competition_groups.count(child_gid), 0);
+    ASSERT_TRUE(ctx.competition_groups.at(parent_gid).best.has_value());
+    EXPECT_EQ(
+        ctx.competition_groups.at(parent_gid).best->source_pass,
+        PassId::kSignatureHybridDecompose
+    );
 }

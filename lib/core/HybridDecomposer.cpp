@@ -17,9 +17,12 @@
 
 namespace cobra {
 
+    // ---------------------------------------------------------------
+    // Public helpers for candidate enumeration
+    // ---------------------------------------------------------------
+
     namespace {
 
-        // Count active variables in a signature.
         uint32_t CountActiveVars(const std::vector< uint64_t > &sig, uint32_t n) {
             uint32_t count = 0;
             for (uint32_t v = 0; v < n; ++v) {
@@ -34,91 +37,69 @@ namespace cobra {
             return count;
         }
 
-        // Remap variable indices using the provided index map.
-        std::unique_ptr< Expr >
-        RemapVars(const Expr &expr, const std::vector< uint32_t > &index_map) {
-            switch (expr.kind) {
-                case Expr::Kind::kConstant:
-                    return Expr::Constant(expr.constant_val);
-                case Expr::Kind::kVariable:
-                    return Expr::Variable(index_map[expr.var_index]);
-                case Expr::Kind::kAdd:
-                    return Expr::Add(
-                        RemapVars(*expr.children[0], index_map),
-                        RemapVars(*expr.children[1], index_map)
-                    );
-                case Expr::Kind::kMul:
-                    return Expr::Mul(
-                        RemapVars(*expr.children[0], index_map),
-                        RemapVars(*expr.children[1], index_map)
-                    );
-                case Expr::Kind::kAnd:
-                    return Expr::BitwiseAnd(
-                        RemapVars(*expr.children[0], index_map),
-                        RemapVars(*expr.children[1], index_map)
-                    );
-                case Expr::Kind::kOr:
-                    return Expr::BitwiseOr(
-                        RemapVars(*expr.children[0], index_map),
-                        RemapVars(*expr.children[1], index_map)
-                    );
-                case Expr::Kind::kXor:
-                    return Expr::BitwiseXor(
-                        RemapVars(*expr.children[0], index_map),
-                        RemapVars(*expr.children[1], index_map)
-                    );
-                case Expr::Kind::kNot:
-                    return Expr::BitwiseNot(RemapVars(*expr.children[0], index_map));
-                case Expr::Kind::kNeg:
-                    return Expr::Negate(RemapVars(*expr.children[0], index_map));
-                case Expr::Kind::kShr:
-                    return Expr::LogicalShr(
-                        RemapVars(*expr.children[0], index_map), expr.constant_val
-                    );
-            }
-            return Expr::Constant(0);
-        }
+    } // namespace
 
-        // Build the residual signature: r_sig[i] = sig[i] OP^{-1} bit_k(i)
-        // XOR: r_sig[i] = sig[i] ^ ((i >> k) & 1)
-        // ADD: r_sig[i] = sig[i] - ((i >> k) & 1)
-        std::vector< uint64_t >
-        BuildResidualSig(const std::vector< uint64_t > &sig, uint32_t k, ExtractOp op) {
-            std::vector< uint64_t > r_sig(sig.size());
-            for (size_t i = 0; i < sig.size(); ++i) {
-                const uint64_t kVk = (i >> k) & 1;
-                switch (op) {
-                    case ExtractOp::kXor:
-                        r_sig[i] = sig[i] ^ kVk;
-                        break;
-                    case ExtractOp::kAdd:
-                        r_sig[i] = sig[i] - kVk;
-                        break;
-                }
-            }
-            return r_sig;
-        }
-
-        // Compose the final expression: f = xi OP r_expr
-        std::unique_ptr< Expr >
-        ComposeExtraction(ExtractOp op, uint32_t original_k, std::unique_ptr< Expr > r_expr) {
-            auto var_k = Expr::Variable(original_k);
+    std::vector< uint64_t >
+    BuildResidualSig(const std::vector< uint64_t > &sig, uint32_t k, ExtractOp op) {
+        std::vector< uint64_t > r_sig(sig.size());
+        for (size_t i = 0; i < sig.size(); ++i) {
+            const uint64_t kVk = (i >> k) & 1;
             switch (op) {
                 case ExtractOp::kXor:
-                    return Expr::BitwiseXor(std::move(var_k), std::move(r_expr));
+                    r_sig[i] = sig[i] ^ kVk;
+                    break;
                 case ExtractOp::kAdd:
-                    return Expr::Add(std::move(var_k), std::move(r_expr));
+                    r_sig[i] = sig[i] - kVk;
+                    break;
             }
-            return Expr::Constant(0);
+        }
+        return r_sig;
+    }
+
+    std::unique_ptr< Expr >
+    ComposeExtraction(ExtractOp op, uint32_t original_k, std::unique_ptr< Expr > r_expr) {
+        auto var_k = Expr::Variable(original_k);
+        switch (op) {
+            case ExtractOp::kXor:
+                return Expr::BitwiseXor(std::move(var_k), std::move(r_expr));
+            case ExtractOp::kAdd:
+                return Expr::Add(std::move(var_k), std::move(r_expr));
+        }
+        return Expr::Constant(0);
+    }
+
+    std::vector< HybridExtractionCandidate >
+    EnumerateHybridCandidates(const std::vector< uint64_t > &sig, uint32_t num_vars) {
+        std::vector< HybridExtractionCandidate > candidates;
+        candidates.reserve(2 * num_vars);
+
+        for (uint32_t k = 0; k < num_vars; ++k) {
+            for (auto op : { ExtractOp::kXor, ExtractOp::kAdd }) {
+                auto r_sig = BuildResidualSig(sig, k, op);
+
+                if (r_sig == sig) { continue; }
+
+                const uint32_t r_active = CountActiveVars(r_sig, num_vars);
+                candidates.push_back(
+                    { .var_k        = k,
+                      .op           = op,
+                      .r_sig        = std::move(r_sig),
+                      .active_count = r_active }
+                );
+            }
         }
 
-        struct ExtractionCandidate
-        {
-            uint32_t var_k;
-            ExtractOp op;
-            std::vector< uint64_t > r_sig;
-            uint32_t active_count;
-        };
+        std::sort(
+            candidates.begin(), candidates.end(),
+            [](const HybridExtractionCandidate &a, const HybridExtractionCandidate &b) {
+                return a.active_count < b.active_count;
+            }
+        );
+
+        return candidates;
+    }
+
+    namespace {
 
         void AppendReasonFrames(std::vector< ReasonFrame > &out, const ReasonDetail &detail) {
             out.push_back(detail.top);
@@ -179,26 +160,7 @@ namespace cobra {
 
         const auto kN = static_cast< uint32_t >(ctx.vars.size());
 
-        std::vector< ExtractionCandidate > candidates;
-        candidates.reserve(2 * kN);
-
-        for (uint32_t k = 0; k < kN; ++k) {
-            for (auto op : { ExtractOp::kXor, ExtractOp::kAdd }) {
-                auto r_sig = BuildResidualSig(sig, k, op);
-
-                // Skip if the residual is identical to the original
-                // (extraction had no effect, e.g., variable is unused).
-                if (r_sig == sig) { continue; }
-
-                const uint32_t r_active = CountActiveVars(r_sig, kN);
-                candidates.push_back(
-                    { .var_k        = k,
-                      .op           = op,
-                      .r_sig        = std::move(r_sig),
-                      .active_count = r_active }
-                );
-            }
-        }
+        auto candidates = EnumerateHybridCandidates(sig, kN);
 
         if (candidates.empty()) {
             ReasonDetail reason{
@@ -208,14 +170,6 @@ namespace cobra {
             };
             return SolverResult< SignaturePayload >::Blocked(std::move(reason));
         }
-
-        // Sort by active variable count (simpler first)
-        std::sort(
-            candidates.begin(), candidates.end(),
-            [](const ExtractionCandidate &a, const ExtractionCandidate &b) {
-                return a.active_count < b.active_count;
-            }
-        );
 
         std::optional< SignaturePayload > best;
         std::vector< ReasonFrame > all_causes;
