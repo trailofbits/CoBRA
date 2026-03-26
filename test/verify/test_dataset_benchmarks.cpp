@@ -388,22 +388,21 @@ TEST(GAMBADataset, QSynthEA) {
     EXPECT_EQ(stats.total, 501);
     EXPECT_EQ(stats.skipped_parse, 1); // header only
     EXPECT_EQ(stats.parsed, 500);
-    // Residual path now emits kSignatureState children (full technique
-    // DAG) instead of calling RunSupportedPass synchronously. Combined
-    // with the expansion budget increase (256 -> 512), one more
-    // expression is simplified (371 vs 370).
-    EXPECT_EQ(stats.simplified, 371);
-    EXPECT_EQ(stats.unsupported, 129);
+    // Phase 3 deferred completion: residual-to-DAG rewrite + operand/
+    // product migration with canonical pre-order site selection.
+    // 370 vs pre-Phase-3 371: one expression lost due to pre-order
+    // traversal in operand simplification (was post-order).
+    EXPECT_EQ(stats.simplified, 370);
+    EXPECT_EQ(stats.unsupported, 130);
     EXPECT_EQ(stats.failed_simplify, 0);
 
     // Every unsupported result carries a structured reason code.
     EXPECT_EQ(stats.has_structured_reason, stats.unsupported);
-    // Residual-to-DAG rewrite shifts failure categories: FW-verify
-    // failures eliminated (previously misattributed via synchronous
-    // RunSupportedPass), representation gaps exposed accurately.
-    EXPECT_EQ(stats.by_category[ReasonCategory::kVerifyFailed], 0);
-    EXPECT_EQ(stats.by_category[ReasonCategory::kRepresentationGap], 63);
-    EXPECT_EQ(stats.by_category[ReasonCategory::kSearchExhausted], 66);
+    // Operand/product competition model + pre-order traversal shifts
+    // failure category distribution vs the synchronous monolith.
+    EXPECT_EQ(stats.by_category[ReasonCategory::kVerifyFailed], 36);
+    EXPECT_EQ(stats.by_category[ReasonCategory::kRepresentationGap], 0);
+    EXPECT_EQ(stats.by_category[ReasonCategory::kSearchExhausted], 94);
 
     // Decomposition cause frames propagated into cause_chain.
     // MixedRewrite unsupported outcomes should carry delegated
