@@ -855,6 +855,8 @@ TEST(SignaturePass, ProductJoinResolveBothFactors) {
     join.vars          = vars;
     join.bitwidth      = 64;
     join.rewrite_gen   = 0;
+    join.full_ast      = CloneExpr(*orig);
+    join.target_hash   = std::hash< Expr >{}(*orig);
 
     auto join_id = CreateJoin(ctx.join_states, ctx.next_join_id, JoinState{ std::move(join) });
 
@@ -944,6 +946,8 @@ TEST(SignaturePass, ProductJoinOneFactorNoWinner) {
     join.vars          = vars;
     join.bitwidth      = 64;
     join.rewrite_gen   = 0;
+    join.full_ast      = CloneExpr(*orig);
+    join.target_hash   = std::hash< Expr >{}(*orig);
 
     auto join_id = CreateJoin(ctx.join_states, ctx.next_join_id, JoinState{ std::move(join) });
 
@@ -1457,4 +1461,89 @@ TEST(OperandEmission, NoEligibleSiteReturnsNoProgress) {
 
     EXPECT_EQ(pr.decision, PassDecision::kNoProgress);
     EXPECT_EQ(pr.disposition, ItemDisposition::kRetainCurrent);
+}
+
+// --- ProductEmission tests ---
+
+TEST(ProductEmission, FindsSiteAndEmitsChildPairs) {
+    // Build Add(Mul(a&b, a|b), Mul(a&~b, ~a&b)).
+    // This is the product identity for a*b.
+    std::vector< std::string > vars = { "x0", "x1" };
+    Options opts;
+    opts.bitwidth = 64;
+    auto ctx      = MakeCtx(opts, vars);
+
+    auto add_expr = Expr::Add(
+        Expr::Mul(
+            Expr::BitwiseAnd(Expr::Variable(0), Expr::Variable(1)),
+            Expr::BitwiseOr(Expr::Variable(0), Expr::Variable(1))
+        ),
+        Expr::Mul(
+            Expr::BitwiseAnd(Expr::Variable(0), Expr::BitwiseNot(Expr::Variable(1))),
+            Expr::BitwiseAnd(Expr::BitwiseNot(Expr::Variable(0)), Expr::Variable(1))
+        )
+    );
+
+    WorkItem item;
+    item.payload = AstPayload{
+        .expr       = std::move(add_expr),
+        .provenance = Provenance::kOriginal,
+    };
+
+    auto result = RunProductIdentityCollapse(item, ctx);
+    ASSERT_TRUE(result.has_value());
+    auto &pr = result.value();
+
+    EXPECT_EQ(pr.decision, PassDecision::kAdvance);
+    EXPECT_EQ(pr.disposition, ItemDisposition::kConsumeCurrent);
+
+    // Children are emitted in pairs (x, y) per valid assignment.
+    EXPECT_GE(pr.next.size(), 2);
+    EXPECT_EQ(pr.next.size() % 2, 0);
+
+    for (const auto &child : pr.next) {
+        EXPECT_EQ(GetStateKind(child.payload), StateKind::kSignatureState);
+        EXPECT_TRUE(child.group_id.has_value());
+    }
+
+    // Join states populated with ProductJoinState entries.
+    EXPECT_GE(ctx.join_states.size(), 1);
+    for (auto &[jid, jstate] : ctx.join_states) {
+        auto *pjs = std::get_if< ProductJoinState >(&jstate);
+        ASSERT_NE(pjs, nullptr);
+        EXPECT_NE(pjs->full_ast, nullptr);
+        EXPECT_NE(pjs->target_hash, 0);
+    }
+
+    // Competition groups have ProductCollapseCont.
+    for (auto &[gid, group] : ctx.competition_groups) {
+        ASSERT_TRUE(group.continuation.has_value());
+        EXPECT_TRUE(std::holds_alternative< ProductCollapseCont >(*group.continuation));
+    }
+}
+
+TEST(ProductEmission, NoEligibleSiteReturnsNoProgress) {
+    // Build Add(a, b) — no Mul2 children.
+    std::vector< std::string > vars = { "x0", "x1" };
+    Options opts;
+    opts.bitwidth = 64;
+    auto ctx      = MakeCtx(opts, vars);
+
+    auto add_expr = Expr::Add(Expr::Variable(0), Expr::Variable(1));
+
+    WorkItem item;
+    item.payload = AstPayload{
+        .expr       = std::move(add_expr),
+        .provenance = Provenance::kOriginal,
+    };
+
+    auto result = RunProductIdentityCollapse(item, ctx);
+    ASSERT_TRUE(result.has_value());
+    auto &pr = result.value();
+
+    EXPECT_EQ(pr.decision, PassDecision::kNoProgress);
+    EXPECT_EQ(pr.disposition, ItemDisposition::kRetainCurrent);
+    EXPECT_TRUE(pr.next.empty());
+    EXPECT_TRUE(ctx.join_states.empty());
+    EXPECT_TRUE(ctx.competition_groups.empty());
 }

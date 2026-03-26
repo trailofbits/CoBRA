@@ -408,11 +408,18 @@ namespace cobra {
                 if (check.passed) {
                     auto cand_cost = ComputeCost(*candidate).cost;
                     if (IsBetter(cand_cost, join->baseline_cost)) {
-                        auto new_cls = ClassifyStructural(*candidate);
+                        // Splice into full AST.
+                        auto rebuilt_ast = CloneExpr(*join->full_ast);
+                        bool replaced    = false;
+                        rebuilt_ast      = ReplaceByHash(
+                            std::move(rebuilt_ast), join->target_hash, candidate, replaced
+                        );
+
+                        auto new_cls = ClassifyStructural(*rebuilt_ast);
 
                         WorkItem rewritten;
                         rewritten.payload = AstPayload{
-                            .expr           = std::move(candidate),
+                            .expr           = std::move(rebuilt_ast),
                             .classification = new_cls,
                             .provenance     = Provenance::kRewritten,
                         };

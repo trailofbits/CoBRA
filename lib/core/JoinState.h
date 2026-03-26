@@ -44,6 +44,9 @@ namespace cobra {
         std::vector< std::string > vars;
         uint32_t bitwidth    = 64;
         uint32_t rewrite_gen = 0;
+        // Full AST for replacement splicing.
+        std::unique_ptr< Expr > full_ast;
+        size_t target_hash = 0;
     };
 
     using JoinState = std::variant< OperandJoinState, ProductJoinState >;

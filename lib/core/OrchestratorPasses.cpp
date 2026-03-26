@@ -7,13 +7,13 @@
 #include "SignaturePasses.h"
 #include "SimplifierInternal.h"
 #include "cobra/core/AuxVarEliminator.h"
+#include "cobra/core/BitWidth.h"
 #include "cobra/core/Classifier.h"
 #include "cobra/core/DecompositionEngine.h"
 #include "cobra/core/ExprCost.h"
 #include "cobra/core/ExprUtils.h"
 #include "cobra/core/MixedProductRewriter.h"
 #include "cobra/core/PatternMatcher.h"
-#include "cobra/core/ProductIdentityRecoverer.h"
 #include "cobra/core/SignatureEval.h"
 
 #include <functional>
@@ -62,6 +62,112 @@ namespace cobra {
                 if (result.has_value()) { return result; }
             }
             return std::nullopt;
+        }
+
+        struct ProductSite
+        {
+            const Expr *add_node;
+            size_t add_hash;
+        };
+
+        std::optional< ProductSite > FindFirstProductSite(const Expr &root) {
+            if (root.kind == Expr::Kind::kAdd && root.children.size() == 2) {
+                bool lhs_mul2 = root.children[0]->kind == Expr::Kind::kMul
+                    && root.children[0]->children.size() == 2;
+                bool rhs_mul2 = root.children[1]->kind == Expr::Kind::kMul
+                    && root.children[1]->children.size() == 2;
+                if (lhs_mul2 && rhs_mul2) {
+                    return ProductSite{
+                        .add_node = &root,
+                        .add_hash = std::hash< Expr >{}(root),
+                    };
+                }
+            }
+            for (const auto &child : root.children) {
+                auto result = FindFirstProductSite(*child);
+                if (result.has_value()) { return result; }
+            }
+            return std::nullopt;
+        }
+
+        struct ProductAssignment
+        {
+            std::vector< uint64_t > sig_x;
+            std::vector< uint64_t > sig_y;
+        };
+
+        std::vector< ProductAssignment > EnumerateValidAssignments(
+            const Expr &add_node, uint32_t num_vars, uint32_t bitwidth,
+            uint32_t max_assignments = 4
+        ) {
+            const auto sig_len  = size_t{ 1 } << num_vars;
+            const uint64_t mask = Bitmask(bitwidth);
+
+            const Expr *factors[4] = {
+                add_node.children[0]->children[0].get(),
+                add_node.children[0]->children[1].get(),
+                add_node.children[1]->children[0].get(),
+                add_node.children[1]->children[1].get(),
+            };
+
+            std::array< std::vector< uint64_t >, 4 > sigs;
+            for (int i = 0; i < 4; ++i) {
+                sigs[i] = EvaluateBooleanSignature(*factors[i], num_vars, bitwidth);
+            }
+
+            struct Roles
+            {
+                int i, o, l, r;
+            };
+
+            static constexpr Roles kAssignments[8] = {
+                { .i = 0, .o = 1, .l = 2, .r = 3 },
+                { .i = 1, .o = 0, .l = 2, .r = 3 },
+                { .i = 0, .o = 1, .l = 3, .r = 2 },
+                { .i = 1, .o = 0, .l = 3, .r = 2 },
+                { .i = 2, .o = 3, .l = 0, .r = 1 },
+                { .i = 3, .o = 2, .l = 0, .r = 1 },
+                { .i = 2, .o = 3, .l = 1, .r = 0 },
+                { .i = 3, .o = 2, .l = 1, .r = 0 },
+            };
+
+            std::vector< ProductAssignment > out;
+            std::vector< uint64_t > sig_x(sig_len);
+            std::vector< uint64_t > sig_y(sig_len);
+
+            for (const auto &a : kAssignments) {
+                const auto &sig_i = sigs[a.i];
+                const auto &sig_o = sigs[a.o];
+                const auto &sig_l = sigs[a.l];
+                const auto &sig_r = sigs[a.r];
+
+                bool ok = true;
+                for (size_t j = 0; j < sig_len; ++j) {
+                    const uint64_t mi = sig_i[j] & mask;
+                    const uint64_t mo = sig_o[j] & mask;
+                    const uint64_t ml = sig_l[j] & mask;
+                    const uint64_t mr = sig_r[j] & mask;
+                    if (((mi & ml) | (mi & mr) | (ml & mr)) != 0u) {
+                        ok = false;
+                        break;
+                    }
+                    if (mo != (mi | ml | mr)) {
+                        ok = false;
+                        break;
+                    }
+                }
+                if (!ok) { continue; }
+
+                for (size_t j = 0; j < sig_len; ++j) {
+                    sig_x[j] = (sig_i[j] | sig_l[j]) & mask;
+                    sig_y[j] = (sig_i[j] | sig_r[j]) & mask;
+                }
+
+                out.push_back(ProductAssignment{ .sig_x = sig_x, .sig_y = sig_y });
+                if (out.size() >= max_assignments) { break; }
+            }
+
+            return out;
         }
 
     } // namespace
@@ -339,12 +445,10 @@ namespace cobra {
         if (!IsAstKind(item)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
-
         const auto &ast = std::get< AstPayload >(item.payload);
-        auto collapse =
-            CollapseProductIdentities(CloneExpr(*ast.expr), ctx.original_vars, ctx.opts);
 
-        if (!collapse.changed) {
+        auto site = FindFirstProductSite(*ast.expr);
+        if (!site.has_value()) {
             return Ok(
                 PassResult{
                     .decision    = PassDecision::kNoProgress,
@@ -353,27 +457,84 @@ namespace cobra {
             );
         }
 
-        auto new_cls = ClassifyStructural(*collapse.expr);
+        const auto &vars    = ctx.original_vars;
+        const auto num_vars = static_cast< uint32_t >(vars.size());
 
-        WorkItem rewritten;
-        rewritten.payload = AstPayload{
-            .expr           = std::move(collapse.expr),
-            .classification = new_cls,
-            .provenance     = Provenance::kRewritten,
-        };
-        rewritten.features                = item.features;
-        rewritten.features.classification = new_cls;
-        rewritten.features.provenance     = Provenance::kRewritten;
-        rewritten.metadata                = item.metadata;
-        rewritten.depth                   = item.depth;
-        rewritten.rewrite_gen             = item.rewrite_gen + 1;
-        rewritten.attempted_mask          = 0;
-        rewritten.history                 = item.history;
+        auto assignments = EnumerateValidAssignments(*site->add_node, num_vars, ctx.bitwidth);
+        if (assignments.empty()) {
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kNoProgress,
+                    .disposition = ItemDisposition::kRetainCurrent,
+                }
+            );
+        }
+
+        auto baseline_cost = ComputeCost(*site->add_node).cost;
 
         PassResult result;
         result.decision    = PassDecision::kAdvance;
-        result.disposition = ItemDisposition::kReplaceCurrent;
-        result.next.push_back(std::move(rewritten));
+        result.disposition = ItemDisposition::kConsumeCurrent;
+
+        std::vector< uint32_t > indices(num_vars);
+        std::iota(indices.begin(), indices.end(), 0U);
+
+        for (const auto &assign : assignments) {
+            ProductJoinState join;
+            join.original_expr = CloneExpr(*site->add_node);
+            join.baseline_cost = baseline_cost;
+            join.vars          = vars;
+            join.bitwidth      = ctx.bitwidth;
+            join.rewrite_gen   = item.rewrite_gen;
+            join.full_ast      = CloneExpr(*ast.expr);
+            join.target_hash   = site->add_hash;
+
+            auto join_id =
+                CreateJoin(ctx.join_states, ctx.next_join_id, JoinState{ std::move(join) });
+
+            auto x_group = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+            ctx.competition_groups.at(x_group).continuation = ProductCollapseCont{
+                .join_id = join_id,
+                .role    = ProductCollapseCont::FactorRole::kX,
+            };
+
+            WorkItem x_child;
+            x_child.payload = SignatureStatePayload{
+                .ctx = {
+                    .sig              = assign.sig_x,
+                    .real_vars        = vars,
+                    .elimination      = { .reduced_sig = assign.sig_x, .real_vars = vars },
+                    .original_indices = indices,
+                    .needs_original_space_verification = false,
+                },
+            };
+            x_child.features = item.features;
+            x_child.metadata = item.metadata;
+            x_child.group_id = x_group;
+            result.next.push_back(std::move(x_child));
+
+            auto y_group = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+            ctx.competition_groups.at(y_group).continuation = ProductCollapseCont{
+                .join_id = join_id,
+                .role    = ProductCollapseCont::FactorRole::kY,
+            };
+
+            WorkItem y_child;
+            y_child.payload = SignatureStatePayload{
+                .ctx = {
+                    .sig              = assign.sig_y,
+                    .real_vars        = vars,
+                    .elimination      = { .reduced_sig = assign.sig_y, .real_vars = vars },
+                    .original_indices = indices,
+                    .needs_original_space_verification = false,
+                },
+            };
+            y_child.features = item.features;
+            y_child.metadata = item.metadata;
+            y_child.group_id = y_group;
+            result.next.push_back(std::move(y_child));
+        }
+
         return Ok(std::move(result));
     }
 
