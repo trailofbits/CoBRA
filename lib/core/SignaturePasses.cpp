@@ -31,6 +31,7 @@
 #include <numeric>
 #include <optional>
 #include <random>
+#include <ranges>
 #include <utility>
 #include <vector>
 
@@ -39,11 +40,49 @@ namespace cobra {
     namespace {
 
         // Build a mapped evaluator for the reduced variable space.
-        // When the reduced space matches the original, returns the
-        // evaluator directly. Otherwise builds a remapping lambda.
+        // Prefers item-level evaluator_override (set for residual
+        // children), falling back to the run-global ctx.evaluator.
+        // When the reduced space matches the evaluator's space,
+        // returns the evaluator directly; otherwise builds a
+        // remapping lambda.
         std::optional< Evaluator > BuildMappedEvaluator(
-            const OrchestratorContext &ctx, const SignatureSubproblemContext &sub_ctx
+            const OrchestratorContext &ctx, const SignatureSubproblemContext &sub_ctx,
+            const WorkItem &item
         ) {
+            // Use item-level evaluator override if present (residual children).
+            if (item.evaluator_override) {
+                const bool identity_map = std::ranges::equal(
+                    sub_ctx.original_indices,
+                    std::views::iota(
+                        uint32_t{ 0 }, static_cast< uint32_t >(sub_ctx.original_indices.size())
+                    )
+                );
+                if (identity_map) { return *item.evaluator_override; }
+
+                // Remap from reduced space to the override's variable space.
+                return Evaluator(
+                    [eval = *item.evaluator_override, idx_map = sub_ctx.original_indices,
+                     original_vals = std::vector< uint64_t >(
+                         sub_ctx.original_indices.empty()
+                             ? 0
+                             : *std::max_element(
+                                   sub_ctx.original_indices.begin(),
+                                   sub_ctx.original_indices.end()
+                               ) + 1,
+                         0
+                     )](const std::vector< uint64_t > &reduced_vals) mutable -> uint64_t {
+                        for (size_t i = 0; i < idx_map.size(); ++i) {
+                            original_vals[idx_map[i]] = reduced_vals[i];
+                        }
+                        uint64_t result = eval(original_vals);
+                        for (size_t i = 0; i < idx_map.size(); ++i) {
+                            original_vals[idx_map[i]] = 0;
+                        }
+                        return result;
+                    }
+                );
+            }
+            // Fall back to run-global evaluator.
             if (!ctx.evaluator) { return std::nullopt; }
             if (sub_ctx.real_vars.size() == ctx.original_vars.size()) { return *ctx.evaluator; }
             return Evaluator(
@@ -623,7 +662,7 @@ namespace cobra {
         }
 
         // Full-width check if evaluator available
-        auto mapped_eval = BuildMappedEvaluator(ctx, sub_ctx);
+        auto mapped_eval = BuildMappedEvaluator(ctx, sub_ctx, item);
         bool accepted    = true;
         if (mapped_eval) {
             auto check = FullWidthCheckEval(*mapped_eval, num_vars, **pm, ctx.bitwidth);
@@ -716,7 +755,7 @@ namespace cobra {
         }
 
         // Full-width check
-        auto mapped_eval = BuildMappedEvaluator(ctx, sub_ctx);
+        auto mapped_eval = BuildMappedEvaluator(ctx, sub_ctx, item);
         if (mapped_eval) {
             auto fw = FullWidthCheckEval(*mapped_eval, num_vars, *anf_expr, ctx.bitwidth);
             if (!fw.passed) {
@@ -819,7 +858,7 @@ namespace cobra {
         }
 
         // Full-width check — reject if evaluator proves mismatch
-        auto mapped_eval = BuildMappedEvaluator(ctx, sub_ctx);
+        auto mapped_eval = BuildMappedEvaluator(ctx, sub_ctx, item);
         if (mapped_eval) {
             auto fw = FullWidthCheckEval(*mapped_eval, num_vars, *expr, ctx.bitwidth);
             if (fw.passed) {
@@ -880,7 +919,7 @@ namespace cobra {
         const auto &coeffs        = coeff_payload.coeffs;
         const auto num_vars       = static_cast< uint32_t >(sub_ctx.real_vars.size());
 
-        auto mapped_eval = BuildMappedEvaluator(ctx, sub_ctx);
+        auto mapped_eval = BuildMappedEvaluator(ctx, sub_ctx, item);
         if (!mapped_eval) {
             return Ok(
                 PassResult{
@@ -1008,7 +1047,7 @@ namespace cobra {
                 HasFlag(item.features.classification->flags, kSfHasMultivarHighPower);
         }
 
-        auto mapped_eval = BuildMappedEvaluator(ctx, sub_ctx);
+        auto mapped_eval = BuildMappedEvaluator(ctx, sub_ctx, item);
         if (!has_multivar_flag || num_vars > 6 || !mapped_eval) {
             return Ok(
                 PassResult{

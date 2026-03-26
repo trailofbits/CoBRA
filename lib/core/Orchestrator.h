@@ -207,6 +207,7 @@ namespace cobra {
         uint64_t attempted_mask           = 0;
         uint8_t signature_recursion_depth = 0;
         std::optional< GroupId > group_id;
+        std::optional< Evaluator > evaluator_override;
         std::vector< PassId > history;
     };
 

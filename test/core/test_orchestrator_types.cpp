@@ -664,3 +664,8 @@ TEST(WorkItem, DefaultCompetitionFields) {
     EXPECT_EQ(item.signature_recursion_depth, 0);
     EXPECT_FALSE(item.group_id.has_value());
 }
+
+TEST(WorkItemTest, EvaluatorOverrideDefaultsToNullopt) {
+    WorkItem item;
+    EXPECT_FALSE(item.evaluator_override.has_value());
+}
