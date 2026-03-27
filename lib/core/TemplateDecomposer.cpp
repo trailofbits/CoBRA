@@ -44,16 +44,53 @@ namespace cobra {
 
         bool GateInvertible(Gate g) { return g == Gate::kXor || g == Gate::kAdd; }
 
-        struct ValHash
-        {
-            size_t operator()(const ProbeVals &v) const {
-                size_t h = kNProbes;
-                for (auto x : v) { h = detail::hash_combine(h, std::hash< uint64_t >{}(x)); }
-                return h;
-            }
-        };
+        // Fingerprint-indexed map: maps ProbeVals → size_t using a cheap
+        // 64-bit fingerprint as primary key, with full equality check on
+        // lookup to handle the (rare) collisions.  Avoids hashing 128 bytes
+        // per lookup that unordered_map<ProbeVals,...> would require.
+        uint64_t Fingerprint(const ProbeVals &v) {
+            // XOR-fold with position-dependent rotation to avoid
+            // commutative cancellation (a^b == b^a).
+            uint64_t h = 0;
+            for (size_t i = 0; i < kNProbes; ++i) { h ^= v[i] * (0x9E3779B97F4A7C15ULL + i); }
+            return h;
+        }
 
-        using ValMap = std::unordered_map< ProbeVals, size_t, ValHash >;
+        class ValMap
+        {
+          public:
+            struct Entry
+            {
+                size_t value;
+            };
+
+            void insert(const ProbeVals &key, size_t value) {
+                auto fp = Fingerprint(key);
+                buckets_[fp].push_back({ .key = key, .value = value });
+            }
+
+            // Returns pointer to value if found, nullptr otherwise.
+            const size_t *find(const ProbeVals &key) const {
+                auto fp = Fingerprint(key);
+                auto it = buckets_.find(fp);
+                if (it == buckets_.end()) { return nullptr; }
+                for (const auto &entry : it->second) {
+                    if (entry.key == key) { return &entry.value; }
+                }
+                return nullptr;
+            }
+
+            bool contains(const ProbeVals &key) const { return find(key) != nullptr; }
+
+          private:
+            struct Slot
+            {
+                ProbeVals key;
+                size_t value;
+            };
+
+            std::unordered_map< uint64_t, std::vector< Slot > > buckets_;
+        };
 
         struct Atom
         {
@@ -75,14 +112,14 @@ namespace cobra {
         void Push(
             std::vector< Atom > &pool, ValMap &idx, std::unique_ptr< Expr > e, ProbeVals vals
         ) {
-            auto it = idx.find(vals);
-            if (it != idx.end()) {
-                if (IsBetter(ComputeCost(*e).cost, ComputeCost(*pool[it->second].expr).cost)) {
-                    pool[it->second].expr = std::move(e);
+            const auto *slot = idx.find(vals);
+            if (slot != nullptr) {
+                if (IsBetter(ComputeCost(*e).cost, ComputeCost(*pool[*slot].expr).cost)) {
+                    pool[*slot].expr = std::move(e);
                 }
                 return;
             }
-            idx[vals] = pool.size();
+            idx.insert(vals, pool.size());
             pool.push_back({ .expr = std::move(e), .vals = vals });
         }
 
@@ -260,7 +297,7 @@ namespace cobra {
                         auto v = GateApply(pool[bi].vals, pool[ci].vals, g_in, mask);
                         if (vmap.contains(v)) { continue; }
                         if (inner.index.contains(v)) { continue; }
-                        inner.index[v] = inner.comps.size();
+                        inner.index.insert(v, inner.comps.size());
                         inner.comps.push_back({ .gate = g_in, .bi = bi, .ci = ci, .vals = v });
                     }
                 }
@@ -301,11 +338,11 @@ namespace cobra {
             for (auto g : kAllGates) {
                 if (GateInvertible(g)) {
                     for (size_t ai = 0; ai < pool.size(); ++ai) {
-                        auto res = GateResidual(target, pool[ai].vals, g, mask);
-                        auto it  = vmap.find(res);
-                        if (it == vmap.end()) { continue; }
+                        auto res         = GateResidual(target, pool[ai].vals, g, mask);
+                        const auto *slot = vmap.find(res);
+                        if (slot == nullptr) { continue; }
                         auto e = GateExpr(
-                            g, CloneExpr(*pool[ai].expr), CloneExpr(*pool[it->second].expr)
+                            g, CloneExpr(*pool[ai].expr), CloneExpr(*pool[*slot].expr)
                         );
                         TryUpdate(best, std::move(e), eval, nv, bw, baseline);
                     }
@@ -338,12 +375,11 @@ namespace cobra {
             for (auto g : kAllGates) {
                 if (!GateInvertible(g)) { continue; }
                 for (size_t ai = 0; ai < pool.size(); ++ai) {
-                    auto res = GateResidual(target, pool[ai].vals, g, mask);
-                    auto it  = vmap.find(res);
-                    if (it == vmap.end()) { continue; }
-                    auto e = GateExpr(
-                        g, CloneExpr(*pool[ai].expr), CloneExpr(*pool[it->second].expr)
-                    );
+                    auto res         = GateResidual(target, pool[ai].vals, g, mask);
+                    const auto *slot = vmap.find(res);
+                    if (slot == nullptr) { continue; }
+                    auto e =
+                        GateExpr(g, CloneExpr(*pool[ai].expr), CloneExpr(*pool[*slot].expr));
                     TryUpdate(best, std::move(e), eval, nv, bw, baseline);
                 }
                 if (best.has_value()) { return best; }
@@ -420,11 +456,10 @@ namespace cobra {
                 for (auto g_out : kAllGates) {
                     if (!GateInvertible(g_out)) { continue; }
                     for (const auto &ai : pool) {
-                        auto res = GateResidual(target, ai.vals, g_out, mask);
-                        auto it  = inner_idx.find(res);
-                        if (it == inner_idx.end()) { continue; }
-                        auto e =
-                            GateExpr(g_out, CloneExpr(*ai.expr), make_inner(inner[it->second]));
+                        auto res         = GateResidual(target, ai.vals, g_out, mask);
+                        const auto *slot = inner_idx.find(res);
+                        if (slot == nullptr) { continue; }
+                        auto e = GateExpr(g_out, CloneExpr(*ai.expr), make_inner(inner[*slot]));
                         TryUpdate(best, std::move(e), eval, nv, bw, baseline);
                     }
                     if (best.has_value()) { return best; }
@@ -433,12 +468,11 @@ namespace cobra {
                 for (auto g_out : kAllGates) {
                     if (!GateInvertible(g_out)) { continue; }
                     for (size_t ii = 0; ii < inner.size(); ++ii) {
-                        auto res = GateResidual(target, inner[ii].vals, g_out, mask);
-                        auto it  = inner_idx.find(res);
-                        if (it == inner_idx.end()) { continue; }
-                        auto e = GateExpr(
-                            g_out, make_inner(inner[ii]), make_inner(inner[it->second])
-                        );
+                        auto res         = GateResidual(target, inner[ii].vals, g_out, mask);
+                        const auto *slot = inner_idx.find(res);
+                        if (slot == nullptr) { continue; }
+                        auto e =
+                            GateExpr(g_out, make_inner(inner[ii]), make_inner(inner[*slot]));
                         TryUpdate(best, std::move(e), eval, nv, bw, baseline);
                     }
                     if (best.has_value()) { return best; }
@@ -524,16 +558,12 @@ namespace cobra {
                             auto r2 = GateResidual(r1, pool[bi].vals, g2, mask);
                             std::unique_ptr< Expr > r2_expr;
                             {
-                                auto it = vmap.find(r2);
-                                if (it != vmap.end()) {
-                                    r2_expr = CloneExpr(*pool[it->second].expr);
-                                }
+                                const auto *p = vmap.find(r2);
+                                if (p != nullptr) { r2_expr = CloneExpr(*pool[*p].expr); }
                             }
                             if (!r2_expr) {
-                                auto it = inner_idx.find(r2);
-                                if (it != inner_idx.end()) {
-                                    r2_expr = make_inner(inner[it->second]);
-                                }
+                                const auto *p = inner_idx.find(r2);
+                                if (p != nullptr) { r2_expr = make_inner(inner[*p]); }
                             }
                             if (!r2_expr) { continue; }
                             auto mid =
@@ -633,9 +663,9 @@ namespace cobra {
 
         // Direct atom match.
         {
-            auto it = vmap.find(target);
-            if (it != vmap.end()) {
-                auto e   = CloneExpr(*pool[it->second].expr);
+            const auto *slot = vmap.find(target);
+            if (slot != nullptr) {
+                auto e   = CloneExpr(*pool[*slot].expr);
                 auto chk = FullWidthCheckEval(*ctx.eval, num_vars, *e, opts.bitwidth);
                 if (chk.passed) {
                     auto info = ComputeCost(*e);
@@ -711,9 +741,9 @@ namespace cobra {
 
             // Atom match on lifted
             {
-                auto it = vmap.find(lifted);
-                if (it != vmap.end()) {
-                    auto r = check_wrap(CloneExpr(*pool[it->second].expr));
+                const auto *slot = vmap.find(lifted);
+                if (slot != nullptr) {
+                    auto r = check_wrap(CloneExpr(*pool[*slot].expr));
                     if (r.has_value()) {
                         return SolverResult< SignaturePayload >::Success(std::move(*r));
                     }
