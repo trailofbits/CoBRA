@@ -718,9 +718,14 @@ namespace cobra {
         }
         cont.outer_vars         = skel->outer_ctx.vars;
         cont.original_var_count = skel->original_var_count;
-        cont.original_vars      = ctx.original_vars;
-        cont.source_sig         = skel->source_sig;
-        if (ctx.evaluator.has_value()) { cont.original_eval = *ctx.evaluator; }
+        cont.original_vars =
+            skel->original_ctx.vars.empty() ? ctx.original_vars : skel->original_ctx.vars;
+        cont.source_sig = skel->source_sig;
+        if (skel->original_ctx.evaluator.has_value()) {
+            cont.original_eval = *skel->original_ctx.evaluator;
+        } else if (ctx.evaluator.has_value()) {
+            cont.original_eval = *ctx.evaluator;
+        }
         group.continuation = std::move(cont);
 
         auto cls = ClassifyStructural(*skel->outer_expr);

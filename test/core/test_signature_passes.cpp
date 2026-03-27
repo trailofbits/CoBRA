@@ -2316,6 +2316,82 @@ TEST(ResolveCompetition, LiftedSubstituteWithAuxElimination) {
     EXPECT_FALSE(cand->needs_original_space_verification);
 }
 
+TEST(ResolveCompetition, NestedLiftedSubstituteUsesParentLocalContext) {
+    Options opts;
+    opts.bitwidth  = 64;
+    auto root_vars = std::vector< std::string >{ "x" };
+    auto ctx       = MakeCtx(opts, root_vars);
+
+    auto parent_expr =
+        Expr::BitwiseAnd(Expr::Variable(1), Expr::Mul(Expr::Variable(0), Expr::Variable(0)));
+    auto source_sig = EvaluateBooleanSignature(*parent_expr, 2, 64);
+
+    WorkItem skel_item;
+    skel_item.payload = LiftedSkeletonPayload{
+        .outer_expr         = Expr::BitwiseAnd(Expr::Variable(1), Expr::Variable(2)),
+        .outer_ctx          = { .vars = { "x", "v0", "v1" } },
+        .original_var_count = 2,
+        .baseline_cost      = ExprCost{ .weighted_size = 5 },
+        .source_sig         = std::move(source_sig),
+        .original_ctx =
+            AstSolveContext{
+                               .vars      = { "x", "v0" },
+                               .evaluator = Evaluator::FromExpr(*parent_expr, 64),
+                               },
+    };
+    std::get< LiftedSkeletonPayload >(skel_item.payload)
+        .bindings.push_back(
+            LiftedBinding{
+                .kind             = LiftedValueKind::kArithmeticAtom,
+                .outer_var_index  = 2,
+                .subtree          = Expr::Mul(Expr::Variable(0), Expr::Variable(0)),
+                .structural_hash  = 0,
+                .original_support = { 0 },
+            }
+        );
+
+    auto prep = RunPrepareLiftedOuterSolve(skel_item, ctx);
+    ASSERT_TRUE(prep.has_value());
+    auto &prep_pr = prep.value();
+    ASSERT_EQ(prep_pr.decision, PassDecision::kAdvance);
+    ASSERT_EQ(prep_pr.next.size(), 1);
+    ASSERT_TRUE(prep_pr.next[0].group_id.has_value());
+
+    const auto group_id = *prep_pr.next[0].group_id;
+    auto group_it       = ctx.competition_groups.find(group_id);
+    ASSERT_NE(group_it, ctx.competition_groups.end());
+    ASSERT_TRUE(group_it->second.continuation.has_value());
+
+    auto *cont = std::get_if< LiftedSubstituteCont >(&*group_it->second.continuation);
+    ASSERT_NE(cont, nullptr);
+    EXPECT_EQ(cont->original_vars, (std::vector< std::string >{ "x", "v0" }));
+    EXPECT_EQ(cont->original_eval.InputArity(), 2u);
+
+    CandidateRecord rec;
+    rec.expr         = Expr::BitwiseAnd(Expr::Variable(1), Expr::Variable(2));
+    rec.cost         = ExprCost{ .weighted_size = 3 };
+    rec.verification = VerificationState::kVerified;
+    rec.real_vars    = { "x", "v0", "v1" };
+    rec.source_pass  = PassId::kSignatureCobCandidate;
+    ASSERT_TRUE(SubmitCandidate(ctx.competition_groups, group_id, std::move(rec)));
+
+    WorkItem resolved_item;
+    resolved_item.payload = CompetitionResolvedPayload{ .group_id = group_id };
+
+    auto resolved = RunResolveCompetition(resolved_item, ctx);
+    ASSERT_TRUE(resolved.has_value());
+
+    auto &pr = resolved.value();
+    EXPECT_EQ(pr.decision, PassDecision::kSolvedCandidate);
+    ASSERT_FALSE(pr.next.empty());
+
+    auto *cand = std::get_if< CandidatePayload >(&pr.next[0].payload);
+    ASSERT_NE(cand, nullptr);
+    EXPECT_EQ(cand->real_vars, (std::vector< std::string >{ "x", "v0" }));
+    EXPECT_FALSE(cand->needs_original_space_verification);
+    EXPECT_EQ(EvalExpr(*cand->expr, { 3, 5 }, 64), 1u);
+}
+
 // --- BuildSignatureState group reuse ---
 
 TEST(SignaturePass, BuildSignatureStateReusesIncomingGroup) {

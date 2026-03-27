@@ -315,6 +315,7 @@ namespace cobra {
 
         const auto &ast               = std::get< AstPayload >(item.payload);
         const auto &vars              = ActiveAstVars(item, ctx);
+        const auto &active_eval       = ActiveAstEvaluator(item, ctx);
         const auto original_var_count = static_cast< uint32_t >(vars.size());
 
         // Collect liftable arithmetic atoms under bitwise parents.
@@ -409,6 +410,11 @@ namespace cobra {
             .original_var_count = original_var_count,
             .baseline_cost      = baseline_cost,
             .source_sig         = std::move(source_sig),
+            .original_ctx =
+                AstSolveContext{
+                                .vars      = vars,
+                                .evaluator = active_eval,
+                                },
         };
         skel_item.features    = item.features;
         skel_item.metadata    = item.metadata;
@@ -432,6 +438,7 @@ namespace cobra {
 
         const auto &ast               = std::get< AstPayload >(item.payload);
         const auto &vars              = ActiveAstVars(item, ctx);
+        const auto &active_eval       = ActiveAstEvaluator(item, ctx);
         const auto original_var_count = static_cast< uint32_t >(vars.size());
 
         // Candidate discovery: traverse all non-leaf subtrees,
@@ -568,6 +575,11 @@ namespace cobra {
             .original_var_count = original_var_count,
             .baseline_cost      = baseline_cost,
             .source_sig         = std::move(source_sig),
+            .original_ctx =
+                AstSolveContext{
+                                .vars      = vars,
+                                .evaluator = active_eval,
+                                },
         };
         skel_item.features    = item.features;
         skel_item.metadata    = item.metadata;

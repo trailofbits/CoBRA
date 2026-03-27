@@ -56,6 +56,46 @@ TEST(ArithmeticAtomLifter, DetectsArithUnderBitwise) {
     EXPECT_EQ(skel->original_var_count, 2);
 }
 
+TEST(ArithmeticAtomLifter, CarriesParentLocalSolveContext) {
+    auto expr =
+        Expr::BitwiseAnd(Expr::Mul(Expr::Variable(0), Expr::Variable(0)), Expr::Variable(1));
+    auto cls = ClassifyStructural(*expr);
+
+    auto root_vars  = std::vector< std::string >{ "x" };
+    auto local_vars = std::vector< std::string >{ "x", "v0" };
+    Options opts{ .bitwidth = 64, .max_vars = 16 };
+    auto ctx = MakeLiftCtx(opts, root_vars);
+
+    auto local_eval_expr =
+        Expr::BitwiseAnd(Expr::Mul(Expr::Variable(0), Expr::Variable(0)), Expr::Variable(1));
+
+    WorkItem item;
+    item.payload = AstPayload{
+        .expr           = std::move(expr),
+        .classification = cls,
+        .provenance     = Provenance::kRewritten,
+        .solve_ctx =
+            AstSolveContext{
+                            .vars      = local_vars,
+                            .evaluator = Evaluator::FromExpr(*local_eval_expr, 64),
+                            },
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kRewritten;
+
+    auto result = RunLiftArithmeticAtoms(item, ctx);
+    ASSERT_TRUE(result.has_value());
+    auto &pr = result.value();
+    ASSERT_EQ(pr.next.size(), 1);
+
+    auto *skel = std::get_if< LiftedSkeletonPayload >(&pr.next[0].payload);
+    ASSERT_NE(skel, nullptr);
+    EXPECT_EQ(skel->original_ctx.vars, local_vars);
+    ASSERT_TRUE(skel->original_ctx.evaluator.has_value());
+    EXPECT_EQ(skel->original_ctx.evaluator->InputArity(), 2u);
+    EXPECT_EQ((*skel->original_ctx.evaluator)(std::vector< uint64_t >{ 3, 5 }), 1u);
+}
+
 // x & y -- no arithmetic atoms
 TEST(ArithmeticAtomLifter, NoAtomsReturnsNotApplicable) {
     auto expr = Expr::BitwiseAnd(Expr::Variable(0), Expr::Variable(1));

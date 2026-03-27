@@ -99,6 +99,12 @@ namespace cobra {
         const uint32_t kSimpNumVars =
             var_map.empty() ? original_num_vars : static_cast< uint32_t >(var_map.size());
 
+        if (original_eval.arity > original_num_vars || simplified_eval.arity > kSimpNumVars) {
+            auto result = CheckResult{ .passed = false, .failing_input = {} };
+            COBRA_TRACE("Verifier", "FullWidthCheck: passed={}", result.passed);
+            return result;
+        }
+
         std::vector< uint64_t > orig_inputs(original_num_vars);
         std::vector< uint64_t > simp_inputs(kSimpNumVars);
         std::vector< uint64_t > original_stack(original_eval.stack_size);
@@ -176,6 +182,14 @@ namespace cobra {
             COBRA_ZONE_N("FullWidthCheckEval.compile");
             return CompileExpr(simplified, bitwidth);
         }();
+
+        if ((eval_original.HasCompiledExpr() && eval_original.InputArity() > num_vars)
+            || simplified_eval.arity > num_vars)
+        {
+            auto result = CheckResult{ .passed = false, .failing_input = {} };
+            COBRA_TRACE("Verifier", "FullWidthCheckEval: passed={}", result.passed);
+            return result;
+        }
 
         std::vector< uint64_t > inputs(num_vars);
         std::vector< uint64_t > simplified_stack(simplified_eval.stack_size);

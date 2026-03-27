@@ -158,6 +158,10 @@ namespace cobra {
         uint32_t original_var_count = 0;
         ExprCost baseline_cost;
         std::vector< uint64_t > source_sig;
+        // Parent-local context for the expression before adding the
+        // new lifted virtuals. Nested lifting must resolve back into
+        // this space, not necessarily the global original space.
+        AstSolveContext original_ctx;
     };
 
     struct SemilinearContext

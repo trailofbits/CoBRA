@@ -163,6 +163,12 @@ namespace cobra {
                     for (uint64_t s : payload.outer_ctx.input_sig) {
                         h = detail::hash_combine(h, std::hash< uint64_t >{}(s));
                     }
+                    for (const auto &v : payload.original_ctx.vars) {
+                        h = detail::hash_combine(h, std::hash< std::string >{}(v));
+                    }
+                    h = detail::hash_combine(
+                        h, std::hash< bool >{}(payload.original_ctx.evaluator.has_value())
+                    );
                     h = detail::hash_combine(
                         h, std::hash< uint32_t >{}(payload.original_var_count)
                     );
