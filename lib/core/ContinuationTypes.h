@@ -10,6 +10,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 #include <variant>
 #include <vector>
 
@@ -30,9 +31,11 @@ namespace cobra {
         uint64_t add_coeff;
         std::vector< uint32_t > active_context_indices;
         GroupId parent_group_id;
+        std::optional< Evaluator > parent_eval;
         std::vector< std::string > parent_real_vars;
         std::vector< uint32_t > parent_original_indices;
-        uint32_t parent_num_vars = 0;
+        uint32_t parent_num_vars                      = 0;
+        bool parent_needs_original_space_verification = true;
     };
 
     struct HybridComposeCont
@@ -40,9 +43,11 @@ namespace cobra {
         uint32_t var_k;
         ExtractOp op;
         GroupId parent_group_id;
+        std::optional< Evaluator > parent_eval;
         std::vector< std::string > parent_real_vars;
         std::vector< uint32_t > parent_original_indices;
-        uint32_t parent_num_vars = 0;
+        uint32_t parent_num_vars                      = 0;
+        bool parent_needs_original_space_verification = true;
     };
 
     struct ResidualRecombineCont
@@ -54,6 +59,11 @@ namespace cobra {
         std::vector< uint32_t > residual_support;
         uint8_t core_degree = 0;
         std::optional< GroupId > parent_group_id;
+        // Target-local context for verification. When target_vars is
+        // non-empty, recombination verifies against target_eval in
+        // the target variable space instead of ctx.original_vars.
+        Evaluator target_eval;
+        std::vector< std::string > target_vars;
     };
 
     struct OperandRewriteCont
@@ -70,9 +80,34 @@ namespace cobra {
         FactorRole role;
     };
 
+    enum class LiftedValueKind : uint8_t {
+        kArithmeticAtom,
+        kRepeatedSubexpression,
+    };
+
+    struct LiftedBinding
+    {
+        LiftedValueKind kind;
+        uint32_t outer_var_index;
+        std::unique_ptr< Expr > subtree;
+        uint64_t structural_hash = 0;
+        std::vector< uint32_t > original_support;
+    };
+
+    struct LiftedSubstituteCont
+    {
+        std::vector< LiftedBinding > bindings;
+        std::vector< std::string > outer_vars;
+        std::vector< uint32_t > outer_original_indices;
+        uint32_t original_var_count = 0;
+        Evaluator original_eval;
+        std::vector< std::string > original_vars;
+        std::vector< uint64_t > source_sig;
+    };
+
     using ContinuationData = std::variant<
         std::monostate, BitwiseComposeCont, HybridComposeCont, ResidualRecombineCont,
-        OperandRewriteCont, ProductCollapseCont >;
+        OperandRewriteCont, ProductCollapseCont, LiftedSubstituteCont >;
 
     // Projects a parent's baseline cost for a child work item
     // given the continuation that will recombine the child's result.
