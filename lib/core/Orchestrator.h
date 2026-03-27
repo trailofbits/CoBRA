@@ -240,6 +240,7 @@ namespace cobra {
         uint8_t signature_recursion_depth = 0;
         std::optional< GroupId > group_id;
         std::optional< Evaluator > evaluator_override;
+        uint32_t evaluator_override_arity = 0;
         std::vector< PassId > history;
     };
 

@@ -52,28 +52,24 @@ namespace cobra {
             const OrchestratorContext &ctx, const SignatureSubproblemContext &sub_ctx,
             const WorkItem &item
         ) {
-            // Use item-level evaluator override if present (residual children).
+            // Use item-level evaluator override if present (residual
+            // or lifted-outer children).  The override's arity may
+            // exceed the reduced var count when aux-var elimination
+            // removed variables, so we must remap through a buffer
+            // sized to the full override arity.
             if (item.evaluator_override) {
-                const bool identity_map = std::ranges::equal(
-                    sub_ctx.original_indices,
-                    std::views::iota(
-                        uint32_t{ 0 }, static_cast< uint32_t >(sub_ctx.original_indices.size())
-                    )
-                );
+                const auto arity        = item.evaluator_override_arity;
+                const bool identity_map = sub_ctx.original_indices.size() == arity
+                    && std::ranges::equal(sub_ctx.original_indices,
+                                          std::views::iota(uint32_t{ 0 }, arity));
                 if (identity_map) { return *item.evaluator_override; }
 
                 // Remap from reduced space to the override's variable space.
                 return Evaluator(
                     [eval = *item.evaluator_override, idx_map = sub_ctx.original_indices,
-                     original_vals = std::vector< uint64_t >(
-                         sub_ctx.original_indices.empty()
-                             ? 0
-                             : *std::max_element(
-                                   sub_ctx.original_indices.begin(),
-                                   sub_ctx.original_indices.end()
-                               ) + 1,
-                         0
-                     )](const std::vector< uint64_t > &reduced_vals) mutable -> uint64_t {
+                     original_vals = std::vector< uint64_t >(arity, 0)](
+                        const std::vector< uint64_t > &reduced_vals
+                    ) mutable -> uint64_t {
                         for (size_t i = 0; i < idx_map.size(); ++i) {
                             original_vals[idx_map[i]] = reduced_vals[i];
                         }
@@ -949,9 +945,10 @@ namespace cobra {
         child.depth                     = item.depth;
         child.rewrite_gen               = item.rewrite_gen;
         child.attempted_mask            = 0;
-        child.signature_recursion_depth = item.signature_recursion_depth;
+        child.signature_recursion_depth = item.signature_recursion_depth + 1;
         child.group_id                  = item.group_id;
         child.evaluator_override        = item.evaluator_override;
+        child.evaluator_override_arity  = item.evaluator_override_arity;
         child.history                   = item.history;
 
         PassResult result;
@@ -1235,13 +1232,14 @@ namespace cobra {
                                        .vars = sub_ctx.real_vars,
                                        },
         };
-        residual_item.features       = item.features;
-        residual_item.metadata       = item.metadata;
-        residual_item.depth          = item.depth;
-        residual_item.rewrite_gen    = item.rewrite_gen;
-        residual_item.attempted_mask = 0;
-        residual_item.history        = item.history;
-        residual_item.group_id       = item.group_id;
+        residual_item.features                  = item.features;
+        residual_item.metadata                  = item.metadata;
+        residual_item.depth                     = item.depth;
+        residual_item.rewrite_gen               = item.rewrite_gen;
+        residual_item.attempted_mask            = 0;
+        residual_item.signature_recursion_depth = item.signature_recursion_depth;
+        residual_item.history                   = item.history;
+        residual_item.group_id                  = item.group_id;
 
         PassResult result;
         result.decision    = PassDecision::kAdvance;
@@ -1477,6 +1475,7 @@ namespace cobra {
             child.signature_recursion_depth = item.signature_recursion_depth + 1;
             child.group_id                  = child_group_id;
             child.evaluator_override        = item.evaluator_override;
+            child.evaluator_override_arity  = item.evaluator_override_arity;
             child.history                   = item.history;
 
             result.next.push_back(std::move(child));
@@ -1590,6 +1589,7 @@ namespace cobra {
             child.signature_recursion_depth = item.signature_recursion_depth + 1;
             child.group_id                  = child_group_id;
             child.evaluator_override        = item.evaluator_override;
+            child.evaluator_override_arity  = item.evaluator_override_arity;
             child.history                   = item.history;
 
             result.next.push_back(std::move(child));

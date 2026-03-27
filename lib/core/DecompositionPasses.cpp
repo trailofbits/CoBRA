@@ -350,13 +350,14 @@ namespace cobra {
                                        .vars = active_vars,
                                        },
         };
-        residual_item.features       = item.features;
-        residual_item.metadata       = item.metadata;
-        residual_item.depth          = item.depth;
-        residual_item.rewrite_gen    = item.rewrite_gen;
-        residual_item.attempted_mask = item.attempted_mask;
-        residual_item.history        = item.history;
-        residual_item.group_id       = item.group_id;
+        residual_item.features                  = item.features;
+        residual_item.metadata                  = item.metadata;
+        residual_item.depth                     = item.depth;
+        residual_item.rewrite_gen               = item.rewrite_gen;
+        residual_item.attempted_mask            = item.attempted_mask;
+        residual_item.signature_recursion_depth = item.signature_recursion_depth;
+        residual_item.history                   = item.history;
+        residual_item.group_id                  = item.group_id;
 
         PassResult result;
         result.decision    = PassDecision::kAdvance;
@@ -442,13 +443,14 @@ namespace cobra {
                                        .remap_support = core.target.remap_support,
                                        },
         };
-        residual_item.features       = item.features;
-        residual_item.metadata       = item.metadata;
-        residual_item.depth          = item.depth;
-        residual_item.rewrite_gen    = item.rewrite_gen;
-        residual_item.attempted_mask = item.attempted_mask;
-        residual_item.history        = item.history;
-        residual_item.group_id       = item.group_id;
+        residual_item.features                  = item.features;
+        residual_item.metadata                  = item.metadata;
+        residual_item.depth                     = item.depth;
+        residual_item.rewrite_gen               = item.rewrite_gen;
+        residual_item.attempted_mask            = item.attempted_mask;
+        residual_item.signature_recursion_depth = item.signature_recursion_depth;
+        residual_item.history                   = item.history;
+        residual_item.group_id                  = item.group_id;
 
         PassResult result;
         result.decision    = PassDecision::kAdvance;
@@ -760,10 +762,12 @@ namespace cobra {
                 .needs_original_space_verification = true,
             },
         };
-        child.features           = item.features;
-        child.metadata           = item.metadata;
-        child.group_id           = group_id;
-        child.evaluator_override = residual.remainder_eval;
+        child.features                  = item.features;
+        child.metadata                  = item.metadata;
+        child.group_id                  = group_id;
+        child.signature_recursion_depth = item.signature_recursion_depth;
+        child.evaluator_override        = residual.remainder_eval;
+        child.evaluator_override_arity  = static_cast< uint32_t >(target_vars.size());
 
         PassResult result;
         result.decision    = PassDecision::kAdvance;

@@ -7,6 +7,7 @@
 #include "cobra/core/SignatureEval.h"
 #include "cobra/core/Simplifier.h"
 #include "cobra/core/SimplifyOutcome.h"
+#include "cobra/core/Trace.h"
 
 #include <algorithm>
 #include <unordered_map>
@@ -950,6 +951,11 @@ namespace cobra {
             // Compute pre-attempt fingerprint, record attempt
             auto fp              = ComputeFingerprint(item, context.bitwidth);
             item.attempted_mask |= Bit(*pass_id);
+            COBRA_TRACE(
+                "Orchestrator", "pass={} kind={} depth={} mask={:#x}",
+                static_cast< int >(*pass_id), static_cast< int >(GetStateKind(item.payload)),
+                item.depth, item.attempted_mask
+            );
 
             // Run the pass
             auto it = registry_map.find(*pass_id);
@@ -964,6 +970,11 @@ namespace cobra {
             cache.Record(fp, *pass_id);
 
             auto &pr = result.value();
+            COBRA_TRACE(
+                "Orchestrator", "  → decision={} children={} disp={}",
+                static_cast< int >(pr.decision), pr.next.size(),
+                static_cast< int >(pr.disposition)
+            );
             if (pr.decision == PassDecision::kAdvance
                 || pr.decision == PassDecision::kSolvedCandidate)
             {

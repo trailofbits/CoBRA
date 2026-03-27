@@ -378,6 +378,8 @@ namespace cobra {
         if (auto *a = std::get_if< AstPayload >(&item.payload)) {
             if (a->solve_ctx.has_value() && a->solve_ctx->evaluator.has_value()) {
                 sig_item.evaluator_override = *a->solve_ctx->evaluator;
+                sig_item.evaluator_override_arity =
+                    static_cast< uint32_t >(a->solve_ctx->vars.size());
             }
         }
 

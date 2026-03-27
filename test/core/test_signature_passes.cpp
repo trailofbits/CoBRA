@@ -243,9 +243,10 @@ TEST(SignaturePass, PrepareCoeffModelEmitsChild) {
     opts.bitwidth = 64;
     auto ctx      = MakeCtx(opts, vars);
 
-    auto item   = MakeSignatureItem(sig, vars, ctx);
-    auto gid    = *item.group_id;
-    auto result = RunPrepareCoeffModel(item, ctx);
+    auto item                      = MakeSignatureItem(sig, vars, ctx);
+    item.signature_recursion_depth = 1;
+    auto gid                       = *item.group_id;
+    auto result                    = RunPrepareCoeffModel(item, ctx);
     ASSERT_TRUE(result.has_value());
     auto &pr = result.value();
 
@@ -257,6 +258,7 @@ TEST(SignaturePass, PrepareCoeffModelEmitsChild) {
     EXPECT_EQ(GetStateKind(child.payload), StateKind::kSignatureCoeffState);
     ASSERT_TRUE(child.group_id.has_value());
     EXPECT_EQ(*child.group_id, gid);
+    EXPECT_EQ(child.signature_recursion_depth, item.signature_recursion_depth + 1);
 
     // AcquireHandle should have incremented to 2
     auto &group = ctx.competition_groups.at(gid);
@@ -569,6 +571,29 @@ TEST(SingletonPolyRecovery, EmitsResidualForNonzeroTwoVar) {
         ASSERT_TRUE(group.best.has_value());
         EXPECT_EQ(group.best->source_pass, PassId::kSignatureSingletonPolyRecovery);
     }
+}
+
+TEST(SingletonPolyRecovery, PreservesSignatureRecursionDepthOnResidualEmission) {
+    std::vector< uint64_t > sig     = { 0, 0, 0, 1 };
+    std::vector< std::string > vars = { "x0", "x1" };
+    std::vector< uint64_t > coeffs  = { 0, 0, 0, 1 };
+    Options opts;
+    opts.bitwidth  = 64;
+    opts.evaluator = [](const std::vector< uint64_t > &v) -> uint64_t { return v[0] & v[1]; };
+    auto ctx       = MakeCtx(opts, vars);
+
+    auto group_id                  = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+    auto item                      = MakeCoeffItem(sig, vars, coeffs, group_id, ctx);
+    item.signature_recursion_depth = 1;
+
+    auto result = RunSignatureSingletonPolyRecovery(item, ctx);
+    ASSERT_TRUE(result.has_value());
+    auto &pr = result.value();
+
+    EXPECT_EQ(pr.decision, PassDecision::kAdvance);
+    ASSERT_EQ(pr.next.size(), 1);
+    EXPECT_EQ(GetStateKind(pr.next[0].payload), StateKind::kRemainderState);
+    EXPECT_EQ(pr.next[0].signature_recursion_depth, item.signature_recursion_depth);
 }
 
 TEST(SingletonPolyRecovery, RecursiveInvocationFallsBackToInline) {
@@ -1685,6 +1710,7 @@ TEST(ResidualEmission, EmitsSignatureStateChildWithContinuation) {
         .remainder_support = BuildVarSupport(vars, elim.real_vars),
         .is_boolean_null   = true,
     };
+    item.signature_recursion_depth = 1;
 
     auto result = RunResidualSupported(item, ctx);
     ASSERT_TRUE(result.has_value());
@@ -1702,6 +1728,8 @@ TEST(ResidualEmission, EmitsSignatureStateChildWithContinuation) {
     ASSERT_TRUE(pr.next[0].group_id.has_value());
     // 6. Child has evaluator_override
     EXPECT_TRUE(pr.next[0].evaluator_override.has_value());
+    // 7. Child preserves signature recursion depth across the residual handoff
+    EXPECT_EQ(pr.next[0].signature_recursion_depth, item.signature_recursion_depth);
     // 7. Exactly one competition group created
     EXPECT_EQ(ctx.competition_groups.size(), 1);
     // 8. The group's continuation is RemainderRecombineCont
