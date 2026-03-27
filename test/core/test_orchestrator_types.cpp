@@ -51,7 +51,10 @@ TEST(WorkItem, DefaultAttemptedMaskIsZero) {
     EXPECT_EQ(item.attempted_mask, 0);
 }
 
-TEST(Fingerprint, AttemptedMaskDistinct) {
+TEST(Fingerprint, AttemptedMaskIgnored) {
+    // attempted_mask is deliberately excluded from the fingerprint
+    // so the pass-attempt cache can deduplicate across items with
+    // identical payloads but different attempt histories.
     WorkItem a, b;
     a.payload        = AstPayload{ .expr = Expr::Constant(1) };
     a.attempted_mask = 0;
@@ -59,7 +62,7 @@ TEST(Fingerprint, AttemptedMaskDistinct) {
     b.attempted_mask = (1ULL << static_cast< uint8_t >(PassId::kExtractProductCore));
     auto fa          = ComputeFingerprint(a, 64);
     auto fb          = ComputeFingerprint(b, 64);
-    EXPECT_NE(fa, fb);
+    EXPECT_EQ(fa, fb);
 }
 
 // --- ItemMetadata default state tests ---

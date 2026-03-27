@@ -608,10 +608,11 @@ TEST(SingletonPolyRecovery, RecursiveInvocationFallsBackToInline) {
     opts.evaluator = [](const std::vector< uint64_t > &v) -> uint64_t { return v[0]; };
     auto ctx       = MakeCtx(opts, vars);
 
-    auto group_id           = CreateGroup(ctx.competition_groups, ctx.next_group_id);
-    auto item               = MakeCoeffItem(sig, vars, coeffs, group_id, ctx);
+    auto group_id                 = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+    auto item                     = MakeCoeffItem(sig, vars, coeffs, group_id, ctx);
     // Simulate a recursive invocation from a residual solver.
-    item.evaluator_override = opts.evaluator;
+    item.evaluator_override       = opts.evaluator;
+    item.evaluator_override_arity = static_cast< uint32_t >(vars.size());
 
     auto result = RunSignatureSingletonPolyRecovery(item, ctx);
     ASSERT_TRUE(result.has_value());
