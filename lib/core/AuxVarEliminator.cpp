@@ -1,4 +1,5 @@
 #include "cobra/core/AuxVarEliminator.h"
+#include "cobra/core/Profile.h"
 #include "cobra/core/Trace.h"
 #include <algorithm>
 #include <bit>
@@ -172,6 +173,7 @@ namespace cobra {
     EliminationResult EliminateAuxVars(
         const std::vector< uint64_t > &sig, const std::vector< std::string > &vars
     ) {
+        COBRA_ZONE_N("EliminateAuxVars");
         const auto kNumVars = static_cast< uint32_t >(vars.size());
         COBRA_TRACE("AuxVarEliminator", "EliminateAuxVars: num_vars={}", kNumVars);
         COBRA_TRACE_SIG("AuxVarEliminator", "input sig", sig);

@@ -1,5 +1,6 @@
 #include "cobra/core/BitwiseDecomposer.h"
 #include "cobra/core/Expr.h"
+#include "cobra/core/Profile.h"
 #include "cobra/core/SignatureSimplifier.h"
 #include <algorithm>
 #include <cstddef>
@@ -131,6 +132,7 @@ namespace cobra {
 
     std::vector< BitwiseSplitCandidate >
     EnumerateBitwiseCandidates(const std::vector< uint64_t > &sig, uint32_t num_vars) {
+        COBRA_ZONE_N("EnumerateBitwiseCandidates");
         const size_t kHalf = sig.size() / 2;
         std::vector< BitwiseSplitCandidate > candidates;
         std::vector< uint64_t > cof0;

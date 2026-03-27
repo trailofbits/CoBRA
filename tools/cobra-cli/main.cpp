@@ -5,6 +5,7 @@
 #include "cobra/core/Classifier.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/MaskedAtomReconstructor.h"
+#include "cobra/core/Profile.h"
 #include "cobra/core/SelfCheck.h"
 #include "cobra/core/SemilinearIR.h"
 #include "cobra/core/SemilinearNormalizer.h"

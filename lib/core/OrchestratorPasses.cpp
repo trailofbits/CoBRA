@@ -15,6 +15,7 @@
 #include "cobra/core/ExprUtils.h"
 #include "cobra/core/MixedProductRewriter.h"
 #include "cobra/core/PatternMatcher.h"
+#include "cobra/core/Profile.h"
 #include "cobra/core/SignatureEval.h"
 
 #include <functional>
@@ -188,6 +189,7 @@ namespace cobra {
     // ---------------------------------------------------------------
 
     Result< PassResult > RunLowerNotOverArith(const WorkItem &item, OrchestratorContext &ctx) {
+        COBRA_ZONE_N("RunLowerNotOverArith");
         if (!IsAstKind(item)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
@@ -239,6 +241,7 @@ namespace cobra {
     }
 
     Result< PassResult > RunClassifyAst(const WorkItem &item, OrchestratorContext &ctx) {
+        COBRA_ZONE_N("RunClassifyAst");
         if (!IsAstKind(item)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
@@ -273,6 +276,7 @@ namespace cobra {
 
     Result< PassResult >
     RunBuildSignatureState(const WorkItem &item, OrchestratorContext &ctx) {
+        COBRA_ZONE_N("RunBuildSignatureState");
         if (!IsAstKind(item)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
@@ -689,6 +693,7 @@ namespace cobra {
 
     Result< PassResult >
     RunPrepareLiftedOuterSolve(const WorkItem &item, OrchestratorContext &ctx) {
+        COBRA_ZONE_N("RunPrepareLiftedOuterSolve");
         auto *skel = std::get_if< LiftedSkeletonPayload >(&item.payload);
         if (skel == nullptr) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });

@@ -3,6 +3,7 @@
 #include "cobra/core/Expr.h"
 #include "cobra/core/ExprCost.h"
 #include "cobra/core/PassContract.h"
+#include "cobra/core/Profile.h"
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/Simplifier.h"
 #include <fstream>
@@ -116,6 +117,7 @@ namespace {
 
             auto result =
                 Simplify(parse_result.value().sig, parse_result.value().vars, input_expr, opts);
+            COBRA_FRAME();
 
             if (!result.has_value()) {
                 ADD_FAILURE() << "Unexpected error on line " << line_num << ": "

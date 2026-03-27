@@ -1,6 +1,7 @@
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/BitWidth.h"
 #include "cobra/core/Expr.h"
+#include "cobra/core/Profile.h"
 #include "cobra/core/SignatureEval.h"
 #include "cobra/core/Trace.h"
 
@@ -129,6 +130,7 @@ namespace cobra {
         const std::function< uint64_t(const std::vector< uint64_t > &) > &eval_original,
         uint32_t num_vars, const Expr &simplified, uint32_t bitwidth, uint32_t num_samples
     ) {
+        COBRA_ZONE_N("FullWidthCheckEval");
         COBRA_TRACE(
             "Verifier", "FullWidthCheckEval: vars={} bitwidth={} samples={}", num_vars,
             bitwidth, num_samples
@@ -189,6 +191,7 @@ namespace cobra {
 
     uint64_t
     EvalExpr(const Expr &expr, const std::vector< uint64_t > &var_values, uint32_t bitwidth) {
+        COBRA_ZONE_N("EvalExpr");
         const uint64_t kMask = Bitmask(bitwidth);
         switch (expr.kind) {
             case Expr::Kind::kConstant:
@@ -233,6 +236,7 @@ namespace cobra {
         const std::vector< uint64_t > &original_sig, const Expr &simplified, uint32_t num_vars,
         uint32_t bitwidth
     ) {
+        COBRA_ZONE_N("SignatureCheck");
         COBRA_TRACE("Verifier", "SignatureCheck: vars={} bitwidth={}", num_vars, bitwidth);
         // Bottom-up evaluation: walk the tree once to get all outputs.
         auto computed        = EvaluateBooleanSignature(simplified, num_vars, bitwidth);

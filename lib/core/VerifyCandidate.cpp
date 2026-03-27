@@ -1,9 +1,11 @@
 #include "OrchestratorPasses.h"
 #include "SimplifierInternal.h"
+#include "cobra/core/Profile.h"
 
 namespace cobra {
 
     Result< PassResult > RunVerifyCandidate(const WorkItem &item, OrchestratorContext &ctx) {
+        COBRA_ZONE_N("RunVerifyCandidate");
         if (!std::holds_alternative< CandidatePayload >(item.payload)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }

@@ -21,6 +21,7 @@
 #include "cobra/core/PatternMatcher.h"
 #include "cobra/core/PolyExprBuilder.h"
 #include "cobra/core/PolyNormalizer.h"
+#include "cobra/core/Profile.h"
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/SignatureEval.h"
 #include "cobra/core/SignatureSimplifier.h"

@@ -8,6 +8,7 @@
 #include "cobra/core/ExprUtils.h"
 #include "cobra/core/GhostResidualSolver.h"
 #include "cobra/core/MultivarPolyRecovery.h"
+#include "cobra/core/Profile.h"
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/SignatureEval.h"
 #include "cobra/core/SignatureSimplifier.h"
@@ -294,6 +295,7 @@ namespace cobra {
 
     Result< PassResult >
     RunPrepareDirectRemainder(const WorkItem &item, OrchestratorContext &ctx) {
+        COBRA_ZONE_N("RunPrepareDirectRemainder");
         if (!IsAstKind(item)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
@@ -368,6 +370,7 @@ namespace cobra {
 
     Result< PassResult >
     RunPrepareRemainderFromCore(const WorkItem &item, OrchestratorContext &ctx) {
+        COBRA_ZONE_N("RunPrepareRemainderFromCore");
         if (!std::holds_alternative< CoreCandidatePayload >(item.payload)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
@@ -464,6 +467,7 @@ namespace cobra {
     // ---------------------------------------------------------------
 
     Result< PassResult > RunResidualGhost(const WorkItem &item, OrchestratorContext &ctx) {
+        COBRA_ZONE_N("RunResidualGhost");
         if (!IsResidualKind(item)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
@@ -642,6 +646,7 @@ namespace cobra {
 
     Result< PassResult >
     RunResidualPolyRecovery(const WorkItem &item, OrchestratorContext &ctx) {
+        COBRA_ZONE_N("RunResidualPolyRecovery");
         if (!IsResidualKind(item)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
@@ -693,6 +698,7 @@ namespace cobra {
     }
 
     Result< PassResult > RunResidualSupported(const WorkItem &item, OrchestratorContext &ctx) {
+        COBRA_ZONE_N("RunResidualSupported");
         if (!IsResidualKind(item)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }

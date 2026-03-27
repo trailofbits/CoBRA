@@ -1,6 +1,7 @@
 #include "cobra/core/PatternMatcher.h"
 #include "cobra/core/BitWidth.h"
 #include "cobra/core/Expr.h"
+#include "cobra/core/Profile.h"
 #include "cobra/core/Trace.h"
 #include <algorithm>
 #include <cstddef>
@@ -1064,6 +1065,7 @@ namespace cobra {
 
     std::optional< std::unique_ptr< Expr > >
     MatchPattern(const std::vector< uint64_t > &sig, uint32_t num_vars, uint32_t bitwidth) {
+        COBRA_ZONE_N("MatchPattern");
         COBRA_TRACE("PatternMatcher", "MatchPattern: vars={} bitwidth={}", num_vars, bitwidth);
 
         // Constant: all entries equal (works for any variable count)

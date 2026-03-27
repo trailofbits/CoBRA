@@ -3,6 +3,7 @@
 #include "cobra/core/Classifier.h"
 #include "cobra/core/ExprCost.h"
 #include "cobra/core/ExprUtils.h"
+#include "cobra/core/Profile.h"
 #include "cobra/core/SignatureEval.h"
 
 #include <algorithm>
@@ -307,6 +308,7 @@ namespace cobra {
 
     Result< PassResult >
     RunLiftArithmeticAtoms(const WorkItem &item, OrchestratorContext &ctx) {
+        COBRA_ZONE_N("RunLiftArithmeticAtoms");
         if (!std::holds_alternative< AstPayload >(item.payload)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
@@ -423,6 +425,7 @@ namespace cobra {
 
     Result< PassResult >
     RunLiftRepeatedSubexpressions(const WorkItem &item, OrchestratorContext &ctx) {
+        COBRA_ZONE_N("RunLiftRepeatedSubexpressions");
         if (!std::holds_alternative< AstPayload >(item.payload)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }

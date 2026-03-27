@@ -5,6 +5,7 @@
 #include "cobra/core/PassContract.h"
 #include "cobra/core/PolyExprBuilder.h"
 #include "cobra/core/PolyIR.h"
+#include "cobra/core/Profile.h"
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/Simplifier.h"
 #include <array>
@@ -183,6 +184,7 @@ namespace cobra {
         const Evaluator &eval, const std::vector< uint32_t > &support_vars,
         uint32_t total_num_vars, uint32_t bitwidth, uint8_t max_degree_cap, uint8_t min_degree
     ) {
+        COBRA_ZONE_N("RecoverAndVerifyPoly");
         if (max_degree_cap < min_degree) {
             ReasonDetail reason{
                 .top = { .code    = { ReasonCategory::kGuardFailed, ReasonDomain::kMultivarPoly,

@@ -1,5 +1,6 @@
 #include "cobra/core/HybridDecomposer.h"
 #include "cobra/core/Expr.h"
+#include "cobra/core/Profile.h"
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>

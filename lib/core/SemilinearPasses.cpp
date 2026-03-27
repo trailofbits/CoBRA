@@ -6,6 +6,7 @@
 #include "cobra/core/ExprCost.h"
 #include "cobra/core/ExprUtils.h"
 #include "cobra/core/MaskedAtomReconstructor.h"
+#include "cobra/core/Profile.h"
 #include "cobra/core/SelfCheck.h"
 #include "cobra/core/SemilinearNormalizer.h"
 #include "cobra/core/SemilinearSignature.h"
@@ -98,6 +99,7 @@ namespace cobra {
 
     Result< PassResult >
     RunSemilinearNormalize(const WorkItem &item, OrchestratorContext &ctx) {
+        COBRA_ZONE_N("RunSemilinearNormalize");
         if (!std::holds_alternative< AstPayload >(item.payload)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
@@ -193,6 +195,7 @@ namespace cobra {
     }
 
     Result< PassResult > RunSemilinearCheck(const WorkItem &item, OrchestratorContext &ctx) {
+        COBRA_ZONE_N("RunSemilinearCheck");
         if (!std::holds_alternative< NormalizedSemilinearPayload >(item.payload)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
@@ -249,6 +252,7 @@ namespace cobra {
     }
 
     Result< PassResult > RunSemilinearRewrite(const WorkItem &item, OrchestratorContext &ctx) {
+        COBRA_ZONE_N("RunSemilinearRewrite");
         if (!std::holds_alternative< CheckedSemilinearPayload >(item.payload)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
@@ -312,6 +316,7 @@ namespace cobra {
 
     Result< PassResult >
     RunSemilinearReconstruct(const WorkItem &item, OrchestratorContext &ctx) {
+        COBRA_ZONE_N("RunSemilinearReconstruct");
         if (!std::holds_alternative< RewrittenSemilinearPayload >(item.payload)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }

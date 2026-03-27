@@ -6,6 +6,7 @@
 #include "cobra/core/MultivarPolyRecovery.h"
 #include "cobra/core/PassContract.h"
 #include "cobra/core/PolyExprBuilder.h"
+#include "cobra/core/Profile.h"
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/SignatureEval.h"
 #include "cobra/core/TemplateDecomposer.h"
@@ -94,6 +95,7 @@ namespace cobra {
     }
 
     SolverResult< CoreCandidate > ExtractProductCore(const DecompositionContext &ctx) {
+        COBRA_ZONE_N("ExtractProductCore");
         if (ctx.current_expr == nullptr) {
             return SolverResult< CoreCandidate >::Inapplicable(
                 ReasonDetail{
@@ -175,6 +177,7 @@ namespace cobra {
 
     SolverResult< CoreCandidate >
     ExtractPolyCore(const DecompositionContext &ctx, uint8_t degree) {
+        COBRA_ZONE_N("ExtractPolyCore");
         if (!ctx.opts.evaluator) {
             return SolverResult< CoreCandidate >::Inapplicable(
                 ReasonDetail{
@@ -238,6 +241,7 @@ namespace cobra {
     }
 
     SolverResult< CoreCandidate > ExtractTemplateCore(const DecompositionContext &ctx) {
+        COBRA_ZONE_N("ExtractTemplateCore");
         if (!ctx.opts.evaluator) {
             return SolverResult< CoreCandidate >::Inapplicable(
                 ReasonDetail{

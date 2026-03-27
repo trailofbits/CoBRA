@@ -4,6 +4,7 @@
 #include "cobra/core/AuxVarEliminator.h"
 #include "cobra/core/ExprUtils.h"
 #include "cobra/core/PatternMatcher.h"
+#include "cobra/core/Profile.h"
 #include "cobra/core/SignatureEval.h"
 #include "cobra/core/Simplifier.h"
 #include "cobra/core/SimplifyOutcome.h"
@@ -793,6 +794,8 @@ namespace cobra {
         const std::vector< uint64_t > &sig, const std::vector< std::string > &vars,
         const Expr *input_expr, const Options &opts
     ) {
+        COBRA_ZONE_N("Simplify");
+        COBRA_ZONE_VALUE(static_cast< int64_t >(vars.size()));
         OrchestratorPolicy policy;
         OrchestratorContext context{
             .opts          = opts,
@@ -961,7 +964,11 @@ namespace cobra {
             auto it = registry_map.find(*pass_id);
             if (it == registry_map.end()) { continue; }
             telemetry.passes_attempted.push_back(*pass_id);
-            auto result = it->second->run(item, context);
+            auto result = [&]() {
+                COBRA_ZONE_N("RunPass");
+                COBRA_ZONE_VALUE(static_cast< int64_t >(*pass_id));
+                return it->second->run(item, context);
+            }();
             if (*pass_id == PassId::kVerifyCandidate) {
                 ++verifications;
                 telemetry.candidates_verified = verifications;

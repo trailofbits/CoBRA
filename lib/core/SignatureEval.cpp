@@ -1,6 +1,7 @@
 #include "cobra/core/SignatureEval.h"
 #include "cobra/core/BitWidth.h"
 #include "cobra/core/Expr.h"
+#include "cobra/core/Profile.h"
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -91,6 +92,7 @@ namespace cobra {
 
     std::vector< uint64_t >
     EvaluateBooleanSignature(const Expr &expr, uint32_t num_vars, uint32_t bitwidth) {
+        COBRA_ZONE_N("EvaluateBooleanSignature");
         const size_t kLen = size_t{ 1 } << num_vars;
         return EvalSigRecursive(expr, kLen, bitwidth);
     }
