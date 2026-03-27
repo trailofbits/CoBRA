@@ -76,7 +76,11 @@ target_include_directories(test_residual_solver_passes PRIVATE ${PROJECT_SOURCE_
 
 cobra_add_test(test_orchestrator_telemetry core/test_orchestrator_telemetry.cpp)
 
+cobra_add_test(test_lifting_passes core/test_lifting_passes.cpp)
+target_include_directories(test_lifting_passes PRIVATE ${PROJECT_SOURCE_DIR}/lib/core)
+
 cobra_add_test(test_semilinear_integration core/test_semilinear_integration.cpp)
+target_include_directories(test_semilinear_integration PRIVATE ${PROJECT_SOURCE_DIR}/lib/core)
 if(Z3_FOUND)
     target_link_libraries(test_semilinear_integration PRIVATE cobra-verify)
     target_compile_definitions(test_semilinear_integration PRIVATE COBRA_HAS_Z3=1)

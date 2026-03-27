@@ -53,6 +53,7 @@ target_sources(cobra-core PRIVATE
     SemilinearPasses.cpp
     SignaturePasses.cpp
     VerifyCandidate.cpp
+    LiftingPasses.cpp
 )
 
 target_include_directories(cobra-core PUBLIC
