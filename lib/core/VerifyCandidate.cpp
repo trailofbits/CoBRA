@@ -47,6 +47,7 @@ namespace cobra {
             verified_item.rewrite_gen           = item.rewrite_gen;
             verified_item.attempted_mask        = item.attempted_mask;
             verified_item.history               = item.history;
+            verified_item.group_id              = item.group_id;
 
             PassResult result;
             result.decision    = PassDecision::kAdvance;

@@ -928,8 +928,9 @@ TEST(SimplifierTest, MixedRewrite_DiagnosticPayload) {
 
 TEST(SimplifierTest, MixedRewrite_BugOrGap) {
     // Deliberate sig/evaluator mismatch: sig=[0,0,0,99] but
-    // evaluator=x*y (gives 1 at (1,1), not 99). Technique DAG
-    // rejects all candidates because the evaluator gates them.
+    // evaluator=x*y (gives 1 at (1,1), not 99). The sig-derived
+    // CoB candidate fails full-width check, but the residual solver
+    // table recovers x*y from the evaluator-based residual.
     std::vector< uint64_t > sig     = { 0, 0, 0, 99 };
     std::vector< std::string > vars = { "x", "y" };
 
@@ -942,9 +943,10 @@ TEST(SimplifierTest, MixedRewrite_BugOrGap) {
 
     auto result = Simplify(sig, vars, input.get(), opts);
     ASSERT_TRUE(result.has_value());
-    // Evaluator disagrees with every sig-derived candidate, so
-    // the technique DAG exhausts without a verified winner.
-    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kUnchangedUnsupported);
+    // Shared residual solver table can now recover the correct
+    // expression from the evaluator-based residual, producing a
+    // verified result.
+    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
 }
 
 TEST(SimplifierTest, MixedRewrite_SupportedRouteStillSimplifies) {
@@ -1041,7 +1043,10 @@ TEST(SimplifierTest, BitwiseOverPolyEEAndD) {
     // Ground truth: (e*e) & d — AND-gated polynomial. On {0,1},
     // e*e == e&e so the boolean signature is degenerate. Bitwise
     // decomposition finds AND(e, d) which is {0,1}-correct but
-    // diverges at full width. Unsupported until lifted-skeleton.
+    // diverges at full width. The arithmetic-atom lifter exposes
+    // this as outer (v0 & d) with v0 = e*e; the outer problem is
+    // pure bitwise and trivially solved; substitution produces the
+    // ground truth.
     auto eval = [](const std::vector< uint64_t > &v) -> uint64_t {
         return (v[0] * v[0]) & v[1];
     };
@@ -1053,10 +1058,14 @@ TEST(SimplifierTest, BitwiseOverPolyEEAndD) {
     std::vector< std::string > vars = { "e", "d" };
     Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = eval;
+    auto input_expr =
+        Expr::BitwiseAnd(Expr::Mul(Expr::Variable(0), Expr::Variable(0)), Expr::Variable(1));
 
-    auto result = Simplify(sig, vars, nullptr, opts);
+    auto result = Simplify(sig, vars, input_expr.get(), opts);
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kUnchangedUnsupported);
+    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
+    auto fw = FullWidthCheckEval(eval, 2, *result.value().expr, 64);
+    EXPECT_TRUE(fw.passed);
 }
 
 TEST(SimplifierTest, BitwiseOverPolyDSquaredXorA) {
