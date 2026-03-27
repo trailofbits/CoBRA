@@ -629,7 +629,7 @@ namespace cobra {
                     .reason =
                         ReasonDetail{
                                      .top = { .code    = { ReasonCategory::kSearchExhausted,
-                                                  ReasonDomain::kMixedRewrite },
+                                                  ReasonDomain::kStructuralTransform },
                                      .message = "No rewrite applied" },
                                      },
             }
@@ -638,9 +638,9 @@ namespace cobra {
 
         auto new_cls = ClassifyStructural(*rw.expr);
 
-        // Still mixed or unsupported after rewrite: short-circuit
-        // with kRepresentationGap so parity is preserved.
-        if (new_cls.route == Route::kMixedRewrite || new_cls.route == Route::kUnsupported) {
+        // Still has unrecovered mixed structure after rewrite:
+        // short-circuit with kRepresentationGap so parity is preserved.
+        if (NeedsStructuralRecovery(new_cls.flags)) {
             return Ok(
                 PassResult{
                     .decision    = PassDecision::kBlocked,
@@ -648,7 +648,7 @@ namespace cobra {
                     .reason =
                         ReasonDetail{
                                      .top = { .code = { ReasonCategory::kRepresentationGap,
-                                               ReasonDomain::kMixedRewrite },
+                                               ReasonDomain::kStructuralTransform },
                                      .message =
                                          "Rewrite did not reduce to supported structure" },
                                      },
@@ -941,75 +941,75 @@ namespace cobra {
              },
             // Decomposition prep passes
             {
-             .id         = PassId::kPrepareDirectResidual,
+             .id         = PassId::kPrepareDirectRemainder,
              .consumes   = StateKind::kFoldedAst,
              .tag        = PassTag::kAnalysis,
              .applicable = [](const WorkItem &item,                                    const OrchestratorContext & /*ctx*/)
                                     -> bool { return IsAstKind(item); },
-             .run = RunPrepareDirectResidual,
+             .run = RunPrepareDirectRemainder,
              },
             {
-             .id         = PassId::kPrepareResidualFromCore,
+             .id         = PassId::kPrepareRemainderFromCore,
              .consumes   = StateKind::kCoreCandidate,
              .tag        = PassTag::kAnalysis,
              .applicable = [](const WorkItem &item,
              const OrchestratorContext & /*ctx*/) -> bool {
              return std::holds_alternative< CoreCandidatePayload >(item.payload);
-             },        .run = RunPrepareResidualFromCore,
+             },       .run = RunPrepareRemainderFromCore,
              },
-            // Decomposition residual solvers
+            // Decomposition remainder solvers
             {
              .id         = PassId::kResidualSupported,
-             .consumes   = StateKind::kResidualState,
+             .consumes   = StateKind::kRemainderState,
              .tag        = PassTag::kSolver,
              .applicable = [](const WorkItem &item,
              const OrchestratorContext & /*ctx*/) -> bool {
-             return std::holds_alternative< ResidualStatePayload >(item.payload);
+             return std::holds_alternative< RemainderStatePayload >(item.payload);
              },              .run = RunResidualSupported,
              },
             {
              .id         = PassId::kResidualPolyRecovery,
-             .consumes   = StateKind::kResidualState,
+             .consumes   = StateKind::kRemainderState,
              .tag        = PassTag::kSolver,
              .applicable = [](const WorkItem &item,
              const OrchestratorContext & /*ctx*/) -> bool {
-             return std::holds_alternative< ResidualStatePayload >(item.payload);
+             return std::holds_alternative< RemainderStatePayload >(item.payload);
              },           .run = RunResidualPolyRecovery,
              },
             {
              .id         = PassId::kResidualGhost,
-             .consumes   = StateKind::kResidualState,
+             .consumes   = StateKind::kRemainderState,
              .tag        = PassTag::kSolver,
              .applicable = [](const WorkItem &item,
              const OrchestratorContext & /*ctx*/) -> bool {
-             return std::holds_alternative< ResidualStatePayload >(item.payload);
+             return std::holds_alternative< RemainderStatePayload >(item.payload);
              },                  .run = RunResidualGhost,
              },
             {
              .id         = PassId::kResidualFactoredGhost,
-             .consumes   = StateKind::kResidualState,
+             .consumes   = StateKind::kRemainderState,
              .tag        = PassTag::kSolver,
              .applicable = [](const WorkItem &item,
              const OrchestratorContext & /*ctx*/) -> bool {
-             return std::holds_alternative< ResidualStatePayload >(item.payload);
+             return std::holds_alternative< RemainderStatePayload >(item.payload);
              },          .run = RunResidualFactoredGhost,
              },
             {
              .id         = PassId::kResidualFactoredGhostEscalated,
-             .consumes   = StateKind::kResidualState,
+             .consumes   = StateKind::kRemainderState,
              .tag        = PassTag::kSolver,
              .applicable = [](const WorkItem &item,
              const OrchestratorContext & /*ctx*/) -> bool {
-             return std::holds_alternative< ResidualStatePayload >(item.payload);
+             return std::holds_alternative< RemainderStatePayload >(item.payload);
              }, .run = RunResidualFactoredGhostEscalated,
              },
             {
              .id         = PassId::kResidualTemplate,
-             .consumes   = StateKind::kResidualState,
+             .consumes   = StateKind::kRemainderState,
              .tag        = PassTag::kSolver,
              .applicable = [](const WorkItem &item,
              const OrchestratorContext & /*ctx*/) -> bool {
-             return std::holds_alternative< ResidualStatePayload >(item.payload);
+             return std::holds_alternative< RemainderStatePayload >(item.payload);
              },               .run = RunResidualTemplate,
              },
             {

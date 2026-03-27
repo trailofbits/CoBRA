@@ -525,26 +525,26 @@ namespace cobra {
             return pr;
         }
 
-        ExtractorKind ProjectExtractorKind(ResidualOrigin origin) {
+        ExtractorKind ProjectExtractorKind(RemainderOrigin origin) {
             switch (origin) {
-                case ResidualOrigin::kDirectBooleanNull:
+                case RemainderOrigin::kDirectBooleanNull:
                     return ExtractorKind::kBooleanNullDirect;
-                case ResidualOrigin::kProductCore:
+                case RemainderOrigin::kProductCore:
                     return ExtractorKind::kProductAST;
-                case ResidualOrigin::kPolynomialCore:
+                case RemainderOrigin::kPolynomialCore:
                     return ExtractorKind::kPolynomial;
-                case ResidualOrigin::kTemplateCore:
+                case RemainderOrigin::kTemplateCore:
                     return ExtractorKind::kTemplate;
-                case ResidualOrigin::kSignatureLowering:
+                case RemainderOrigin::kSignatureLowering:
                     return ExtractorKind::kBooleanNullDirect;
-                case ResidualOrigin::kLiftedOuter:
+                case RemainderOrigin::kLiftedOuter:
                     return ExtractorKind::kBooleanNullDirect;
             }
             return ExtractorKind::kBooleanNullDirect;
         }
 
         PassResult ResolveResidualRecombine(
-            const ResidualRecombineCont &cont, CompetitionGroup &group, const WorkItem &item,
+            const RemainderRecombineCont &cont, CompetitionGroup &group, const WorkItem &item,
             OrchestratorContext &ctx
         ) {
             PassResult pr;
@@ -582,17 +582,17 @@ namespace cobra {
             // Remap winner from reduced variable space to target.
             // The winner's real_vars may be a subset of target_vars
             // when aux-var elimination reduced the variable set.
-            if (!cont.residual_support.empty()
+            if (!cont.remainder_support.empty()
                 && group.best->real_vars.size() < target_vars.size())
             {
-                RemapVarIndices(*solved, cont.residual_support);
+                RemapVarIndices(*solved, cont.remainder_support);
             }
 
             // Strengthened 64-probe FW check of solved expr against
             // residual_eval, matching RunResidualSupported's check.
             const auto num_vars = static_cast< uint32_t >(target_vars.size());
             auto res_check =
-                FullWidthCheckEval(cont.residual_eval, num_vars, *solved, ctx.bitwidth, 64);
+                FullWidthCheckEval(cont.remainder_eval, num_vars, *solved, ctx.bitwidth, 64);
             if (!res_check.passed) {
                 release_parent();
                 return pr;
@@ -600,8 +600,8 @@ namespace cobra {
 
             // Recombine: core_expr + solved_residual, or just solved
             // for direct boolean-null (core_expr is null).
-            auto combined = cont.core_expr
-                ? Expr::Add(CloneExpr(*cont.core_expr), std::move(solved))
+            auto combined = cont.prefix_expr
+                ? Expr::Add(CloneExpr(*cont.prefix_expr), std::move(solved))
                 : std::move(solved);
 
             // Verify the recombined expression against the target
@@ -648,7 +648,7 @@ namespace cobra {
                     .solver_kind =
                         static_cast< uint8_t >(ResidualSolverKind::kSupportedPipeline),
                     .has_solver  = true,
-                    .core_degree = cont.core_degree,
+                    .core_degree = cont.prefix_degree,
                 };
                 cand_item.depth          = item.depth;
                 cand_item.rewrite_gen    = item.rewrite_gen;
@@ -740,7 +740,7 @@ namespace cobra {
                     return ResolveOperandRewrite(c, group, item, ctx);
                 } else if constexpr (std::is_same_v< T, ProductCollapseCont >) {
                     return ResolveProductCollapse(c, group, item, ctx);
-                } else if constexpr (std::is_same_v< T, ResidualRecombineCont >) {
+                } else if constexpr (std::is_same_v< T, RemainderRecombineCont >) {
                     return ResolveResidualRecombine(c, group, item, ctx);
                 } else if constexpr (std::is_same_v< T, LiftedSubstituteCont >) {
                     return ResolveLiftedSubstitute(c, group, item, ctx);
@@ -1159,7 +1159,7 @@ namespace cobra {
         // When invoked from a residual solver's recursive signature
         // chain (evaluator_override set), fall back to inline
         // combination to avoid residual -> signature -> residual
-        // cycles. Only emit kResidualState for top-level invocations.
+        // cycles. Only emit kRemainderState for top-level invocations.
         if (item.evaluator_override.has_value()) {
             std::unique_ptr< Expr > combined;
             if (bit_expr && !bit_is_zero) { combined = std::move(bit_expr); }
@@ -1202,13 +1202,13 @@ namespace cobra {
             );
         }
 
-        // Nonzero residual: emit kResidualState for shared solver table.
+        // Nonzero residual: emit kRemainderState for shared solver table.
         // Acquire a handle so the group stays open for the residual child.
         AcquireHandle(ctx.competition_groups, *item.group_id);
 
         if (!prefix) { prefix = Expr::Constant(0); }
 
-        auto residual_eval    = BuildResidualEvaluator(*mapped_eval, *prefix, ctx.bitwidth);
+        auto residual_eval    = BuildRemainderEvaluator(*mapped_eval, *prefix, ctx.bitwidth);
         auto residual_sig     = EvaluateBooleanSignature(residual_eval, num_vars, ctx.bitwidth);
         auto residual_elim    = EliminateAuxVars(residual_sig, sub_ctx.real_vars);
         auto residual_support = BuildVarSupport(sub_ctx.real_vars, residual_elim.real_vars);
@@ -1218,22 +1218,22 @@ namespace cobra {
         });
 
         WorkItem residual_item;
-        residual_item.payload = ResidualStatePayload{
-            .origin           = ResidualOrigin::kSignatureLowering,
-            .core_expr        = std::move(prefix),
-            .core_degree      = 0,
-            .residual_eval    = residual_eval,
-            .source_sig       = sub_ctx.elimination.reduced_sig,
-            .residual_sig     = std::move(residual_sig),
-            .residual_elim    = std::move(residual_elim),
-            .residual_support = std::move(residual_support),
-            .is_boolean_null  = is_bn,
-            .degree_floor     = 2,
+        residual_item.payload = RemainderStatePayload{
+            .origin            = RemainderOrigin::kSignatureLowering,
+            .prefix_expr       = std::move(prefix),
+            .prefix_degree     = 0,
+            .remainder_eval    = residual_eval,
+            .source_sig        = sub_ctx.elimination.reduced_sig,
+            .remainder_sig     = std::move(residual_sig),
+            .remainder_elim    = std::move(residual_elim),
+            .remainder_support = std::move(residual_support),
+            .is_boolean_null   = is_bn,
+            .degree_floor      = 2,
             .target =
-                ResidualTargetContext{
-                                      .eval = *mapped_eval,
-                                      .vars = sub_ctx.real_vars,
-                                      },
+                RemainderTargetContext{
+                                       .eval = *mapped_eval,
+                                       .vars = sub_ctx.real_vars,
+                                       },
         };
         residual_item.features       = item.features;
         residual_item.metadata       = item.metadata;

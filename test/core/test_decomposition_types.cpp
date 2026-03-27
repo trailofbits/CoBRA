@@ -14,20 +14,20 @@ TEST(StateKind, CoreCandidateKind) {
 }
 
 TEST(StateKind, ResidualStateKind) {
-    StateData data = ResidualStatePayload{
-        .origin = ResidualOrigin::kDirectBooleanNull,
+    StateData data = RemainderStatePayload{
+        .origin = RemainderOrigin::kDirectBooleanNull,
     };
-    EXPECT_EQ(GetStateKind(data), StateKind::kResidualState);
+    EXPECT_EQ(GetStateKind(data), StateKind::kRemainderState);
 }
 
-TEST(ResidualOrigin, ValuesDistinct) {
+TEST(RemainderOrigin, ValuesDistinct) {
     EXPECT_NE(
-        static_cast< uint8_t >(ResidualOrigin::kDirectBooleanNull),
-        static_cast< uint8_t >(ResidualOrigin::kProductCore)
+        static_cast< uint8_t >(RemainderOrigin::kDirectBooleanNull),
+        static_cast< uint8_t >(RemainderOrigin::kProductCore)
     );
     EXPECT_NE(
-        static_cast< uint8_t >(ResidualOrigin::kPolynomialCore),
-        static_cast< uint8_t >(ResidualOrigin::kTemplateCore)
+        static_cast< uint8_t >(RemainderOrigin::kPolynomialCore),
+        static_cast< uint8_t >(RemainderOrigin::kTemplateCore)
     );
 }
 
@@ -48,12 +48,12 @@ TEST(Fingerprint, CoreCandidateFingerprint) {
 
 TEST(Fingerprint, ResidualStateFingerprintByOrigin) {
     WorkItem a, b;
-    a.payload = ResidualStatePayload{
-        .origin          = ResidualOrigin::kDirectBooleanNull,
+    a.payload = RemainderStatePayload{
+        .origin          = RemainderOrigin::kDirectBooleanNull,
         .is_boolean_null = true,
     };
-    b.payload = ResidualStatePayload{
-        .origin          = ResidualOrigin::kProductCore,
+    b.payload = RemainderStatePayload{
+        .origin          = RemainderOrigin::kProductCore,
         .is_boolean_null = true,
     };
     auto fa = ComputeFingerprint(a, 64);
@@ -63,12 +63,12 @@ TEST(Fingerprint, ResidualStateFingerprintByOrigin) {
 
 TEST(Fingerprint, ResidualStateFingerprintByBooleanNull) {
     WorkItem a, b;
-    a.payload = ResidualStatePayload{
-        .origin          = ResidualOrigin::kProductCore,
+    a.payload = RemainderStatePayload{
+        .origin          = RemainderOrigin::kProductCore,
         .is_boolean_null = true,
     };
-    b.payload = ResidualStatePayload{
-        .origin          = ResidualOrigin::kProductCore,
+    b.payload = RemainderStatePayload{
+        .origin          = RemainderOrigin::kProductCore,
         .is_boolean_null = false,
     };
     auto fa = ComputeFingerprint(a, 64);

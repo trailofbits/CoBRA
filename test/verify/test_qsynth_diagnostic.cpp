@@ -157,7 +157,7 @@ TEST(QSynthDiagnostic, AnalyzeUnsolved) {
         );
 
         auto cls = ClassifyStructural(**folded_ptr);
-        if (cls.route != Route::kMixedRewrite) { continue; }
+        if (!NeedsStructuralRecovery(cls.flags)) { continue; }
 
         const auto &sig  = parse_result.value().sig;
         const auto &vars = parse_result.value().vars;
@@ -371,7 +371,7 @@ TEST(QSynthDiagnostic, DecompEngineTelemetry) {
                 return std::nullopt;
             }
 
-            auto residual_eval = BuildResidualEvaluator(opts.evaluator, *core.expr, kBw);
+            auto residual_eval = BuildRemainderEvaluator(opts.evaluator, *core.expr, kBw);
             auto residual_sig  = EvaluateBooleanSignature(residual_eval, kNv, kBw);
 
             Options res_opts   = opts;
@@ -645,7 +645,7 @@ TEST(QSynthDiagnostic, DecompEngineTelemetry) {
                     if (core.expr->kind == Expr::Kind::kConstant) { return "constant_core"; }
 
                     auto residual_eval =
-                        BuildResidualEvaluator(opts.evaluator, *core.expr, kBw);
+                        BuildRemainderEvaluator(opts.evaluator, *core.expr, kBw);
                     const uint64_t kMask = Bitmask(kBw);
 
                     std::mt19937_64 rng(0xDECAF);
@@ -922,7 +922,7 @@ TEST(QSynthDiagnostic, FactoredGhostTelemetry) {
         if (!chosen) { continue; }
 
         // Build residual
-        auto residual_eval = BuildResidualEvaluator(opts.evaluator, *chosen->expr, kBw);
+        auto residual_eval = BuildRemainderEvaluator(opts.evaluator, *chosen->expr, kBw);
         auto residual_sig  = EvaluateBooleanSignature(residual_eval, kNv, kBw);
 
         // Compute residual support
@@ -1169,7 +1169,7 @@ TEST(QSynthDiagnostic, BooleanNullResidualCharacterization) {
         }
 
         // Residual analysis
-        auto residual_eval = BuildResidualEvaluator(opts.evaluator, *p2->expr, 64);
+        auto residual_eval = BuildRemainderEvaluator(opts.evaluator, *p2->expr, 64);
         auto residual_sig  = EvaluateBooleanSignature(residual_eval, kNv, 64);
         auto res_elim      = EliminateAuxVars(residual_sig, vars, residual_eval, 64);
         auto res_count     = static_cast< uint32_t >(res_elim.real_vars.size());
@@ -1346,7 +1346,7 @@ TEST(QSynthDiagnostic, NullFactorTelemetry) {
             auto direct = FullWidthCheckEval(opts.evaluator, kNv, *p2->expr, kBw);
             if (direct.passed) { continue; }
 
-            auto residual_eval = BuildResidualEvaluator(opts.evaluator, *p2->expr, kBw);
+            auto residual_eval = BuildRemainderEvaluator(opts.evaluator, *p2->expr, kBw);
             auto residual_sig  = EvaluateBooleanSignature(residual_eval, kNv, kBw);
             auto res_elim      = EliminateAuxVars(residual_sig, vars, residual_eval, kBw);
 
@@ -1645,7 +1645,7 @@ TEST(QSynthDiagnostic, MultiWeightNullBasisTelemetry) {
             auto direct = FullWidthCheckEval(opts.evaluator, kNv, *p2->expr, kBw);
             if (direct.passed) { continue; }
 
-            auto residual_eval = BuildResidualEvaluator(opts.evaluator, *p2->expr, kBw);
+            auto residual_eval = BuildRemainderEvaluator(opts.evaluator, *p2->expr, kBw);
             auto residual_sig  = EvaluateBooleanSignature(residual_eval, kNv, kBw);
             auto res_elim      = EliminateAuxVars(residual_sig, vars, residual_eval, kBw);
 
@@ -2051,7 +2051,7 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
 
         // --- We have a core. Build residual and classify. ---
         auto *core         = chosen->core;
-        auto residual_eval = BuildResidualEvaluator(opts.evaluator, *core->expr, 64);
+        auto residual_eval = BuildRemainderEvaluator(opts.evaluator, *core->expr, 64);
         auto residual_sig  = EvaluateBooleanSignature(residual_eval, kNv, 64);
 
         // Residual support
@@ -2490,7 +2490,7 @@ TEST(QSynthDiagnostic, NonBnResidualCharacterization) {
 
         total++;
 
-        auto residual_eval = BuildResidualEvaluator(opts.evaluator, *prod->expr, 64);
+        auto residual_eval = BuildRemainderEvaluator(opts.evaluator, *prod->expr, 64);
         auto residual_sig  = EvaluateBooleanSignature(residual_eval, kNv, 64);
 
         // Residual support (evaluator-aware)
@@ -2670,7 +2670,7 @@ TEST(QSynthDiagnostic, NonBnResidualCharacterization) {
 }
 
 // Deep characterization of the 44 no_core cases.
-// For each: boolean signature, route classification, polynomial
+// For each: boolean signature, structural classification, polynomial
 // recovery, and whether Simplify succeeds on
 // preconditioned AST.
 TEST(QSynthDiagnostic, NoCoreCharacterization) {
@@ -2688,24 +2688,22 @@ TEST(QSynthDiagnostic, NoCoreCharacterization) {
     int total    = 0;
 
     // Aggregate counters
-    std::map< Route, int > by_route;
+    std::map< std::string, int > by_semantic;
     int poly_d2_ok = 0, poly_d3_ok = 0, poly_d4_ok = 0;
     int sup_on_precond  = 0;
     int has_any_mul     = 0;
     int all_bool_valued = 0;
 
-    auto route_name = [](Route r) -> const char * {
-        switch (r) {
-            case Route::kBitwiseOnly:
-                return "Bitwise";
-            case Route::kMultilinear:
-                return "Multilinear";
-            case Route::kPowerRecovery:
-                return "PowerRecov";
-            case Route::kMixedRewrite:
-                return "Mixed";
-            case Route::kUnsupported:
-                return "Unsupported";
+    auto semantic_str = [](SemanticClass s) -> const char * {
+        switch (s) {
+            case SemanticClass::kLinear:
+                return "Linear";
+            case SemanticClass::kSemilinear:
+                return "Semilinear";
+            case SemanticClass::kPolynomial:
+                return "Polynomial";
+            case SemanticClass::kNonPolynomial:
+                return "NonPoly";
         }
         return "?";
     };
@@ -2715,7 +2713,8 @@ TEST(QSynthDiagnostic, NoCoreCharacterization) {
     {
         int line;
         uint32_t num_vars;
-        Route route;
+        StructuralFlag flags;
+        std::string semantic_name;
         bool bool_valued;
         bool has_mul;
         bool sup_precond;
@@ -2759,7 +2758,7 @@ TEST(QSynthDiagnostic, NoCoreCharacterization) {
 
         total++;
 
-        // 1. Route classification (preconditioning removed, now internal)
+        // 1. Structural classification
         auto precond_expr = CloneExpr(**folded_shared);
         auto cls          = ClassifyStructural(*precond_expr);
 
@@ -2823,7 +2822,7 @@ TEST(QSynthDiagnostic, NoCoreCharacterization) {
             }
         }
 
-        by_route[cls.route]++;
+        by_semantic[semantic_str(cls.semantic)]++;
         if (sp) { sup_on_precond++; }
         if (hm) { has_any_mul++; }
         if (bv) { all_bool_valued++; }
@@ -2833,25 +2832,26 @@ TEST(QSynthDiagnostic, NoCoreCharacterization) {
 
         details.push_back(
             {
-                .line         = line_num,
-                .num_vars     = kNv,
-                .route        = cls.route,
-                .bool_valued  = bv,
-                .has_mul      = hm,
-                .sup_precond  = sp,
-                .poly2_fw     = p2fw,
-                .poly3_fw     = p3fw,
-                .poly4_fw     = p4fw,
-                .sig_str      = sig_ss.str(),
-                .ground_truth = truth,
+                .line          = line_num,
+                .num_vars      = kNv,
+                .flags         = cls.flags,
+                .semantic_name = semantic_str(cls.semantic),
+                .bool_valued   = bv,
+                .has_mul       = hm,
+                .sup_precond   = sp,
+                .poly2_fw      = p2fw,
+                .poly3_fw      = p3fw,
+                .poly4_fw      = p4fw,
+                .sig_str       = sig_ss.str(),
+                .ground_truth  = truth,
             }
         );
     }
 
     // --- Summary ---
     std::cerr << "\n=== No-Core Characterization (" << total << " cases) ===\n";
-    std::cerr << "  By route:";
-    for (auto &[r, c] : by_route) { std::cerr << " " << route_name(r) << "=" << c; }
+    std::cerr << "  By semantic:";
+    for (auto &[s, c] : by_semantic) { std::cerr << " " << s << "=" << c; }
     std::cerr << "\n";
     std::cerr << "  Bool-valued sig: " << all_bool_valued << "\n";
     std::cerr << "  Has Mul in AST:  " << has_any_mul << "\n";
@@ -2867,7 +2867,7 @@ TEST(QSynthDiagnostic, NoCoreCharacterization) {
 
     std::cerr << "\n--- Per-case details ---\n";
     for (const auto &d : details) {
-        std::cerr << "  L" << d.line << " vars=" << d.num_vars << " r=" << route_name(d.route)
+        std::cerr << "  L" << d.line << " vars=" << d.num_vars << " s=" << d.semantic_name
                   << " bv=" << d.bool_valued << " mul=" << d.has_mul << " sup=" << d.sup_precond
                   << " p2=" << d.poly2_fw << " p3=" << d.poly3_fw << " p4=" << d.poly4_fw
                   << " sig=" << d.sig_str << "\n    truth: " << d.ground_truth;
@@ -2982,7 +2982,8 @@ TEST(QSynthDiagnostic, RecoverableCaseTrace) {
 
         // Classification
         auto cls = ClassifyStructural(*precond);
-        std::cerr << "route: " << static_cast< int >(cls.route) << "\n";
+        std::cerr << "semantic: " << static_cast< int >(cls.semantic) << " flags=0x" << std::hex
+                  << cls.flags << std::dec << "\n";
 
         auto post_sig = sig;
         DecompositionContext post_dctx{
@@ -3032,7 +3033,8 @@ TEST(QSynthDiagnostic, RecoverableCaseTrace) {
         };
 
         auto t_cls = ClassifyStructural(**t_shared);
-        std::cerr << "truth route: " << static_cast< int >(t_cls.route) << "\n";
+        std::cerr << "truth semantic: " << static_cast< int >(t_cls.semantic) << " flags=0x"
+                  << std::hex << t_cls.flags << std::dec << "\n";
 
         DecompositionContext t_dctx{
             .opts         = t_opts,

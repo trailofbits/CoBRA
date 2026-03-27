@@ -128,9 +128,7 @@ TEST(PassOutcomeTest, SigVectorThreadsThrough) {
 
 TEST(PassOutcomeTest, PartialCarriesExprAndPending) {
     auto residual = Expr::Variable(0);
-    Classification residual_cls{ .semantic = SemanticClass::kLinear,
-                                 .flags    = kSfNone,
-                                 .route    = Route::kBitwiseOnly };
+    Classification residual_cls{ .semantic = SemanticClass::kLinear, .flags = kSfNone };
     PendingWork pw{ .residual = std::move(residual), .residual_classification = residual_cls };
     ReasonDetail reason{
         .top = { .code    = { .category = ReasonCategory::kRepresentationGap,

@@ -14,9 +14,7 @@ namespace cobra {
     struct Diagnostic
     {
         Classification classification        = { .semantic = SemanticClass::kLinear,
-                                                 .flags    = kSfNone,
-                                                 .route    = Route::kBitwiseOnly };
-        Route attempted_route                = Route::kBitwiseOnly;
+                                                 .flags    = kSfNone };
         uint32_t structural_transform_rounds = 0;
         bool transform_produced_candidate    = false;
         bool candidate_failed_verification   = false;

@@ -24,8 +24,8 @@ namespace cobra {
                     return StateKind::kSignatureCoeffState;
                 } else if constexpr (std::is_same_v< T, CoreCandidatePayload >) {
                     return StateKind::kCoreCandidate;
-                } else if constexpr (std::is_same_v< T, ResidualStatePayload >) {
-                    return StateKind::kResidualState;
+                } else if constexpr (std::is_same_v< T, RemainderStatePayload >) {
+                    return StateKind::kRemainderState;
                 } else if constexpr (std::is_same_v< T, NormalizedSemilinearPayload >) {
                     return StateKind::kSemilinearNormalizedIr;
                 } else if constexpr (std::is_same_v< T, CheckedSemilinearPayload >) {
@@ -119,17 +119,17 @@ namespace cobra {
                     }
                     fp.payload_hash = h;
                     fp.vars         = {};
-                } else if constexpr (std::is_same_v< T, ResidualStatePayload >) {
+                } else if constexpr (std::is_same_v< T, RemainderStatePayload >) {
                     size_t h = std::hash< uint8_t >{}(static_cast< uint8_t >(payload.origin));
-                    if (payload.core_expr) {
-                        h = detail::hash_combine(h, std::hash< Expr >{}(*payload.core_expr));
+                    if (payload.prefix_expr) {
+                        h = detail::hash_combine(h, std::hash< Expr >{}(*payload.prefix_expr));
                     } else {
                         h = detail::hash_combine(h, std::hash< uint64_t >{}(0xDEAD));
                     }
-                    for (uint64_t v : payload.residual_sig) {
+                    for (uint64_t v : payload.remainder_sig) {
                         h = detail::hash_combine(h, std::hash< uint64_t >{}(v));
                     }
-                    for (uint32_t s : payload.residual_support) {
+                    for (uint32_t s : payload.remainder_support) {
                         h = detail::hash_combine(h, std::hash< uint32_t >{}(s));
                     }
                     h = detail::hash_combine(h, std::hash< bool >{}(payload.is_boolean_null));
@@ -328,12 +328,6 @@ namespace cobra {
 
     namespace {
 
-        bool IsFoldedAstExplorationCandidate(const Classification &cls) {
-            if (HasFlag(cls.flags, kSfHasUnknownShape)) { return false; }
-            return HasFlag(cls.flags, kSfHasMixedProduct)
-                || HasFlag(cls.flags, kSfHasBitwiseOverArith);
-        }
-
         bool IsSemilinearPass(PassId id) {
             return id >= PassId::kSemilinearNormalize && id <= PassId::kSemilinearReconstruct;
         }
@@ -352,7 +346,7 @@ namespace cobra {
 
         constexpr FoldedAstPassEntry kFoldedAstPasses[] = {
             {        PassId::kBuildSignatureState,                                0,  0, false },
-            {      PassId::kPrepareDirectResidual,                                0,  1, false },
+            {     PassId::kPrepareDirectRemainder,                                0,  1, false },
             {         PassId::kExtractProductCore,                                0,  2, false },
             {          PassId::kExtractPolyCoreD2,                                0,  3, false },
             {        PassId::kExtractTemplateCore,                                0,  4, false },
@@ -456,22 +450,22 @@ namespace cobra {
             return std::nullopt;
         }
 
-        // 3. CoreCandidate → kPrepareResidualFromCore
+        // 3. CoreCandidate → kPrepareRemainderFromCore
         if (kind == StateKind::kCoreCandidate) {
-            auto pass = PassId::kPrepareResidualFromCore;
+            auto pass = PassId::kPrepareRemainderFromCore;
             if ((item.attempted_mask & Bit(pass)) != 0) { return std::nullopt; }
             if (cache.HasAttempted(fp, pass)) { return std::nullopt; }
             return pass;
         }
 
-        // 4. ResidualState → iterate residual solver table
-        if (kind == StateKind::kResidualState) {
-            const auto &residual = std::get< ResidualStatePayload >(item.payload);
+        // 4. RemainderState → iterate residual solver table
+        if (kind == StateKind::kRemainderState) {
+            const auto &residual = std::get< RemainderStatePayload >(item.payload);
 
             const ResidualPassEntry *table = nullptr;
             size_t table_size              = 0;
 
-            if (residual.origin == ResidualOrigin::kDirectBooleanNull) {
+            if (residual.origin == RemainderOrigin::kDirectBooleanNull) {
                 table      = kDirectBooleanNullSolvers;
                 table_size = std::size(kDirectBooleanNullSolvers);
             } else if (residual.is_boolean_null) {
@@ -564,7 +558,7 @@ namespace cobra {
         if (HasFlag(cls.flags, kSfHasUnknownShape)) { return std::nullopt; }
 
         // 10. Non-exploration candidates → only kBuildSignatureState
-        if (!IsFoldedAstExplorationCandidate(cls)) {
+        if (!IsFoldedAstExplorationCandidate(cls.flags)) {
             auto pass = PassId::kBuildSignatureState;
             if ((item.attempted_mask & Bit(pass)) != 0) { return std::nullopt; }
             if (cache.HasAttempted(fp, pass)) { return std::nullopt; }
@@ -721,18 +715,11 @@ namespace cobra {
             auto classified = std::move(cr.next[0]);
             auto cls        = classified.features.classification;
 
-            // Copy classification to the original seed and set
-            // attempted_route so unsupported outcomes carry the
-            // correct route in diagnostics.
+            // Copy classification to the original seed.
             seed.features.classification = cls;
             if (auto *ast = std::get_if< AstPayload >(&seed.payload)) {
                 ast->classification = cls;
             }
-            if (cls) {
-                classified.metadata.attempted_route = cls->route;
-                seed.metadata.attempted_route       = cls->route;
-            }
-
             // Push items to the worklist.
             // Both branches ensure a kLowered item enters the worklist
             // so the scheduler routes it into kBuildSignatureState.
@@ -775,8 +762,7 @@ namespace cobra {
                 outcome.expr = original_expr != nullptr ? CloneExpr(*original_expr) : nullptr;
             }
 
-            outcome.diag.classification  = result.run_metadata.input_classification;
-            outcome.diag.attempted_route = result.metadata.attempted_route;
+            outcome.diag.classification = result.run_metadata.input_classification;
             outcome.diag.structural_transform_rounds =
                 result.metadata.structural_transform_rounds;
             outcome.diag.transform_produced_candidate =
@@ -1067,7 +1053,7 @@ namespace cobra {
         // Derive structural-transform terminal reason code from
         // lineage-local metadata instead of the old loop-global variable.
         bool used_folded_ast_exploration =
-            IsFoldedAstExplorationCandidate(context.run_metadata.input_classification)
+            IsFoldedAstExplorationCandidate(context.run_metadata.input_classification.flags)
             || final_meta.structural_transform_rounds > 0
             || final_meta.transform_produced_candidate
             || strongest_transform_terminal.has_value();
@@ -1097,12 +1083,12 @@ namespace cobra {
         if (final_meta.cause_chain.empty() && !final_meta.decomposition_causes.empty()) {
             final_meta.cause_chain = std::move(final_meta.decomposition_causes);
         }
-        // For non-MixedRewrite routes, propagate semilinear failure
+        // For non-exploration inputs, propagate semilinear failure
         // as the cause chain (matching legacy behavior where the
         // supported pipeline's verification failure includes the
         // semilinear pipeline's failure reason).
         if (final_meta.cause_chain.empty()
-            && context.run_metadata.input_classification.route != Route::kMixedRewrite
+            && !IsFoldedAstExplorationCandidate(context.run_metadata.input_classification.flags)
             && context.run_metadata.semilinear_failure.has_value())
         {
             const auto &sf = *context.run_metadata.semilinear_failure;

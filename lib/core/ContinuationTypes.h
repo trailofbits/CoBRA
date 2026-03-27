@@ -19,8 +19,8 @@ namespace cobra {
     // Forward declarations to avoid circular includes.
     // GroupId is defined identically in CompetitionGroup.h.
     using GroupId = uint32_t;
-    // ResidualOrigin is defined in Orchestrator.h.
-    enum class ResidualOrigin : uint8_t;
+    // RemainderOrigin is defined in Orchestrator.h.
+    enum class RemainderOrigin : uint8_t;
 
     using JoinId = uint32_t;
 
@@ -50,14 +50,14 @@ namespace cobra {
         bool parent_needs_original_space_verification = true;
     };
 
-    struct ResidualRecombineCont
+    struct RemainderRecombineCont
     {
-        std::unique_ptr< Expr > core_expr;
-        ResidualOrigin origin;
-        Evaluator residual_eval;
+        std::unique_ptr< Expr > prefix_expr;
+        RemainderOrigin origin;
+        Evaluator remainder_eval;
         std::vector< uint64_t > source_sig;
-        std::vector< uint32_t > residual_support;
-        uint8_t core_degree = 0;
+        std::vector< uint32_t > remainder_support;
+        uint8_t prefix_degree = 0;
         std::optional< GroupId > parent_group_id;
         // Target-local context for verification. When target_vars is
         // non-empty, recombination verifies against target_eval in
@@ -106,7 +106,7 @@ namespace cobra {
     };
 
     using ContinuationData = std::variant<
-        std::monostate, BitwiseComposeCont, HybridComposeCont, ResidualRecombineCont,
+        std::monostate, BitwiseComposeCont, HybridComposeCont, RemainderRecombineCont,
         OperandRewriteCont, ProductCollapseCont, LiftedSubstituteCont >;
 
     // Projects a parent's baseline cost for a child work item

@@ -16,7 +16,6 @@ namespace {
         return Classification{
             .semantic = semantic,
             .flags    = flags,
-            .route    = DeriveRoute(flags),
         };
     }
 
@@ -68,7 +67,6 @@ TEST(Fingerprint, AttemptedMaskDistinct) {
 TEST(ItemMetadata, DefaultState) {
     ItemMetadata meta;
     EXPECT_EQ(meta.verification, VerificationState::kUnverified);
-    EXPECT_EQ(meta.attempted_route, Route::kBitwiseOnly);
     EXPECT_EQ(meta.structural_transform_rounds, 0);
     EXPECT_FALSE(meta.transform_produced_candidate);
     EXPECT_FALSE(meta.candidate_failed_verification);
@@ -229,7 +227,7 @@ TEST(SelectNextPass, AfterBuildSigGetsPrepareDirectResidual) {
     PassAttemptCache cache;
     auto pass = SelectNextPass(item, policy, 0, cache);
     ASSERT_TRUE(pass.has_value());
-    EXPECT_EQ(*pass, PassId::kPrepareDirectResidual);
+    EXPECT_EQ(*pass, PassId::kPrepareDirectRemainder);
 }
 
 TEST(SelectNextPass, PrereqBlocksOperandSimplifyBeforeExtract) {
@@ -248,7 +246,7 @@ TEST(SelectNextPass, PrereqBlocksOperandSimplifyBeforeExtract) {
     PassAttemptCache cache;
     auto pass = SelectNextPass(item, policy, 0, cache);
     ASSERT_TRUE(pass.has_value());
-    EXPECT_EQ(*pass, PassId::kPrepareDirectResidual);
+    EXPECT_EQ(*pass, PassId::kPrepareDirectRemainder);
 }
 
 TEST(SelectNextPass, AllAttemptedReturnsNullopt) {
@@ -280,7 +278,7 @@ TEST(SelectNextPass, RewriteBudgetBlocksTransforms) {
     item.features.classification = cls;
     item.features.provenance     = Provenance::kLowered;
     item.attempted_mask = (1ULL << static_cast< uint8_t >(PassId::kBuildSignatureState))
-        | (1ULL << static_cast< uint8_t >(PassId::kPrepareDirectResidual))
+        | (1ULL << static_cast< uint8_t >(PassId::kPrepareDirectRemainder))
         | (1ULL << static_cast< uint8_t >(PassId::kExtractProductCore))
         | (1ULL << static_cast< uint8_t >(PassId::kExtractPolyCoreD2))
         | (1ULL << static_cast< uint8_t >(PassId::kExtractTemplateCore))
@@ -331,7 +329,7 @@ TEST(SelectNextPass, CacheBlocksSameState) {
 
     auto pass = SelectNextPass(item, policy, 0, cache);
     ASSERT_TRUE(pass.has_value());
-    EXPECT_EQ(*pass, PassId::kPrepareDirectResidual);
+    EXPECT_EQ(*pass, PassId::kPrepareDirectRemainder);
 }
 
 TEST(SelectNextPass, SignatureStateGetsPatternMatchFirst) {
@@ -428,13 +426,13 @@ TEST(SelectNextPass, CoreCandidateGetsPrepareResidual) {
     PassAttemptCache cache;
     auto pass = SelectNextPass(item, policy, 0, cache);
     ASSERT_TRUE(pass.has_value());
-    EXPECT_EQ(*pass, PassId::kPrepareResidualFromCore);
+    EXPECT_EQ(*pass, PassId::kPrepareRemainderFromCore);
 }
 
 TEST(SelectNextPass, ResidualStateGetsFirstSolver) {
     WorkItem item;
-    item.payload = ResidualStatePayload{
-        .origin          = ResidualOrigin::kProductCore,
+    item.payload = RemainderStatePayload{
+        .origin          = RemainderOrigin::kProductCore,
         .is_boolean_null = false,
     };
     OrchestratorPolicy policy;
@@ -446,8 +444,8 @@ TEST(SelectNextPass, ResidualStateGetsFirstSolver) {
 
 TEST(SelectNextPass, BooleanNullResidualGetsGhostFirst) {
     WorkItem item;
-    item.payload = ResidualStatePayload{
-        .origin          = ResidualOrigin::kDirectBooleanNull,
+    item.payload = RemainderStatePayload{
+        .origin          = RemainderOrigin::kDirectBooleanNull,
         .is_boolean_null = true,
     };
     OrchestratorPolicy policy;
@@ -459,8 +457,8 @@ TEST(SelectNextPass, BooleanNullResidualGetsGhostFirst) {
 
 TEST(SelectNextPass, CoreDerivedBooleanNullGetsPolyFirst) {
     WorkItem item;
-    item.payload = ResidualStatePayload{
-        .origin          = ResidualOrigin::kProductCore,
+    item.payload = RemainderStatePayload{
+        .origin          = RemainderOrigin::kProductCore,
         .is_boolean_null = true,
     };
     OrchestratorPolicy policy;
@@ -783,13 +781,13 @@ TEST(Fingerprint, LiftedSkeletonBindingsDistinct) {
 
 TEST(Fingerprint, ResidualTargetVarsDistinct) {
     WorkItem a, b;
-    a.payload = ResidualStatePayload{
-        .origin          = ResidualOrigin::kDirectBooleanNull,
+    a.payload = RemainderStatePayload{
+        .origin          = RemainderOrigin::kDirectBooleanNull,
         .is_boolean_null = true,
         .target          = { .vars = { "x" } },
     };
-    b.payload = ResidualStatePayload{
-        .origin          = ResidualOrigin::kDirectBooleanNull,
+    b.payload = RemainderStatePayload{
+        .origin          = RemainderOrigin::kDirectBooleanNull,
         .is_boolean_null = true,
         .target          = { .vars = { "y" } },
     };

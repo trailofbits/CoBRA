@@ -58,23 +58,6 @@ namespace {
         return s;
     }
 
-    std::string route_str(Route r) {
-        switch (r) {
-            case Route::kBitwiseOnly:
-                return "BitwiseOnly";
-            case Route::kMultilinear:
-                return "Multilinear";
-            case Route::kPowerRecovery:
-                return "PowerRecovery";
-            case Route::kMixedRewrite:
-                return "MixedRewrite";
-            case Route::kUnsupported:
-                return "Unsupported";
-            default:
-                return "Unknown";
-        }
-    }
-
     std::string semantic_str(SemanticClass s) {
         switch (s) {
             case SemanticClass::kLinear:
@@ -126,10 +109,10 @@ namespace {
 
     void scan_dataset(
         const std::string &path, const std::string &dataset_name,
-        std::vector< FailureEntry > &failures, std::map< std::string, int > &by_route,
-        std::map< std::string, int > &by_semantic, std::map< std::string, int > &by_flags,
-        std::map< uint32_t, int > &by_vars, std::map< std::string, int > &by_reason,
-        int &total_parsed, int &total_simplified, int &total_unsupported
+        std::vector< FailureEntry > &failures, std::map< std::string, int > &by_semantic,
+        std::map< std::string, int > &by_flags, std::map< uint32_t, int > &by_vars,
+        std::map< std::string, int > &by_reason, int &total_parsed, int &total_simplified,
+        int &total_unsupported
     ) {
         std::ifstream file(path);
         ASSERT_TRUE(file.is_open()) << "Cannot open " << path;
@@ -195,7 +178,6 @@ namespace {
             std::string gt    = trim(line.substr(sep + 1));
             std::string flags = flag_str(cls.flags);
 
-            by_route[route_str(cls.route)]++;
             by_semantic[semantic_str(cls.semantic)]++;
             by_flags[flags]++;
             by_vars[rv]++;
@@ -234,7 +216,6 @@ TEST(ArithOverBitwiseDiagnostic, FullScan) {
     };
 
     std::vector< FailureEntry > all_failures;
-    std::map< std::string, int > by_route;
     std::map< std::string, int > by_semantic;
     std::map< std::string, int > by_flags;
     std::map< uint32_t, int > by_vars;
@@ -244,8 +225,8 @@ TEST(ArithOverBitwiseDiagnostic, FullScan) {
         int parsed = 0, simplified = 0, unsupported = 0;
         std::cerr << "\n=== Scanning " << ds.name << " ===\n";
         scan_dataset(
-            ds.path, ds.name, all_failures, by_route, by_semantic, by_flags, by_vars, by_reason,
-            parsed, simplified, unsupported
+            ds.path, ds.name, all_failures, by_semantic, by_flags, by_vars, by_reason, parsed,
+            simplified, unsupported
         );
         std::cerr << "  parsed=" << parsed << " simplified=" << simplified
                   << " unsupported=" << unsupported << "\n";
@@ -254,7 +235,6 @@ TEST(ArithOverBitwiseDiagnostic, FullScan) {
     // Separate FW-fail from other unsupported
     int fw_fail_count = 0;
     std::map< std::string, int > fw_by_dataset;
-    std::map< std::string, int > fw_by_route;
     std::map< std::string, int > fw_by_semantic;
     std::map< std::string, int > fw_by_flags;
     std::map< uint32_t, int > fw_by_vars;
@@ -262,7 +242,6 @@ TEST(ArithOverBitwiseDiagnostic, FullScan) {
     for (const auto &f : all_failures) {
         fw_fail_count++;
         fw_by_dataset[f.dataset]++;
-        fw_by_route[route_str(f.cls.route)]++;
         fw_by_semantic[semantic_str(f.cls.semantic)]++;
         fw_by_flags[flag_str(f.cls.flags)]++;
         fw_by_vars[f.num_vars]++;
@@ -275,9 +254,6 @@ TEST(ArithOverBitwiseDiagnostic, FullScan) {
 
     std::cerr << "\n--- By dataset ---\n";
     for (auto &[k, v] : fw_by_dataset) { std::cerr << "  " << k << ": " << v << "\n"; }
-
-    std::cerr << "\n--- By route ---\n";
-    for (auto &[k, v] : fw_by_route) { std::cerr << "  " << k << ": " << v << "\n"; }
 
     std::cerr << "\n--- By semantic class ---\n";
     for (auto &[k, v] : fw_by_semantic) { std::cerr << "  " << k << ": " << v << "\n"; }
@@ -297,7 +273,7 @@ TEST(ArithOverBitwiseDiagnostic, FullScan) {
         for (const auto &f : all_failures) {
             if (f.dataset != ds_name) { continue; }
             std::cerr << "  L" << f.line_num << " vars=" << f.num_vars
-                      << " route=" << route_str(f.cls.route) << " flags={"
+                      << " semantic=" << semantic_str(f.cls.semantic) << " flags={"
                       << flag_str(f.cls.flags) << "}"
                       << " GT: " << f.ground_truth << "\n";
         }
@@ -367,8 +343,9 @@ TEST(ArithOverBitwiseDiagnostic, CoBMismatchDetail) {
         auto cls       = ClassifyStructural(**folded_ptr);
         std::string gt = trim(line.substr(sep + 1));
 
-        std::cerr << "\nL" << line_num << " route=" << route_str(cls.route) << " flags=0x"
-                  << std::hex << cls.flags << std::dec << " vars=" << vars.size() << "\n";
+        std::cerr << "\nL" << line_num << " semantic=" << semantic_str(cls.semantic)
+                  << " flags=0x" << std::hex << cls.flags << std::dec << " vars=" << vars.size()
+                  << "\n";
         std::cerr << "  GT:  " << gt << "\n";
         std::cerr
             << "  CoB: "

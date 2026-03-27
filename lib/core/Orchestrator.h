@@ -30,7 +30,7 @@ namespace cobra {
         kSignatureState,
         kSignatureCoeffState,
         kCoreCandidate,
-        kResidualState,
+        kRemainderState,
         kSemilinearNormalizedIr,
         kSemilinearCheckedIr,
         kSemilinearRewrittenIr,
@@ -110,7 +110,7 @@ namespace cobra {
         bool needs_original_space_verification = true;
     };
 
-    enum class ResidualOrigin : uint8_t {
+    enum class RemainderOrigin : uint8_t {
         kDirectBooleanNull,
         kProductCore,
         kPolynomialCore,
@@ -119,7 +119,7 @@ namespace cobra {
         kLiftedOuter,
     };
 
-    struct ResidualTargetContext
+    struct RemainderTargetContext
     {
         Evaluator eval;
         std::vector< std::string > vars;
@@ -132,22 +132,22 @@ namespace cobra {
         ExtractorKind extractor_kind;
         uint8_t degree_used = 0;
         std::vector< uint64_t > source_sig;
-        ResidualTargetContext target;
+        RemainderTargetContext target;
     };
 
-    struct ResidualStatePayload
+    struct RemainderStatePayload
     {
-        ResidualOrigin origin;
-        std::unique_ptr< Expr > core_expr;
-        uint8_t core_degree = 0;
-        Evaluator residual_eval;
+        RemainderOrigin origin;
+        std::unique_ptr< Expr > prefix_expr;
+        uint8_t prefix_degree = 0;
+        Evaluator remainder_eval;
         std::vector< uint64_t > source_sig;
-        std::vector< uint64_t > residual_sig;
-        EliminationResult residual_elim;
-        std::vector< uint32_t > residual_support;
+        std::vector< uint64_t > remainder_sig;
+        EliminationResult remainder_elim;
+        std::vector< uint32_t > remainder_support;
         bool is_boolean_null = false;
         uint8_t degree_floor = 2;
-        ResidualTargetContext target;
+        RemainderTargetContext target;
     };
 
     struct LiftedSkeletonPayload
@@ -189,7 +189,7 @@ namespace cobra {
 
     using StateData = std::variant<
         AstPayload, SignatureStatePayload, SignatureCoeffStatePayload, CoreCandidatePayload,
-        ResidualStatePayload, NormalizedSemilinearPayload, CheckedSemilinearPayload,
+        RemainderStatePayload, NormalizedSemilinearPayload, CheckedSemilinearPayload,
         RewrittenSemilinearPayload, LiftedSkeletonPayload, CandidatePayload,
         CompetitionResolvedPayload >;
 
@@ -214,7 +214,6 @@ namespace cobra {
     {
         std::vector< uint64_t > sig_vector;
         VerificationState verification       = VerificationState::kUnverified;
-        Route attempted_route                = Route::kBitwiseOnly;
         uint32_t structural_transform_rounds = 0;
         bool transform_produced_candidate    = false;
         bool candidate_failed_verification   = false;

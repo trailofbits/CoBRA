@@ -386,13 +386,11 @@ namespace cobra {
             sem = SemanticClass::kSemilinear;
         }
 
-        const Route kRoute = DeriveRoute(info.flags);
         COBRA_TRACE(
-            "Classifier", "ClassifyStructural: semantic={} route={} flags=0x{:x}",
-            static_cast< int >(sem), static_cast< int >(kRoute),
-            static_cast< uint32_t >(info.flags)
+            "Classifier", "ClassifyStructural: semantic={} flags=0x{:x}",
+            static_cast< int >(sem), static_cast< uint32_t >(info.flags)
         );
-        return { .semantic = sem, .flags = info.flags, .route = kRoute };
+        return { .semantic = sem, .flags = info.flags };
     }
 
 } // namespace cobra

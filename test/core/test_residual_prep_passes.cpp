@@ -18,7 +18,7 @@ TEST(PrepareDirectResidual, InapplicableOnNonAst) {
     WorkItem item;
     item.payload = SignatureStatePayload{};
 
-    auto result = RunPrepareDirectResidual(item, ctx);
+    auto result = RunPrepareDirectRemainder(item, ctx);
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result.value().decision, PassDecision::kNotApplicable);
 }
@@ -38,7 +38,7 @@ TEST(PrepareDirectResidual, BlockedWithoutEvaluator) {
         .provenance = Provenance::kLowered,
     };
 
-    auto result = RunPrepareDirectResidual(item, ctx);
+    auto result = RunPrepareDirectRemainder(item, ctx);
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result.value().decision, PassDecision::kBlocked);
 }
@@ -58,7 +58,7 @@ TEST(PrepareResidualFromCore, InapplicableOnNonCore) {
         .provenance = Provenance::kLowered,
     };
 
-    auto result = RunPrepareResidualFromCore(item, ctx);
+    auto result = RunPrepareRemainderFromCore(item, ctx);
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result.value().decision, PassDecision::kNotApplicable);
 }
@@ -78,7 +78,7 @@ TEST(PrepareResidualFromCore, BlockedWithoutEvaluator) {
         .extractor_kind = ExtractorKind::kProductAST,
     };
 
-    auto result = RunPrepareResidualFromCore(item, ctx);
+    auto result = RunPrepareRemainderFromCore(item, ctx);
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result.value().decision, PassDecision::kBlocked);
 }
@@ -102,21 +102,21 @@ TEST(PrepareResidualFromCore, UsesTargetLocalEvaluatorWithoutGlobalEvaluator) {
         .core_expr      = Expr::Variable(0),
         .extractor_kind = ExtractorKind::kPolynomial,
         .target =
-            ResidualTargetContext{
-                                  .eval = local_eval,
-                                  .vars = { "x" },
-                                  },
+            RemainderTargetContext{
+                                   .eval = local_eval,
+                                   .vars = { "x" },
+                                   },
     };
     item.group_id = 9;
 
-    auto result = RunPrepareResidualFromCore(item, ctx);
+    auto result = RunPrepareRemainderFromCore(item, ctx);
     ASSERT_TRUE(result.has_value());
     auto &pr = result.value();
 
     EXPECT_EQ(pr.decision, PassDecision::kAdvance);
     ASSERT_EQ(pr.next.size(), 1u);
-    ASSERT_EQ(GetStateKind(pr.next[0].payload), StateKind::kResidualState);
-    auto &residual = std::get< ResidualStatePayload >(pr.next[0].payload);
+    ASSERT_EQ(GetStateKind(pr.next[0].payload), StateKind::kRemainderState);
+    auto &residual = std::get< RemainderStatePayload >(pr.next[0].payload);
     EXPECT_EQ(residual.target.vars, std::vector< std::string >({ "x" }));
     EXPECT_EQ(residual.target.eval(std::vector< uint64_t >{ 7 }), 8u);
     ASSERT_TRUE(pr.next[0].group_id.has_value());

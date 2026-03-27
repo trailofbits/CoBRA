@@ -317,7 +317,6 @@ TEST(SignaturePass, MultivarPolyRecoveryGuardNoEvaluator) {
     auto cls = Classification{
         .semantic = SemanticClass::kPolynomial,
         .flags    = kSfHasMultivarHighPower,
-        .route    = Route::kPowerRecovery,
     };
     auto item   = MakeSignatureItem(sig, vars, ctx, cls);
     auto result = RunSignatureMultivarPolyRecovery(item, ctx);
@@ -368,9 +367,7 @@ TEST(SignaturePass, BuildSignatureStateCreatesGroup) {
 
     // Build an AST item for x0
     WorkItem ast_item;
-    auto cls         = Classification{ .semantic = SemanticClass::kLinear,
-                                       .flags    = kSfNone,
-                                       .route    = Route::kBitwiseOnly };
+    auto cls         = Classification{ .semantic = SemanticClass::kLinear, .flags = kSfNone };
     ast_item.payload = AstPayload{
         .expr           = Expr::Variable(0),
         .classification = cls,
@@ -411,9 +408,7 @@ TEST(SignaturePass, BuildSignatureStateUsesSolveCtxVars) {
 
     // Build an AST item for Variable(0) in a 1-var subproblem.
     WorkItem ast_item;
-    auto cls         = Classification{ .semantic = SemanticClass::kLinear,
-                                       .flags    = kSfNone,
-                                       .route    = Route::kBitwiseOnly };
+    auto cls         = Classification{ .semantic = SemanticClass::kLinear, .flags = kSfNone };
     ast_item.payload = AstPayload{
         .expr           = Expr::Variable(0),
         .classification = cls,
@@ -449,9 +444,7 @@ TEST(SignaturePass, BuildSignatureStateNoSolveCtxUsesOriginal) {
     auto ctx      = MakeCtx(opts, vars);
 
     WorkItem ast_item;
-    auto cls         = Classification{ .semantic = SemanticClass::kLinear,
-                                       .flags    = kSfNone,
-                                       .route    = Route::kBitwiseOnly };
+    auto cls         = Classification{ .semantic = SemanticClass::kLinear, .flags = kSfNone };
     ast_item.payload = AstPayload{
         .expr           = Expr::Add(Expr::Variable(0), Expr::Variable(1)),
         .classification = cls,
@@ -498,7 +491,7 @@ TEST(SingletonPolyRecovery, EmitsResidualForNonzeroCob) {
     // depending on whether the singleton fully absorbs the coefficient.
     // This test verifies the pass produces kAdvance (either via
     // direct candidate submission for zero residual or via
-    // kResidualState emission for nonzero residual).
+    // kRemainderState emission for nonzero residual).
     std::vector< uint64_t > sig     = { 0, 1 };
     std::vector< std::string > vars = { "x0" };
     std::vector< uint64_t > coeffs  = { 0, 1 };
@@ -524,11 +517,11 @@ TEST(SingletonPolyRecovery, EmitsResidualForNonzeroCob) {
         ASSERT_TRUE(group.best.has_value());
         EXPECT_EQ(group.best->source_pass, PassId::kSignatureSingletonPolyRecovery);
     } else {
-        // Nonzero-residual path: kResidualState emitted.
+        // Nonzero-residual path: kRemainderState emitted.
         ASSERT_EQ(pr.next.size(), 1);
-        EXPECT_EQ(GetStateKind(pr.next[0].payload), StateKind::kResidualState);
-        auto &residual = std::get< ResidualStatePayload >(pr.next[0].payload);
-        EXPECT_EQ(residual.origin, ResidualOrigin::kSignatureLowering);
+        EXPECT_EQ(GetStateKind(pr.next[0].payload), StateKind::kRemainderState);
+        auto &residual = std::get< RemainderStatePayload >(pr.next[0].payload);
+        EXPECT_EQ(residual.origin, RemainderOrigin::kSignatureLowering);
         ASSERT_TRUE(pr.next[0].group_id.has_value());
         EXPECT_EQ(*pr.next[0].group_id, group_id);
     }
@@ -537,7 +530,7 @@ TEST(SingletonPolyRecovery, EmitsResidualForNonzeroCob) {
 TEST(SingletonPolyRecovery, EmitsResidualForNonzeroTwoVar) {
     // f(x,y) = x + y + x*y. CoB coefficients {0, 1, 1, 1}.
     // The polynomial lowering may extract x*y, leaving a nonzero
-    // residual (x + y). This exercises the kResidualState emission.
+    // residual (x + y). This exercises the kRemainderState emission.
     std::vector< uint64_t > sig     = { 0, 1, 1, 3 };
     std::vector< std::string > vars = { "x0", "x1" };
     std::vector< uint64_t > coeffs  = { 0, 1, 1, 1 };
@@ -562,10 +555,10 @@ TEST(SingletonPolyRecovery, EmitsResidualForNonzeroTwoVar) {
     if (!pr.next.empty()) {
         // Residual state emitted.
         ASSERT_EQ(pr.next.size(), 1);
-        EXPECT_EQ(GetStateKind(pr.next[0].payload), StateKind::kResidualState);
-        auto &residual = std::get< ResidualStatePayload >(pr.next[0].payload);
-        EXPECT_EQ(residual.origin, ResidualOrigin::kSignatureLowering);
-        EXPECT_TRUE(residual.core_expr != nullptr);
+        EXPECT_EQ(GetStateKind(pr.next[0].payload), StateKind::kRemainderState);
+        auto &residual = std::get< RemainderStatePayload >(pr.next[0].payload);
+        EXPECT_EQ(residual.origin, RemainderOrigin::kSignatureLowering);
+        EXPECT_TRUE(residual.prefix_expr != nullptr);
         ASSERT_TRUE(pr.next[0].group_id.has_value());
         EXPECT_EQ(*pr.next[0].group_id, group_id);
         // Target context should carry the evaluator and vars.
@@ -580,7 +573,7 @@ TEST(SingletonPolyRecovery, EmitsResidualForNonzeroTwoVar) {
 
 TEST(SingletonPolyRecovery, RecursiveInvocationFallsBackToInline) {
     // When evaluator_override is set (residual solver spawned this
-    // chain), the pass should NOT emit a kResidualState — it should
+    // chain), the pass should NOT emit a kRemainderState — it should
     // fall back to inline combination and verification.
     std::vector< uint64_t > sig     = { 0, 1 };
     std::vector< std::string > vars = { "x0" };
@@ -605,7 +598,7 @@ TEST(SingletonPolyRecovery, RecursiveInvocationFallsBackToInline) {
     // No residual state should be emitted when evaluator_override is set.
     // Result is either a direct candidate or an inline combined candidate.
     for (const auto &child : pr.next) {
-        EXPECT_NE(GetStateKind(child.payload), StateKind::kResidualState);
+        EXPECT_NE(GetStateKind(child.payload), StateKind::kRemainderState);
     }
 }
 
@@ -1311,7 +1304,7 @@ TEST(SignaturePass, JoinCleanupAfterResolution) {
     EXPECT_EQ(ctx.join_states.count(join_id), 0);
 }
 
-// --- ResidualRecombineCont resolution tests ---
+// --- RemainderRecombineCont resolution tests ---
 
 TEST(SignaturePass, ResidualRecombineDirectBooleanNull) {
     // Direct boolean-null: core_expr is null, winner IS the full answer.
@@ -1327,15 +1320,15 @@ TEST(SignaturePass, ResidualRecombineDirectBooleanNull) {
     // Child group: the signature DAG solved the residual to "2*x0"
     auto child_gid = CreateGroup(ctx.competition_groups, ctx.next_group_id);
     ctx.competition_groups.at(child_gid).continuation = ContinuationData{
-        ResidualRecombineCont{
-                              .core_expr        = nullptr,
-                              .origin           = ResidualOrigin::kDirectBooleanNull,
-                              .residual_eval    = opts.evaluator,
-                              .source_sig       = { 0, 2 },
-                              .residual_support = {},
-                              .core_degree      = 0,
-                              .parent_group_id  = std::nullopt,
-                              }
+        RemainderRecombineCont{
+                               .prefix_expr       = nullptr,
+                               .origin            = RemainderOrigin::kDirectBooleanNull,
+                               .remainder_eval    = opts.evaluator,
+                               .source_sig        = { 0, 2 },
+                               .remainder_support = {},
+                               .prefix_degree     = 0,
+                               .parent_group_id   = std::nullopt,
+                               }
     };
 
     // Submit 2*x0 as the winner
@@ -1389,15 +1382,15 @@ TEST(SignaturePass, ResidualRecombineWithCoreExpr) {
 
     auto child_gid = CreateGroup(ctx.competition_groups, ctx.next_group_id);
     ctx.competition_groups.at(child_gid).continuation = ContinuationData{
-        ResidualRecombineCont{
-                              .core_expr        = CloneExpr(*core_expr),
-                              .origin           = ResidualOrigin::kProductCore,
-                              .residual_eval    = residual_eval,
-                              .source_sig       = { 0, 1, 1, 0 },
-                              .residual_support = {},
-                              .core_degree      = 0,
-                              .parent_group_id  = std::nullopt,
-                              }
+        RemainderRecombineCont{
+                               .prefix_expr       = CloneExpr(*core_expr),
+                               .origin            = RemainderOrigin::kProductCore,
+                               .remainder_eval    = residual_eval,
+                               .source_sig        = { 0, 1, 1, 0 },
+                               .remainder_support = {},
+                               .prefix_degree     = 0,
+                               .parent_group_id   = std::nullopt,
+                               }
     };
 
     // The DAG solved the residual: x0 ^ x1
@@ -1441,15 +1434,15 @@ TEST(SignaturePass, ResidualRecombineSubmitsToParentGroup) {
 
     Evaluator residual_eval                           = opts.evaluator;
     ctx.competition_groups.at(child_gid).continuation = ContinuationData{
-        ResidualRecombineCont{
-                              .core_expr        = nullptr,
-                              .origin           = ResidualOrigin::kDirectBooleanNull,
-                              .residual_eval    = residual_eval,
-                              .source_sig       = { 0, 3 },
-                              .residual_support = {},
-                              .core_degree      = 0,
-                              .parent_group_id  = parent_gid,
-                              }
+        RemainderRecombineCont{
+                               .prefix_expr       = nullptr,
+                               .origin            = RemainderOrigin::kDirectBooleanNull,
+                               .remainder_eval    = residual_eval,
+                               .source_sig        = { 0, 3 },
+                               .remainder_support = {},
+                               .prefix_degree     = 0,
+                               .parent_group_id   = parent_gid,
+                               }
     };
 
     CandidateRecord rec;
@@ -1501,15 +1494,15 @@ TEST(SignaturePass, ResidualRecombineNoWinnerAdvances) {
 
     auto child_gid = CreateGroup(ctx.competition_groups, ctx.next_group_id);
     ctx.competition_groups.at(child_gid).continuation = ContinuationData{
-        ResidualRecombineCont{
-                              .core_expr        = nullptr,
-                              .origin           = ResidualOrigin::kDirectBooleanNull,
-                              .residual_eval    = opts.evaluator,
-                              .source_sig       = { 0, 1 },
-                              .residual_support = {},
-                              .core_degree      = 0,
-                              .parent_group_id  = std::nullopt,
-                              }
+        RemainderRecombineCont{
+                               .prefix_expr       = nullptr,
+                               .origin            = RemainderOrigin::kDirectBooleanNull,
+                               .remainder_eval    = opts.evaluator,
+                               .source_sig        = { 0, 1 },
+                               .remainder_support = {},
+                               .prefix_degree     = 0,
+                               .parent_group_id   = std::nullopt,
+                               }
     };
 
     // No candidate submitted — group has no winner
@@ -1538,17 +1531,17 @@ TEST(SignaturePass, ResidualRecombineNoWinnerReleasesParentHandle) {
     auto child_gid = CreateGroup(ctx.competition_groups, ctx.next_group_id);
     Evaluator eval = [](const std::vector< uint64_t > &vals) -> uint64_t { return vals[0]; };
     ctx.competition_groups.at(child_gid).continuation = ContinuationData{
-        ResidualRecombineCont{
-                              .core_expr        = nullptr,
-                              .origin           = ResidualOrigin::kDirectBooleanNull,
-                              .residual_eval    = eval,
-                              .source_sig       = { 0, 1 },
-                              .residual_support = {},
-                              .core_degree      = 0,
-                              .parent_group_id  = parent_gid,
-                              .target_eval      = eval,
-                              .target_vars      = vars,
-                              }
+        RemainderRecombineCont{
+                               .prefix_expr       = nullptr,
+                               .origin            = RemainderOrigin::kDirectBooleanNull,
+                               .remainder_eval    = eval,
+                               .source_sig        = { 0, 1 },
+                               .remainder_support = {},
+                               .prefix_degree     = 0,
+                               .parent_group_id   = parent_gid,
+                               .target_eval       = eval,
+                               .target_vars       = vars,
+                               }
     };
 
     WorkItem resolved_item;
@@ -1581,17 +1574,17 @@ TEST(SignaturePass, ResidualRecombineVerificationFailureReleasesParentHandle) {
         return vals[0] + 1;
     };
     ctx.competition_groups.at(child_gid).continuation = ContinuationData{
-        ResidualRecombineCont{
-                              .core_expr        = nullptr,
-                              .origin           = ResidualOrigin::kDirectBooleanNull,
-                              .residual_eval    = good_eval,
-                              .source_sig       = { 0, 1 },
-                              .residual_support = {},
-                              .core_degree      = 0,
-                              .parent_group_id  = parent_gid,
-                              .target_eval      = bad_eval,
-                              .target_vars      = vars,
-                              }
+        RemainderRecombineCont{
+                               .prefix_expr       = nullptr,
+                               .origin            = RemainderOrigin::kDirectBooleanNull,
+                               .remainder_eval    = good_eval,
+                               .source_sig        = { 0, 1 },
+                               .remainder_support = {},
+                               .prefix_degree     = 0,
+                               .parent_group_id   = parent_gid,
+                               .target_eval       = bad_eval,
+                               .target_vars       = vars,
+                               }
     };
 
     CandidateRecord rec;
@@ -1630,15 +1623,15 @@ TEST(SignaturePass, ResidualRecombineWithVarRemap) {
     Evaluator residual_eval = opts.evaluator;
     auto child_gid          = CreateGroup(ctx.competition_groups, ctx.next_group_id);
     ctx.competition_groups.at(child_gid).continuation = ContinuationData{
-        ResidualRecombineCont{
-                              .core_expr        = nullptr,
-                              .origin           = ResidualOrigin::kDirectBooleanNull,
-                              .residual_eval    = residual_eval,
-                              .source_sig       = {},
-                              .residual_support = { 1 },
-                              .core_degree      = 0,
-                              .parent_group_id  = std::nullopt,
-                              }
+        RemainderRecombineCont{
+                               .prefix_expr       = nullptr,
+                               .origin            = RemainderOrigin::kDirectBooleanNull,
+                               .remainder_eval    = residual_eval,
+                               .source_sig        = {},
+                               .remainder_support = { 1 },
+                               .prefix_degree     = 0,
+                               .parent_group_id   = std::nullopt,
+                               }
     };
 
     // Winner in reduced 1-var space: 5*x0 (but x0 maps to x1)
@@ -1676,21 +1669,21 @@ TEST(ResidualEmission, EmitsSignatureStateChildWithContinuation) {
     };
     auto ctx = MakeCtx(opts, vars);
 
-    // Build a ResidualStatePayload (direct boolean-null).
+    // Build a RemainderStatePayload (direct boolean-null).
     auto sig  = EvaluateBooleanSignature(opts.evaluator, 2, 64);
     auto elim = EliminateAuxVars(sig, vars);
 
     WorkItem item;
-    item.payload = ResidualStatePayload{
-        .origin           = ResidualOrigin::kDirectBooleanNull,
-        .core_expr        = nullptr,
-        .core_degree      = 0,
-        .residual_eval    = opts.evaluator,
-        .source_sig       = sig,
-        .residual_sig     = sig,
-        .residual_elim    = elim,
-        .residual_support = BuildVarSupport(vars, elim.real_vars),
-        .is_boolean_null  = true,
+    item.payload = RemainderStatePayload{
+        .origin            = RemainderOrigin::kDirectBooleanNull,
+        .prefix_expr       = nullptr,
+        .prefix_degree     = 0,
+        .remainder_eval    = opts.evaluator,
+        .source_sig        = sig,
+        .remainder_sig     = sig,
+        .remainder_elim    = elim,
+        .remainder_support = BuildVarSupport(vars, elim.real_vars),
+        .is_boolean_null   = true,
     };
 
     auto result = RunResidualSupported(item, ctx);
@@ -1711,10 +1704,10 @@ TEST(ResidualEmission, EmitsSignatureStateChildWithContinuation) {
     EXPECT_TRUE(pr.next[0].evaluator_override.has_value());
     // 7. Exactly one competition group created
     EXPECT_EQ(ctx.competition_groups.size(), 1);
-    // 8. The group's continuation is ResidualRecombineCont
+    // 8. The group's continuation is RemainderRecombineCont
     auto &group = ctx.competition_groups.at(*pr.next[0].group_id);
     ASSERT_TRUE(group.continuation.has_value());
-    EXPECT_TRUE(std::holds_alternative< ResidualRecombineCont >(*group.continuation));
+    EXPECT_TRUE(std::holds_alternative< RemainderRecombineCont >(*group.continuation));
 }
 
 TEST(ResidualEmission, BlockedWhenVarsOutOfRange) {
@@ -1729,11 +1722,11 @@ TEST(ResidualEmission, BlockedWhenVarsOutOfRange) {
     auto elim                   = EliminateAuxVars(sig, vars);
 
     WorkItem item;
-    item.payload = ResidualStatePayload{
-        .origin           = ResidualOrigin::kDirectBooleanNull,
-        .residual_sig     = sig,
-        .residual_elim    = elim,
-        .residual_support = {},
+    item.payload = RemainderStatePayload{
+        .origin            = RemainderOrigin::kDirectBooleanNull,
+        .remainder_sig     = sig,
+        .remainder_elim    = elim,
+        .remainder_support = {},
     };
 
     auto result = RunResidualSupported(item, ctx);
@@ -1746,7 +1739,7 @@ TEST(ResidualEmission, BlockedWhenVarsOutOfRange) {
 
 TEST(ResidualEmission, GroupedResidualSetsParentGroupOnContinuation) {
     // When the residual state has item.group_id, RunResidualSupported should
-    // set parent_group_id on the ResidualRecombineCont so the winner
+    // set parent_group_id on the RemainderRecombineCont so the winner
     // resolves back into the parent group.
     std::vector< std::string > vars = { "x0", "x1" };
     Options opts;
@@ -1763,21 +1756,21 @@ TEST(ResidualEmission, GroupedResidualSetsParentGroupOnContinuation) {
     auto parent_gid = CreateGroup(ctx.competition_groups, ctx.next_group_id);
 
     WorkItem item;
-    item.payload = ResidualStatePayload{
-        .origin           = ResidualOrigin::kDirectBooleanNull,
-        .core_expr        = nullptr,
-        .core_degree      = 0,
-        .residual_eval    = opts.evaluator,
-        .source_sig       = sig,
-        .residual_sig     = sig,
-        .residual_elim    = elim,
-        .residual_support = BuildVarSupport(vars, elim.real_vars),
-        .is_boolean_null  = true,
+    item.payload = RemainderStatePayload{
+        .origin            = RemainderOrigin::kDirectBooleanNull,
+        .prefix_expr       = nullptr,
+        .prefix_degree     = 0,
+        .remainder_eval    = opts.evaluator,
+        .source_sig        = sig,
+        .remainder_sig     = sig,
+        .remainder_elim    = elim,
+        .remainder_support = BuildVarSupport(vars, elim.real_vars),
+        .is_boolean_null   = true,
         .target =
-            ResidualTargetContext{
-                                  .eval = *ctx.evaluator,
-                                  .vars = vars,
-                                  },
+            RemainderTargetContext{
+                                   .eval = *ctx.evaluator,
+                                   .vars = vars,
+                                   },
     };
     item.group_id = parent_gid;
 
@@ -1792,11 +1785,11 @@ TEST(ResidualEmission, GroupedResidualSetsParentGroupOnContinuation) {
     auto child_gid = *pr.next[0].group_id;
     ASSERT_NE(child_gid, parent_gid);
 
-    // The child group's continuation should be ResidualRecombineCont
+    // The child group's continuation should be RemainderRecombineCont
     // with parent_group_id pointing to the parent.
     auto &child_group = ctx.competition_groups.at(child_gid);
     ASSERT_TRUE(child_group.continuation.has_value());
-    auto *cont = std::get_if< ResidualRecombineCont >(&*child_group.continuation);
+    auto *cont = std::get_if< RemainderRecombineCont >(&*child_group.continuation);
     ASSERT_NE(cont, nullptr);
     ASSERT_TRUE(cont->parent_group_id.has_value());
     EXPECT_EQ(*cont->parent_group_id, parent_gid);
@@ -1816,21 +1809,21 @@ TEST(ResidualEmission, UngroupedResidualNoParentGroup) {
     auto elim = EliminateAuxVars(sig, vars);
 
     WorkItem item;
-    item.payload = ResidualStatePayload{
-        .origin           = ResidualOrigin::kDirectBooleanNull,
-        .core_expr        = nullptr,
-        .core_degree      = 0,
-        .residual_eval    = opts.evaluator,
-        .source_sig       = sig,
-        .residual_sig     = sig,
-        .residual_elim    = elim,
-        .residual_support = BuildVarSupport(vars, elim.real_vars),
-        .is_boolean_null  = true,
+    item.payload = RemainderStatePayload{
+        .origin            = RemainderOrigin::kDirectBooleanNull,
+        .prefix_expr       = nullptr,
+        .prefix_degree     = 0,
+        .remainder_eval    = opts.evaluator,
+        .source_sig        = sig,
+        .remainder_sig     = sig,
+        .remainder_elim    = elim,
+        .remainder_support = BuildVarSupport(vars, elim.real_vars),
+        .is_boolean_null   = true,
         .target =
-            ResidualTargetContext{
-                                  .eval = *ctx.evaluator,
-                                  .vars = vars,
-                                  },
+            RemainderTargetContext{
+                                   .eval = *ctx.evaluator,
+                                   .vars = vars,
+                                   },
     };
     // No group_id set.
 
@@ -1845,7 +1838,7 @@ TEST(ResidualEmission, UngroupedResidualNoParentGroup) {
     auto child_gid    = *pr.next[0].group_id;
     auto &child_group = ctx.competition_groups.at(child_gid);
     ASSERT_TRUE(child_group.continuation.has_value());
-    auto *cont = std::get_if< ResidualRecombineCont >(&*child_group.continuation);
+    auto *cont = std::get_if< RemainderRecombineCont >(&*child_group.continuation);
     ASSERT_NE(cont, nullptr);
     EXPECT_FALSE(cont->parent_group_id.has_value());
 }
@@ -2311,9 +2304,7 @@ TEST(SignaturePass, BuildSignatureStateReusesIncomingGroup) {
 
     // Build an AST item with the existing group_id.
     WorkItem ast_item;
-    auto cls         = Classification{ .semantic = SemanticClass::kLinear,
-                                       .flags    = kSfNone,
-                                       .route    = Route::kBitwiseOnly };
+    auto cls         = Classification{ .semantic = SemanticClass::kLinear, .flags = kSfNone };
     ast_item.payload = AstPayload{
         .expr           = Expr::Variable(0),
         .classification = cls,

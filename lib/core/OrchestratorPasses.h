@@ -26,9 +26,9 @@ namespace cobra {
         kExtractTemplateCore,
         kExtractPolyCoreD3,
         kExtractPolyCoreD4,
-        // Decomposition residual prep
-        kPrepareDirectResidual,
-        kPrepareResidualFromCore,
+        // Remainder prep
+        kPrepareDirectRemainder,
+        kPrepareRemainderFromCore,
         // Decomposition residual solvers
         kResidualSupported,
         kResidualPolyRecovery,

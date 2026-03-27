@@ -63,9 +63,9 @@ namespace cobra {
     // Core extractor: template decomposition with reduced/full var fallback.
     SolverResult< CoreCandidate > ExtractTemplateCore(const DecompositionContext &ctx);
 
-    // Build a residual evaluator: r(x) = (f(x) - EvalExpr(core, x, bw)) & mask.
-    // The core expression is cloned internally.
+    // Build a remainder evaluator: r(x) = (f(x) - EvalExpr(prefix, x, bw)) & mask.
+    // The prefix expression is cloned internally.
     Evaluator
-    BuildResidualEvaluator(const Evaluator &original, const Expr &core, uint32_t bitwidth);
+    BuildRemainderEvaluator(const Evaluator &original, const Expr &prefix, uint32_t bitwidth);
 
 } // namespace cobra

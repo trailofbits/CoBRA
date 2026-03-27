@@ -81,7 +81,7 @@ namespace cobra {
     } // namespace
 
     Evaluator
-    BuildResidualEvaluator(const Evaluator &original, const Expr &core, uint32_t bitwidth) {
+    BuildRemainderEvaluator(const Evaluator &original, const Expr &core, uint32_t bitwidth) {
         // shared_ptr because std::function requires copy-constructible captures.
         std::shared_ptr< Expr > core_shared = CloneExpr(core);
         const uint64_t kMask                = Bitmask(bitwidth);
@@ -144,7 +144,7 @@ namespace cobra {
         const uint32_t kBw   = ctx.opts.bitwidth;
         const uint64_t kMask = Bitmask(kBw);
 
-        auto residual_eval = BuildResidualEvaluator(ctx.opts.evaluator, *core.expr, kBw);
+        auto residual_eval = BuildRemainderEvaluator(ctx.opts.evaluator, *core.expr, kBw);
 
         // Deterministic seed for reproducible acceptance decisions.
         std::mt19937_64 rng(0xDECAF);

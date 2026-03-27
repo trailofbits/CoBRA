@@ -69,41 +69,6 @@ namespace {
         return "Unknown";
     }
 
-    const char *RouteName(cobra::Route r) {
-        switch (r) {
-            case cobra::Route::kBitwiseOnly:
-                return "BitwiseOnly";
-            case cobra::Route::kMultilinear:
-                return "Multilinear";
-            case cobra::Route::kPowerRecovery:
-                return "PowerRecovery";
-            case cobra::Route::kMixedRewrite:
-                return "MixedRewrite";
-            case cobra::Route::kUnsupported:
-                return "Unsupported";
-        }
-        return "Unknown";
-    }
-
-    const char *RouteTechnique(cobra::Route r) {
-        switch (r) {
-            case cobra::Route::kBitwiseOnly:
-                return "Direct Change-of-Basis decomposition";
-            case cobra::Route::kMultilinear:
-                return "Change-of-Basis with multilinear "
-                       "product matching";
-            case cobra::Route::kPowerRecovery:
-                return "Change-of-Basis with polynomial "
-                       "coefficient splitting and power recovery";
-            case cobra::Route::kMixedRewrite:
-                return "Algebraic rewrite of mixed products, "
-                       "then Change-of-Basis decomposition";
-            case cobra::Route::kUnsupported:
-                return "No simplification available";
-        }
-        return "Unknown";
-    }
-
     void PrintStructuralFlags(cobra::StructuralFlag flags) {
         bool first = true;
         auto emit  = [&](const char *name) {
@@ -171,8 +136,9 @@ namespace {
         if (result.value().kind == cobra::SimplifyOutcome::Kind::kUnchangedUnsupported) {
             std::cerr << "Unsupported: " << result.value().diag.reason << "\n";
             if (verbose) {
-                std::cerr << "  Route: " << RouteName(result.value().diag.classification.route)
-                          << ", rewrite rounds: "
+                std::cerr << "  Flags: ";
+                PrintStructuralFlags(result.value().diag.classification.flags);
+                std::cerr << ", rewrite rounds: "
                           << result.value().diag.structural_transform_rounds << "\n";
             }
             auto text = cobra::Render(*result.value().expr, vars, bitwidth);
@@ -472,17 +438,15 @@ int main(int argc, char *argv[]) {
 
     auto cls = cobra::ClassifyStructural(*folded);
     COBRA_TRACE(
-        "CLI", "ClassifyStructural: semantic={} route={}", SemanticClassName(cls.semantic),
-        RouteName(cls.route)
+        "CLI", "ClassifyStructural: semantic={} flags=0x{:x}", SemanticClassName(cls.semantic),
+        static_cast< uint32_t >(cls.flags)
     );
 
     if (verbose) {
         std::cerr << "Classification: " << SemanticClassName(cls.semantic) << "\n";
-        std::cerr << "  Route: " << RouteName(cls.route) << "\n";
         std::cerr << "  Flags: ";
         PrintStructuralFlags(cls.flags);
         std::cerr << "\n";
-        std::cerr << "  Technique: " << RouteTechnique(cls.route) << "\n";
     }
 
     switch (cls.semantic) {

@@ -159,7 +159,10 @@ namespace cobra {
         std::unique_ptr< Expr > expr, const RewriteOptions &opts
     ) { // NOLINT(readability-identifier-naming)
         auto cls = ClassifyStructural(*expr);
-        if (cls.route != Route::kMixedRewrite) {
+        if (HasFlag(cls.flags, kSfHasUnknownShape)
+            || !HasFlag(cls.flags, kSfHasMixedProduct | kSfHasBitwiseOverArith)
+            || CountRewriteableSites(*expr) == 0)
+        {
             return { .expr = std::move(expr), .rounds_applied = 0, .structure_changed = false };
         }
 
@@ -227,8 +230,8 @@ namespace cobra {
             result.structure_changed = true;
             result.rounds_applied    = round;
 
-            if (DeriveRoute(new_flags) != Route::kMixedRewrite) {
-                COBRA_TRACE("MixedRewriter", "Round {}: route changed — done", round);
+            if (new_sites == 0) {
+                COBRA_TRACE("MixedRewriter", "Round {}: no rewriteable sites — done", round);
                 break;
             }
         }

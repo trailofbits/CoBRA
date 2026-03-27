@@ -39,8 +39,8 @@ TEST(ResidualGhost, InapplicableWhenNotBooleanNull) {
         .bitwidth      = 64,
     };
     WorkItem item;
-    item.payload = ResidualStatePayload{
-        .origin          = ResidualOrigin::kProductCore,
+    item.payload = RemainderStatePayload{
+        .origin          = RemainderOrigin::kProductCore,
         .is_boolean_null = false,
     };
 
@@ -78,8 +78,8 @@ TEST(ResidualFactoredGhost, InapplicableWhenNotBooleanNull) {
         .bitwidth      = 64,
     };
     WorkItem item;
-    item.payload = ResidualStatePayload{
-        .origin          = ResidualOrigin::kProductCore,
+    item.payload = RemainderStatePayload{
+        .origin          = RemainderOrigin::kProductCore,
         .is_boolean_null = false,
     };
 
@@ -117,8 +117,8 @@ TEST(ResidualFactoredGhostEscalated, InapplicableWhenNotBooleanNull) {
         .bitwidth      = 64,
     };
     WorkItem item;
-    item.payload = ResidualStatePayload{
-        .origin          = ResidualOrigin::kProductCore,
+    item.payload = RemainderStatePayload{
+        .origin          = RemainderOrigin::kProductCore,
         .is_boolean_null = false,
     };
 
@@ -175,13 +175,13 @@ TEST(ResidualPolyRecovery, InapplicableWhenTooManyVars) {
         .bitwidth      = 64,
     };
     WorkItem item;
-    item.payload = ResidualStatePayload{
-        .origin = ResidualOrigin::kProductCore,
-        .residual_elim =
+    item.payload = RemainderStatePayload{
+        .origin = RemainderOrigin::kProductCore,
+        .remainder_elim =
             EliminationResult{
                               .real_vars = { "x0", "x1", "x2", "x3", "x4", "x5", "x6" },
                               },
-        .residual_support = { 0, 1, 2, 3, 4, 5, 6 },
+        .remainder_support = { 0, 1, 2, 3, 4, 5, 6 },
     };
 
     auto result = RunResidualPolyRecovery(item, ctx);
@@ -256,23 +256,23 @@ TEST(ResidualGhost, UsesTargetContextNotGlobal) {
     auto elim       = EliminateAuxVars(target_sig, target_vars);
 
     WorkItem item;
-    item.payload = ResidualStatePayload{
-        .origin           = ResidualOrigin::kDirectBooleanNull,
-        .core_expr        = nullptr,
-        .core_degree      = 0,
-        .residual_eval    = target_eval,
-        .source_sig       = target_sig,
-        .residual_sig     = target_sig,
-        .residual_elim    = elim,
-        .residual_support = residual_support,
-        .is_boolean_null  = true,
-        .degree_floor     = 2,
+    item.payload = RemainderStatePayload{
+        .origin            = RemainderOrigin::kDirectBooleanNull,
+        .prefix_expr       = nullptr,
+        .prefix_degree     = 0,
+        .remainder_eval    = target_eval,
+        .source_sig        = target_sig,
+        .remainder_sig     = target_sig,
+        .remainder_elim    = elim,
+        .remainder_support = residual_support,
+        .is_boolean_null   = true,
+        .degree_floor      = 2,
         .target =
-            ResidualTargetContext{
-                                  .eval          = target_eval,
-                                  .vars          = target_vars,
-                                  .remap_support = target_remap,
-                                  },
+            RemainderTargetContext{
+                                   .eval          = target_eval,
+                                   .vars          = target_vars,
+                                   .remap_support = target_remap,
+                                   },
     };
 
     auto result = RunResidualGhost(item, ctx);

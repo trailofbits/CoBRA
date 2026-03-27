@@ -38,7 +38,6 @@ namespace cobra {
         kOrchestrator,
         kSemilinear,
         kSignature,
-        kMixedRewrite,
         kStructuralTransform,
         kDecomposition,
         kTemplateDecomposer,

@@ -23,29 +23,29 @@ namespace cobra {
         }
 
         bool IsResidualKind(const WorkItem &item) {
-            return std::holds_alternative< ResidualStatePayload >(item.payload);
+            return std::holds_alternative< RemainderStatePayload >(item.payload);
         }
 
-        ExtractorKind ProjectExtractorKind(ResidualOrigin origin) {
+        ExtractorKind ProjectExtractorKind(RemainderOrigin origin) {
             switch (origin) {
-                case ResidualOrigin::kDirectBooleanNull:
+                case RemainderOrigin::kDirectBooleanNull:
                     return ExtractorKind::kBooleanNullDirect;
-                case ResidualOrigin::kProductCore:
+                case RemainderOrigin::kProductCore:
                     return ExtractorKind::kProductAST;
-                case ResidualOrigin::kPolynomialCore:
+                case RemainderOrigin::kPolynomialCore:
                     return ExtractorKind::kPolynomial;
-                case ResidualOrigin::kTemplateCore:
+                case RemainderOrigin::kTemplateCore:
                     return ExtractorKind::kTemplate;
-                case ResidualOrigin::kSignatureLowering:
+                case RemainderOrigin::kSignatureLowering:
                     return ExtractorKind::kBooleanNullDirect;
-                case ResidualOrigin::kLiftedOuter:
+                case RemainderOrigin::kLiftedOuter:
                     return ExtractorKind::kBooleanNullDirect;
             }
             return ExtractorKind::kBooleanNullDirect;
         }
 
         std::optional< PassResult > TryRecombineAndEmit(
-            const ResidualStatePayload &residual, std::unique_ptr< Expr > solved_expr,
+            const RemainderStatePayload &residual, std::unique_ptr< Expr > solved_expr,
             const std::vector< std::string > &solved_expr_vars, const WorkItem &parent,
             OrchestratorContext &ctx, PassId producing_pass, ResidualSolverKind solver_kind
         ) {
@@ -56,7 +56,7 @@ namespace cobra {
             const auto &target_eval =
                 residual.target.vars.empty() ? *ctx.evaluator : residual.target.eval;
             const auto &remap = residual.target.remap_support.empty()
-                ? residual.residual_support
+                ? residual.remainder_support
                 : residual.target.remap_support;
 
             // Some residual solvers return expressions already embedded in the
@@ -66,8 +66,8 @@ namespace cobra {
                 RemapVarIndices(*solved_expr, remap);
             }
 
-            auto combined = residual.core_expr
-                ? Expr::Add(CloneExpr(*residual.core_expr), std::move(solved_expr))
+            auto combined = residual.prefix_expr
+                ? Expr::Add(CloneExpr(*residual.prefix_expr), std::move(solved_expr))
                 : std::move(solved_expr);
 
             const auto num_vars = static_cast< uint32_t >(target_vars.size());
@@ -92,7 +92,7 @@ namespace cobra {
                 .extractor_kind = static_cast< uint8_t >(ProjectExtractorKind(residual.origin)),
                 .solver_kind    = static_cast< uint8_t >(solver_kind),
                 .has_solver     = true,
-                .core_degree    = residual.core_degree,
+                .core_degree    = residual.prefix_degree,
             };
             cand_item.depth          = parent.depth;
             cand_item.rewrite_gen    = parent.rewrite_gen;
@@ -234,10 +234,10 @@ namespace cobra {
                 .degree_used    = core_payload.degree_used,
                 .source_sig     = std::move(decomp_sig),
                 .target =
-                    ResidualTargetContext{
-                                          .eval = *active_eval,
-                                          .vars = active_vars,
-                                          },
+                    RemainderTargetContext{
+                                           .eval = *active_eval,
+                                           .vars = active_vars,
+                                           },
             };
             core_item.features       = item.features;
             core_item.metadata       = item.metadata;
@@ -293,7 +293,7 @@ namespace cobra {
     }
 
     Result< PassResult >
-    RunPrepareDirectResidual(const WorkItem &item, OrchestratorContext &ctx) {
+    RunPrepareDirectRemainder(const WorkItem &item, OrchestratorContext &ctx) {
         if (!IsAstKind(item)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
@@ -333,22 +333,22 @@ namespace cobra {
         }
 
         WorkItem residual_item;
-        residual_item.payload = ResidualStatePayload{
-            .origin           = ResidualOrigin::kDirectBooleanNull,
-            .core_expr        = nullptr,
-            .core_degree      = 0,
-            .residual_eval    = *active_eval,
-            .source_sig       = decomp_sig,
-            .residual_sig     = decomp_sig,
-            .residual_elim    = std::move(elim),
-            .residual_support = std::move(support),
-            .is_boolean_null  = true,
-            .degree_floor     = 2,
+        residual_item.payload = RemainderStatePayload{
+            .origin            = RemainderOrigin::kDirectBooleanNull,
+            .prefix_expr       = nullptr,
+            .prefix_degree     = 0,
+            .remainder_eval    = *active_eval,
+            .source_sig        = decomp_sig,
+            .remainder_sig     = decomp_sig,
+            .remainder_elim    = std::move(elim),
+            .remainder_support = std::move(support),
+            .is_boolean_null   = true,
+            .degree_floor      = 2,
             .target =
-                ResidualTargetContext{
-                                      .eval = *active_eval,
-                                      .vars = active_vars,
-                                      },
+                RemainderTargetContext{
+                                       .eval = *active_eval,
+                                       .vars = active_vars,
+                                       },
         };
         residual_item.features       = item.features;
         residual_item.metadata       = item.metadata;
@@ -366,7 +366,7 @@ namespace cobra {
     }
 
     Result< PassResult >
-    RunPrepareResidualFromCore(const WorkItem &item, OrchestratorContext &ctx) {
+    RunPrepareRemainderFromCore(const WorkItem &item, OrchestratorContext &ctx) {
         if (!std::holds_alternative< CoreCandidatePayload >(item.payload)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
@@ -392,7 +392,8 @@ namespace cobra {
         const auto &target_eval = core.target.vars.empty() ? *ctx.evaluator : core.target.eval;
         const auto num_vars     = static_cast< uint32_t >(target_vars.size());
 
-        auto residual_eval = BuildResidualEvaluator(target_eval, *core.core_expr, ctx.bitwidth);
+        auto residual_eval =
+            BuildRemainderEvaluator(target_eval, *core.core_expr, ctx.bitwidth);
 
         auto residual_sig = EvaluateBooleanSignature(residual_eval, num_vars, ctx.bitwidth);
 
@@ -402,19 +403,19 @@ namespace cobra {
         bool is_bn =
             IsBooleanNullResidual(residual_eval, support, num_vars, ctx.bitwidth, residual_sig);
 
-        ResidualOrigin origin;
+        RemainderOrigin origin;
         switch (core.extractor_kind) {
             case ExtractorKind::kProductAST:
-                origin = ResidualOrigin::kProductCore;
+                origin = RemainderOrigin::kProductCore;
                 break;
             case ExtractorKind::kPolynomial:
-                origin = ResidualOrigin::kPolynomialCore;
+                origin = RemainderOrigin::kPolynomialCore;
                 break;
             case ExtractorKind::kTemplate:
-                origin = ResidualOrigin::kTemplateCore;
+                origin = RemainderOrigin::kTemplateCore;
                 break;
             case ExtractorKind::kBooleanNullDirect:
-                origin = ResidualOrigin::kDirectBooleanNull;
+                origin = RemainderOrigin::kDirectBooleanNull;
                 break;
         }
 
@@ -423,23 +424,23 @@ namespace cobra {
             : 2;
 
         WorkItem residual_item;
-        residual_item.payload = ResidualStatePayload{
-            .origin           = origin,
-            .core_expr        = CloneExpr(*core.core_expr),
-            .core_degree      = core.degree_used,
-            .residual_eval    = std::move(residual_eval),
-            .source_sig       = core.source_sig,
-            .residual_sig     = std::move(residual_sig),
-            .residual_elim    = std::move(elim),
-            .residual_support = std::move(support),
-            .is_boolean_null  = is_bn,
-            .degree_floor     = degree_floor,
+        residual_item.payload = RemainderStatePayload{
+            .origin            = origin,
+            .prefix_expr       = CloneExpr(*core.core_expr),
+            .prefix_degree     = core.degree_used,
+            .remainder_eval    = std::move(residual_eval),
+            .source_sig        = core.source_sig,
+            .remainder_sig     = std::move(residual_sig),
+            .remainder_elim    = std::move(elim),
+            .remainder_support = std::move(support),
+            .is_boolean_null   = is_bn,
+            .degree_floor      = degree_floor,
             .target =
-                ResidualTargetContext{
-                                      .eval          = target_eval,
-                                      .vars          = target_vars,
-                                      .remap_support = core.target.remap_support,
-                                      },
+                RemainderTargetContext{
+                                       .eval          = target_eval,
+                                       .vars          = target_vars,
+                                       .remap_support = core.target.remap_support,
+                                       },
         };
         residual_item.features       = item.features;
         residual_item.metadata       = item.metadata;
@@ -464,12 +465,12 @@ namespace cobra {
         if (!IsResidualKind(item)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
-        const auto &residual = std::get< ResidualStatePayload >(item.payload);
+        const auto &residual = std::get< RemainderStatePayload >(item.payload);
         if (!residual.is_boolean_null) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
         const auto res_real_count =
-            static_cast< uint32_t >(residual.residual_elim.real_vars.size());
+            static_cast< uint32_t >(residual.remainder_elim.real_vars.size());
         if (res_real_count > 6) {
             return Ok(
                 PassResult{
@@ -483,7 +484,7 @@ namespace cobra {
             residual.target.vars.empty() ? ctx.original_vars : residual.target.vars;
         const auto num_vars = static_cast< uint32_t >(target_vars.size());
         auto ghost          = SolveGhostResidual(
-            residual.residual_eval, residual.residual_support, num_vars, ctx.bitwidth
+            residual.remainder_eval, residual.remainder_support, num_vars, ctx.bitwidth
         );
         if (!ghost.Succeeded()) {
             return Ok(
@@ -523,12 +524,12 @@ namespace cobra {
         if (!IsResidualKind(item)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
-        const auto &residual = std::get< ResidualStatePayload >(item.payload);
+        const auto &residual = std::get< RemainderStatePayload >(item.payload);
         if (!residual.is_boolean_null) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
         const auto res_real_count =
-            static_cast< uint32_t >(residual.residual_elim.real_vars.size());
+            static_cast< uint32_t >(residual.remainder_elim.real_vars.size());
         if (res_real_count > 6) {
             return Ok(
                 PassResult{
@@ -542,7 +543,7 @@ namespace cobra {
             residual.target.vars.empty() ? ctx.original_vars : residual.target.vars;
         const auto num_vars = static_cast< uint32_t >(target_vars.size());
         auto factored       = SolveFactoredGhostResidual(
-            residual.residual_eval, residual.residual_support, num_vars, ctx.bitwidth
+            residual.remainder_eval, residual.remainder_support, num_vars, ctx.bitwidth
         );
         if (!factored.Succeeded()) {
             return Ok(
@@ -582,12 +583,12 @@ namespace cobra {
         if (!IsResidualKind(item)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
-        const auto &residual = std::get< ResidualStatePayload >(item.payload);
+        const auto &residual = std::get< RemainderStatePayload >(item.payload);
         if (!residual.is_boolean_null) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
         const auto res_real_count =
-            static_cast< uint32_t >(residual.residual_elim.real_vars.size());
+            static_cast< uint32_t >(residual.remainder_elim.real_vars.size());
         if (res_real_count > 6) {
             return Ok(
                 PassResult{
@@ -602,7 +603,7 @@ namespace cobra {
         const auto num_vars = static_cast< uint32_t >(target_vars.size());
         uint8_t grid        = (res_real_count <= 2) ? 3 : 2;
         auto factored       = SolveFactoredGhostResidual(
-            residual.residual_eval, residual.residual_support, num_vars, ctx.bitwidth, 2, grid
+            residual.remainder_eval, residual.remainder_support, num_vars, ctx.bitwidth, 2, grid
         );
         if (!factored.Succeeded()) {
             return Ok(
@@ -642,9 +643,9 @@ namespace cobra {
         if (!IsResidualKind(item)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
-        const auto &residual = std::get< ResidualStatePayload >(item.payload);
+        const auto &residual = std::get< RemainderStatePayload >(item.payload);
         const auto res_real_count =
-            static_cast< uint32_t >(residual.residual_elim.real_vars.size());
+            static_cast< uint32_t >(residual.remainder_elim.real_vars.size());
         if (res_real_count > 6) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
@@ -653,7 +654,7 @@ namespace cobra {
             residual.target.vars.empty() ? ctx.original_vars : residual.target.vars;
         const auto num_vars = static_cast< uint32_t >(target_vars.size());
         auto res_poly       = RecoverAndVerifyPoly(
-            residual.residual_eval, residual.residual_support, num_vars, ctx.bitwidth, 4,
+            residual.remainder_eval, residual.remainder_support, num_vars, ctx.bitwidth, 4,
             residual.degree_floor
         );
         if (!res_poly.Succeeded()) {
@@ -693,14 +694,14 @@ namespace cobra {
         if (!IsResidualKind(item)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
-        const auto &residual = std::get< ResidualStatePayload >(item.payload);
+        const auto &residual = std::get< RemainderStatePayload >(item.payload);
 
         // Resolve target-local variable space.
         const auto &target_vars =
             residual.target.vars.empty() ? ctx.original_vars : residual.target.vars;
 
         // Aux-var elimination on residual signature in the target space.
-        auto elim                 = EliminateAuxVars(residual.residual_sig, target_vars);
+        auto elim                 = EliminateAuxVars(residual.remainder_sig, target_vars);
         const auto real_var_count = static_cast< uint32_t >(elim.real_vars.size());
         if (real_var_count == 0 || real_var_count > ctx.opts.max_vars) {
             return Ok(
@@ -733,19 +734,19 @@ namespace cobra {
         const auto &target_eval =
             residual.target.vars.empty() ? *ctx.evaluator : residual.target.eval;
 
-        // Create competition group with ResidualRecombineCont.
+        // Create competition group with RemainderRecombineCont.
         auto group_id      = CreateGroup(ctx.competition_groups, ctx.next_group_id);
         auto &group        = ctx.competition_groups.at(group_id);
-        group.continuation = ResidualRecombineCont{
-            .core_expr        = residual.core_expr ? CloneExpr(*residual.core_expr) : nullptr,
-            .origin           = residual.origin,
-            .residual_eval    = residual.residual_eval,
-            .source_sig       = residual.source_sig,
-            .residual_support = residual.residual_support,
-            .core_degree      = residual.core_degree,
-            .parent_group_id  = parent_group_id,
-            .target_eval      = target_eval,
-            .target_vars      = target_vars,
+        group.continuation = RemainderRecombineCont{
+            .prefix_expr    = residual.prefix_expr ? CloneExpr(*residual.prefix_expr) : nullptr,
+            .origin         = residual.origin,
+            .remainder_eval = residual.remainder_eval,
+            .source_sig     = residual.source_sig,
+            .remainder_support = residual.remainder_support,
+            .prefix_degree     = residual.prefix_degree,
+            .parent_group_id   = parent_group_id,
+            .target_eval       = target_eval,
+            .target_vars       = target_vars,
         };
 
         // Emit kSignatureState child with the residual evaluator override.
@@ -762,7 +763,7 @@ namespace cobra {
         child.features           = item.features;
         child.metadata           = item.metadata;
         child.group_id           = group_id;
-        child.evaluator_override = residual.residual_eval;
+        child.evaluator_override = residual.remainder_eval;
 
         PassResult result;
         result.decision    = PassDecision::kAdvance;
@@ -775,22 +776,22 @@ namespace cobra {
         if (!IsResidualKind(item)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
-        const auto &residual = std::get< ResidualStatePayload >(item.payload);
+        const auto &residual = std::get< RemainderStatePayload >(item.payload);
         const auto res_real_count =
-            static_cast< uint32_t >(residual.residual_elim.real_vars.size());
+            static_cast< uint32_t >(residual.remainder_elim.real_vars.size());
 
         const auto &target_vars =
             residual.target.vars.empty() ? ctx.original_vars : residual.target.vars;
 
         SignatureContext res_sig_ctx;
-        res_sig_ctx.vars             = residual.residual_elim.real_vars;
-        res_sig_ctx.original_indices = residual.residual_support;
+        res_sig_ctx.vars             = residual.remainder_elim.real_vars;
+        res_sig_ctx.original_indices = residual.remainder_support;
 
-        if (residual.residual_elim.real_vars.size() == target_vars.size()) {
-            res_sig_ctx.eval = residual.residual_eval;
+        if (residual.remainder_elim.real_vars.size() == target_vars.size()) {
+            res_sig_ctx.eval = residual.remainder_eval;
         } else {
-            res_sig_ctx.eval = [residual_eval = residual.residual_eval,
-                                idx           = residual.residual_support,
+            res_sig_ctx.eval = [residual_eval = residual.remainder_eval,
+                                idx           = residual.remainder_support,
                                 full          = std::vector< uint64_t >(target_vars.size(), 0)](
                                    const std::vector< uint64_t > &rv
                                ) mutable -> uint64_t {
@@ -802,7 +803,7 @@ namespace cobra {
         }
 
         Options residual_opts   = ctx.opts;
-        residual_opts.evaluator = residual.residual_eval;
+        residual_opts.evaluator = residual.remainder_eval;
 
         auto td = TryTemplateDecomposition(res_sig_ctx, residual_opts, res_real_count, nullptr);
         if (!td.Succeeded()) {
@@ -817,7 +818,7 @@ namespace cobra {
 
         auto solved_expr = std::move(td.TakePayload().expr);
         auto recombined  = TryRecombineAndEmit(
-            residual, std::move(solved_expr), residual.residual_elim.real_vars, item, ctx,
+            residual, std::move(solved_expr), residual.remainder_elim.real_vars, item, ctx,
             PassId::kResidualTemplate, ResidualSolverKind::kTemplateDecomposition
         );
         if (recombined) { return Ok(std::move(*recombined)); }

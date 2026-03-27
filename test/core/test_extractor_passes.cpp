@@ -295,7 +295,7 @@ TEST(ExtractorSubproblem, DirectCheckUsesLocalEvaluatorAndPreservesGroupId) {
 
 TEST(ExtractorSubproblem, PrepareDirectResidualUsesLocalContext) {
     // A 1-var subproblem with a local evaluator. Verify that
-    // RunPrepareDirectResidual uses local vars/eval.
+    // RunPrepareDirectRemainder uses local vars/eval.
     std::vector< std::string > global_vars = { "x", "y" };
     Options opts;
     opts.bitwidth  = 64;
@@ -331,7 +331,7 @@ TEST(ExtractorSubproblem, PrepareDirectResidualUsesLocalContext) {
     item.features.classification = cls;
     item.features.provenance     = Provenance::kLowered;
 
-    auto result = RunPrepareDirectResidual(item, ctx);
+    auto result = RunPrepareDirectRemainder(item, ctx);
     ASSERT_TRUE(result.has_value());
     // Whether it finds a boolean null or not depends on the
     // expression structure. The key test is that it doesn't crash

@@ -23,7 +23,7 @@ namespace {
 
 } // namespace
 
-TEST(DecompositionEngineTest, BuildResidualEvaluator_SubtractsCore) {
+TEST(DecompositionEngineTest, BuildRemainderEvaluator_SubtractsCore) {
     // f(x0, x1) = x0*x1 + x0^x1
     Evaluator original = [](const std::vector< uint64_t > &v) -> uint64_t {
         return v[0] * v[1] + (v[0] ^ v[1]);
@@ -31,7 +31,7 @@ TEST(DecompositionEngineTest, BuildResidualEvaluator_SubtractsCore) {
     // core = x0*x1
     auto core     = Expr::Mul(Expr::Variable(0), Expr::Variable(1));
     // residual should be x0^x1
-    auto residual = BuildResidualEvaluator(original, *core, 64);
+    auto residual = BuildRemainderEvaluator(original, *core, 64);
 
     // Check at a few points
     EXPECT_EQ(residual({ 3, 5 }), (3u ^ 5u));
@@ -39,14 +39,14 @@ TEST(DecompositionEngineTest, BuildResidualEvaluator_SubtractsCore) {
     EXPECT_EQ(residual({ 7, 11 }), (7u ^ 11u));
 }
 
-TEST(DecompositionEngineTest, BuildResidualEvaluator_BitwidthMasking) {
+TEST(DecompositionEngineTest, BuildRemainderEvaluator_BitwidthMasking) {
     // f(x0) = 200 + x0 at 8 bits
     Evaluator original = [](const std::vector< uint64_t > &v) -> uint64_t {
         return 200 + v[0];
     };
     // core = 100
     auto core     = Expr::Constant(100);
-    auto residual = BuildResidualEvaluator(original, *core, 8);
+    auto residual = BuildRemainderEvaluator(original, *core, 8);
 
     // residual(50) = (200+50 - 100) & 0xFF = 150
     EXPECT_EQ(residual({ 50 }), 150u);
@@ -111,11 +111,9 @@ TEST(ExtractPolyCoreTest, RecoversDegree2) {
     opts.evaluator                  = eval;
     std::vector< std::string > vars = { "x0", "x1" };
     auto sig                        = EvaluateBooleanSignature(eval, 2, 64);
-    auto cls                        = Classification{ .semantic = SemanticClass::kPolynomial,
-                                                      .flags    = kSfHasMul,
-                                                      .route    = Route::kMixedRewrite };
-    auto ctx                        = MakeCtx(opts, vars, sig, nullptr, cls);
-    auto core                       = ExtractPolyCore(ctx, 2);
+    auto cls  = Classification{ .semantic = SemanticClass::kPolynomial, .flags = kSfHasMul };
+    auto ctx  = MakeCtx(opts, vars, sig, nullptr, cls);
+    auto core = ExtractPolyCore(ctx, 2);
     ASSERT_TRUE(core.Succeeded());
     EXPECT_EQ(core.Payload().kind, ExtractorKind::kPolynomial);
     EXPECT_EQ(core.Payload().degree_used, 2);
@@ -130,11 +128,9 @@ TEST(ExtractPolyCoreTest, TooManyVars_ReturnsInapplicable) {
     opts.evaluator                  = eval;
     std::vector< std::string > vars = { "x0", "x1", "x2", "x3", "x4", "x5", "x6" };
     auto sig                        = EvaluateBooleanSignature(eval, 7, 64);
-    auto cls                        = Classification{ .semantic = SemanticClass::kPolynomial,
-                                                      .flags    = kSfHasMul,
-                                                      .route    = Route::kMixedRewrite };
-    auto ctx                        = MakeCtx(opts, vars, sig, nullptr, cls);
-    auto core                       = ExtractPolyCore(ctx, 2);
+    auto cls  = Classification{ .semantic = SemanticClass::kPolynomial, .flags = kSfHasMul };
+    auto ctx  = MakeCtx(opts, vars, sig, nullptr, cls);
+    auto core = ExtractPolyCore(ctx, 2);
     EXPECT_FALSE(core.Succeeded());
 }
 
@@ -145,10 +141,8 @@ TEST(AcceptCoreTest, RejectsZeroCore) {
     opts.evaluator                  = eval;
     std::vector< std::string > vars = { "x0", "x1" };
     auto sig                        = EvaluateBooleanSignature(eval, 2, 64);
-    auto cls                        = Classification{ .semantic = SemanticClass::kLinear,
-                                                      .flags    = kSfNone,
-                                                      .route    = Route::kMixedRewrite };
-    auto ctx                        = MakeCtx(opts, vars, sig, nullptr, cls);
+    auto cls = Classification{ .semantic = SemanticClass::kLinear, .flags = kSfNone };
+    auto ctx = MakeCtx(opts, vars, sig, nullptr, cls);
 
     CoreCandidate core;
     core.expr = std::move(zero_expr);
@@ -169,8 +163,7 @@ TEST(AcceptCoreTest, AcceptsNonTrivialCore) {
     std::vector< std::string > vars = { "x0", "x1" };
     auto sig                        = EvaluateBooleanSignature(eval, 2, 64);
     auto cls                        = Classification{ .semantic = SemanticClass::kPolynomial,
-                                                      .flags    = kSfHasMul | kSfHasBitwise,
-                                                      .route    = Route::kMixedRewrite };
+                                                      .flags    = kSfHasMul | kSfHasBitwise };
     auto ctx                        = MakeCtx(opts, vars, sig, nullptr, cls);
 
     auto core_expr = Expr::Mul(Expr::Variable(0), Expr::Variable(1));
@@ -193,10 +186,8 @@ TEST(AcceptCoreTest, AcceptsPolyCoreSameSupportNonRoutable) {
     opts.evaluator                  = eval;
     std::vector< std::string > vars = { "x0", "x1" };
     auto sig                        = EvaluateBooleanSignature(eval, 2, 64);
-    auto cls                        = Classification{ .semantic = SemanticClass::kPolynomial,
-                                                      .flags    = kSfHasMul,
-                                                      .route    = Route::kMixedRewrite };
-    auto ctx                        = MakeCtx(opts, vars, sig, nullptr, cls);
+    auto cls = Classification{ .semantic = SemanticClass::kPolynomial, .flags = kSfHasMul };
+    auto ctx = MakeCtx(opts, vars, sig, nullptr, cls);
 
     auto core_expr = Expr::Mul(Expr::Variable(0), Expr::Variable(1));
     CoreCandidate core;
@@ -213,10 +204,8 @@ TEST(AcceptCoreTest, RejectsConstantCore) {
     opts.evaluator                  = eval;
     std::vector< std::string > vars = { "x0", "x1" };
     auto sig                        = EvaluateBooleanSignature(eval, 2, 64);
-    auto cls                        = Classification{ .semantic = SemanticClass::kLinear,
-                                                      .flags    = kSfNone,
-                                                      .route    = Route::kMixedRewrite };
-    auto ctx                        = MakeCtx(opts, vars, sig, nullptr, cls);
+    auto cls = Classification{ .semantic = SemanticClass::kLinear, .flags = kSfNone };
+    auto ctx = MakeCtx(opts, vars, sig, nullptr, cls);
 
     CoreCandidate core;
     core.expr = std::move(const_expr);
@@ -231,11 +220,9 @@ TEST(ExtractTemplateCoreTest, FindsTemplateForSimpleComposition) {
     opts.evaluator                  = eval;
     std::vector< std::string > vars = { "x0", "x1" };
     auto sig                        = EvaluateBooleanSignature(eval, 2, 64);
-    auto cls                        = Classification{ .semantic = SemanticClass::kLinear,
-                                                      .flags    = kSfNone,
-                                                      .route    = Route::kMixedRewrite };
-    auto ctx                        = MakeCtx(opts, vars, sig, nullptr, cls);
-    auto core                       = ExtractTemplateCore(ctx);
+    auto cls  = Classification{ .semantic = SemanticClass::kLinear, .flags = kSfNone };
+    auto ctx  = MakeCtx(opts, vars, sig, nullptr, cls);
+    auto core = ExtractTemplateCore(ctx);
     ASSERT_TRUE(core.Succeeded());
     EXPECT_EQ(core.Payload().kind, ExtractorKind::kTemplate);
 }
