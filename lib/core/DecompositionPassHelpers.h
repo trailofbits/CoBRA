@@ -29,8 +29,9 @@ namespace cobra {
     // Uses the parser-computed input_sig when the expression is fresh
     // (rewrite_gen == 0 and lowering has not fired). Otherwise re-evaluates
     // from the AST, since the stored signature would be stale.
+    // Respects AstSolveContext local vars/sig when present.
     std::vector< uint64_t > ComputeDecompositionSignature(
-        const AstPayload &ast, const OrchestratorContext &ctx, uint32_t rewrite_gen
+        const WorkItem &item, const OrchestratorContext &ctx, uint32_t rewrite_gen
     );
 
     // Decomposition extractor passes: each extracts an arithmetic core

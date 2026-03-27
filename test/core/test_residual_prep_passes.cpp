@@ -82,3 +82,43 @@ TEST(PrepareResidualFromCore, BlockedWithoutEvaluator) {
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result.value().decision, PassDecision::kBlocked);
 }
+
+TEST(PrepareResidualFromCore, UsesTargetLocalEvaluatorWithoutGlobalEvaluator) {
+    Options opts;
+    opts.bitwidth                   = 64;
+    std::vector< std::string > vars = { "g0", "g1" };
+    OrchestratorContext ctx{
+        .opts          = opts,
+        .original_vars = vars,
+        .bitwidth      = 64,
+    };
+
+    auto local_eval = Evaluator{ [](const std::vector< uint64_t > &vals) -> uint64_t {
+        return vals[0] + 1;
+    } };
+
+    WorkItem item;
+    item.payload = CoreCandidatePayload{
+        .core_expr      = Expr::Variable(0),
+        .extractor_kind = ExtractorKind::kPolynomial,
+        .target =
+            ResidualTargetContext{
+                                  .eval = local_eval,
+                                  .vars = { "x" },
+                                  },
+    };
+    item.group_id = 9;
+
+    auto result = RunPrepareResidualFromCore(item, ctx);
+    ASSERT_TRUE(result.has_value());
+    auto &pr = result.value();
+
+    EXPECT_EQ(pr.decision, PassDecision::kAdvance);
+    ASSERT_EQ(pr.next.size(), 1u);
+    ASSERT_EQ(GetStateKind(pr.next[0].payload), StateKind::kResidualState);
+    auto &residual = std::get< ResidualStatePayload >(pr.next[0].payload);
+    EXPECT_EQ(residual.target.vars, std::vector< std::string >({ "x" }));
+    EXPECT_EQ(residual.target.eval(std::vector< uint64_t >{ 7 }), 8u);
+    ASSERT_TRUE(pr.next[0].group_id.has_value());
+    EXPECT_EQ(*pr.next[0].group_id, 9u);
+}

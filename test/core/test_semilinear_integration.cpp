@@ -1,3 +1,6 @@
+#include "Orchestrator.h"
+#include "OrchestratorPasses.h"
+#include "SemilinearPasses.h"
 #include "cobra/core/AtomSimplifier.h"
 #include "cobra/core/BitPartitioner.h"
 #include "cobra/core/Classification.h"
@@ -385,6 +388,175 @@ TEST(SemilinearIntegration, RejectXorOverArith) {
     auto ir    = NormalizeToSemilinear(*input, { "x", "y" }, 64);
     EXPECT_FALSE(ir.has_value()) << "Expected normalization to fail for XOR-over-arithmetic";
     if (!ir.has_value()) { EXPECT_EQ(ir.error().code, CobraError::kNonLinearInput); }
+}
+
+// --- Orchestrator pass-level subproblem propagation tests ---
+
+namespace {
+
+    OrchestratorContext
+    MakeSemilinearCtx(const Options &opts, const std::vector< std::string > &vars) {
+        return OrchestratorContext{
+            .opts          = opts,
+            .original_vars = vars,
+            .evaluator =
+                opts.evaluator ? std::optional< Evaluator >(opts.evaluator) : std::nullopt,
+            .bitwidth = opts.bitwidth,
+        };
+    }
+
+} // namespace
+
+TEST(SemilinearSubproblem, LocalVarsPreservedThroughPipeline) {
+    // ctx.original_vars = {"x", "y"} (2 vars globally),
+    // but the subproblem AST has solve_ctx.vars = {"x"} (1 var).
+    // The semilinear pipeline should use the 1-var space throughout.
+    // Input: (x & 0xFF) + 1 in the 1-var space.
+    std::vector< std::string > global_vars = { "x", "y" };
+    Options opts;
+    opts.bitwidth = 64;
+    auto ctx      = MakeSemilinearCtx(opts, global_vars);
+
+    auto input =
+        Expr::Add(Expr::BitwiseAnd(Expr::Variable(0), Expr::Constant(0xFF)), Expr::Constant(1));
+    auto cls = ClassifyStructural(*input);
+    ASSERT_EQ(cls.semantic, SemanticClass::kSemilinear);
+
+    WorkItem seed;
+    seed.payload = AstPayload{
+        .expr           = CloneExpr(*input),
+        .classification = cls,
+        .provenance     = Provenance::kRewritten,
+        .solve_ctx      = AstSolveContext{ .vars = { "x" } },
+    };
+    seed.features.classification = cls;
+    seed.features.provenance     = Provenance::kRewritten;
+
+    // Step 1: Normalize
+    auto r1 = RunSemilinearNormalize(seed, ctx);
+    ASSERT_TRUE(r1.has_value());
+    ASSERT_EQ(r1.value().decision, PassDecision::kAdvance);
+    ASSERT_EQ(r1.value().next.size(), 1);
+    auto &norm_item = r1.value().next[0];
+    auto &norm_ctx  = std::get< NormalizedSemilinearPayload >(norm_item.payload).ctx;
+    EXPECT_EQ(norm_ctx.vars.size(), 1);
+    EXPECT_EQ(norm_ctx.vars[0], "x");
+
+    // Step 2: Check
+    auto r2 = RunSemilinearCheck(norm_item, ctx);
+    ASSERT_TRUE(r2.has_value());
+    ASSERT_EQ(r2.value().decision, PassDecision::kAdvance);
+    ASSERT_EQ(r2.value().next.size(), 1);
+    auto &checked_item = r2.value().next[0];
+    auto &checked_ctx  = std::get< CheckedSemilinearPayload >(checked_item.payload).ctx;
+    EXPECT_EQ(checked_ctx.vars.size(), 1);
+    EXPECT_EQ(checked_ctx.vars[0], "x");
+
+    // Step 3: Rewrite
+    auto r3 = RunSemilinearRewrite(checked_item, ctx);
+    ASSERT_TRUE(r3.has_value());
+    ASSERT_EQ(r3.value().decision, PassDecision::kAdvance);
+    ASSERT_EQ(r3.value().next.size(), 1);
+    auto &rewritten_item = r3.value().next[0];
+    auto &rewritten_ctx  = std::get< RewrittenSemilinearPayload >(rewritten_item.payload).ctx;
+    EXPECT_EQ(rewritten_ctx.vars.size(), 1);
+    EXPECT_EQ(rewritten_ctx.vars[0], "x");
+
+    // Step 4: Reconstruct
+    auto r4 = RunSemilinearReconstruct(rewritten_item, ctx);
+    ASSERT_TRUE(r4.has_value());
+    ASSERT_EQ(r4.value().decision, PassDecision::kSolvedCandidate);
+    ASSERT_EQ(r4.value().next.size(), 1);
+    auto &cand = std::get< CandidatePayload >(r4.value().next[0].payload);
+    // Final candidate real_vars should come from the subproblem
+    EXPECT_EQ(cand.real_vars.size(), 1);
+    EXPECT_EQ(cand.real_vars[0], "x");
+}
+
+TEST(SemilinearSubproblem, GroupIdPreservedThroughPipeline) {
+    std::vector< std::string > global_vars = { "x", "y" };
+    Options opts;
+    opts.bitwidth = 64;
+    auto ctx      = MakeSemilinearCtx(opts, global_vars);
+
+    auto input =
+        Expr::Add(Expr::BitwiseAnd(Expr::Variable(0), Expr::Constant(0xFF)), Expr::Constant(1));
+    auto cls = ClassifyStructural(*input);
+
+    WorkItem seed;
+    seed.payload = AstPayload{
+        .expr           = CloneExpr(*input),
+        .classification = cls,
+        .provenance     = Provenance::kRewritten,
+        .solve_ctx      = AstSolveContext{ .vars = { "x" } },
+    };
+    seed.features.classification = cls;
+    seed.features.provenance     = Provenance::kRewritten;
+    seed.group_id                = 42;
+
+    auto r1 = RunSemilinearNormalize(seed, ctx);
+    ASSERT_TRUE(r1.has_value());
+    ASSERT_EQ(r1.value().next.size(), 1);
+    EXPECT_EQ(r1.value().next[0].group_id, 42);
+
+    auto r2 = RunSemilinearCheck(r1.value().next[0], ctx);
+    ASSERT_TRUE(r2.has_value());
+    ASSERT_EQ(r2.value().next.size(), 1);
+    EXPECT_EQ(r2.value().next[0].group_id, 42);
+
+    auto r3 = RunSemilinearRewrite(r2.value().next[0], ctx);
+    ASSERT_TRUE(r3.has_value());
+    ASSERT_EQ(r3.value().next.size(), 1);
+    EXPECT_EQ(r3.value().next[0].group_id, 42);
+
+    auto r4 = RunSemilinearReconstruct(r3.value().next[0], ctx);
+    ASSERT_TRUE(r4.has_value());
+    ASSERT_EQ(r4.value().next.size(), 1);
+    EXPECT_EQ(r4.value().next[0].group_id, 42);
+}
+
+// --- Reconstruct preserves group_id ---
+
+TEST(SemilinearSubproblem, ReconstructPreservesGroupId) {
+    // Run a grouped semilinear subproblem through reconstruct
+    // and verify the emitted CandidatePayload inherits group_id.
+    std::vector< std::string > global_vars = { "x", "y" };
+    Options opts;
+    opts.bitwidth = 64;
+    auto ctx      = MakeSemilinearCtx(opts, global_vars);
+
+    auto input =
+        Expr::Add(Expr::BitwiseAnd(Expr::Variable(0), Expr::Constant(0xFF)), Expr::Constant(1));
+    auto cls = ClassifyStructural(*input);
+
+    WorkItem seed;
+    seed.payload = AstPayload{
+        .expr           = CloneExpr(*input),
+        .classification = cls,
+        .provenance     = Provenance::kRewritten,
+        .solve_ctx      = AstSolveContext{ .vars = { "x" } },
+    };
+    seed.features.classification = cls;
+    seed.features.provenance     = Provenance::kRewritten;
+    seed.group_id                = 99;
+
+    auto r1 = RunSemilinearNormalize(seed, ctx);
+    ASSERT_TRUE(r1.has_value());
+    ASSERT_EQ(r1.value().next.size(), 1);
+    auto r2 = RunSemilinearCheck(r1.value().next[0], ctx);
+    ASSERT_TRUE(r2.has_value());
+    ASSERT_EQ(r2.value().next.size(), 1);
+    auto r3 = RunSemilinearRewrite(r2.value().next[0], ctx);
+    ASSERT_TRUE(r3.has_value());
+    ASSERT_EQ(r3.value().next.size(), 1);
+    auto r4 = RunSemilinearReconstruct(r3.value().next[0], ctx);
+    ASSERT_TRUE(r4.has_value());
+    ASSERT_EQ(r4.value().decision, PassDecision::kSolvedCandidate);
+    ASSERT_EQ(r4.value().next.size(), 1);
+
+    // The candidate must inherit the group_id.
+    ASSERT_TRUE(r4.value().next[0].group_id.has_value());
+    EXPECT_EQ(*r4.value().next[0].group_id, 99);
 }
 
 // Issue #7: per-partition coefficient elision via NOT-AND lowering

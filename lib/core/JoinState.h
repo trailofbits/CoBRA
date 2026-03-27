@@ -29,8 +29,15 @@ namespace cobra {
         size_t target_hash = 0;
         ExprCost baseline_cost;
         std::vector< std::string > vars;
-        uint32_t bitwidth    = 64;
-        uint32_t rewrite_gen = 0;
+        std::optional< GroupId > parent_group_id;
+        bool has_solve_ctx = false;
+        std::vector< std::string > solve_ctx_vars;
+        std::optional< Evaluator > solve_ctx_evaluator;
+        std::vector< uint64_t > solve_ctx_input_sig;
+        uint32_t bitwidth     = 64;
+        uint32_t parent_depth = 0;
+        uint32_t rewrite_gen  = 0;
+        std::vector< PassId > parent_history;
     };
 
     struct ProductJoinState
@@ -42,8 +49,15 @@ namespace cobra {
         std::unique_ptr< Expr > original_expr;
         ExprCost baseline_cost;
         std::vector< std::string > vars;
-        uint32_t bitwidth    = 64;
-        uint32_t rewrite_gen = 0;
+        std::optional< GroupId > parent_group_id;
+        bool has_solve_ctx = false;
+        std::vector< std::string > solve_ctx_vars;
+        std::optional< Evaluator > solve_ctx_evaluator;
+        std::vector< uint64_t > solve_ctx_input_sig;
+        uint32_t bitwidth     = 64;
+        uint32_t parent_depth = 0;
+        uint32_t rewrite_gen  = 0;
+        std::vector< PassId > parent_history;
         // Full AST for replacement splicing.
         std::unique_ptr< Expr > full_ast;
         size_t target_hash = 0;

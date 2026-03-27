@@ -36,6 +36,10 @@ namespace cobra {
                     return ExtractorKind::kPolynomial;
                 case ResidualOrigin::kTemplateCore:
                     return ExtractorKind::kTemplate;
+                case ResidualOrigin::kSignatureLowering:
+                    return ExtractorKind::kBooleanNullDirect;
+                case ResidualOrigin::kLiftedOuter:
+                    return ExtractorKind::kBooleanNullDirect;
             }
             return ExtractorKind::kBooleanNullDirect;
         }
@@ -45,19 +49,29 @@ namespace cobra {
             const std::vector< std::string > &solved_expr_vars, const WorkItem &parent,
             OrchestratorContext &ctx, PassId producing_pass, ResidualSolverKind solver_kind
         ) {
+            // Resolve target-local variable space: prefer the residual's
+            // target context when populated, fall back to the global context.
+            const auto &target_vars =
+                residual.target.vars.empty() ? ctx.original_vars : residual.target.vars;
+            const auto &target_eval =
+                residual.target.vars.empty() ? *ctx.evaluator : residual.target.eval;
+            const auto &remap = residual.target.remap_support.empty()
+                ? residual.residual_support
+                : residual.target.remap_support;
+
             // Some residual solvers return expressions already embedded in the
-            // original variable universe. Callers pass ctx.original_vars in
-            // that case to suppress remapping.
-            if (solved_expr_vars.size() < ctx.original_vars.size()) {
-                RemapVarIndices(*solved_expr, residual.residual_support);
+            // target variable universe. Callers pass target_vars in that case
+            // to suppress remapping.
+            if (solved_expr_vars.size() < target_vars.size()) {
+                RemapVarIndices(*solved_expr, remap);
             }
 
             auto combined = residual.core_expr
                 ? Expr::Add(CloneExpr(*residual.core_expr), std::move(solved_expr))
                 : std::move(solved_expr);
 
-            const auto num_vars = static_cast< uint32_t >(ctx.original_vars.size());
-            auto check = FullWidthCheckEval(*ctx.evaluator, num_vars, *combined, ctx.bitwidth);
+            const auto num_vars = static_cast< uint32_t >(target_vars.size());
+            auto check = FullWidthCheckEval(target_eval, num_vars, *combined, ctx.bitwidth);
 
             if (!check.passed) { return std::nullopt; }
 
@@ -65,7 +79,7 @@ namespace cobra {
             WorkItem cand_item;
             cand_item.payload = CandidatePayload{
                 .expr                              = std::move(combined),
-                .real_vars                         = ctx.original_vars,
+                .real_vars                         = target_vars,
                 .cost                              = cost_info.cost,
                 .producing_pass                    = producing_pass,
                 .needs_original_space_verification = false,
@@ -84,6 +98,7 @@ namespace cobra {
             cand_item.rewrite_gen    = parent.rewrite_gen;
             cand_item.attempted_mask = parent.attempted_mask;
             cand_item.history        = parent.history;
+            cand_item.group_id       = parent.group_id;
 
             PassResult result;
             result.decision    = PassDecision::kSolvedCandidate;
@@ -101,11 +116,13 @@ namespace cobra {
                 return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
             }
 
-            const auto &ast = std::get< AstPayload >(item.payload);
+            const auto &ast         = std::get< AstPayload >(item.payload);
+            const auto &active_vars = ActiveAstVars(item, ctx);
+            const auto &active_eval = ActiveAstEvaluator(item, ctx);
             if (!ast.classification) {
                 return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
             }
-            if (!ctx.evaluator) {
+            if (!active_eval) {
                 return Ok(
                     PassResult{
                         .decision = PassDecision::kBlocked,
@@ -120,11 +137,11 @@ namespace cobra {
                 );
             }
 
-            auto decomp_sig = ComputeDecompositionSignature(ast, ctx, item.rewrite_gen);
+            auto decomp_sig = ComputeDecompositionSignature(item, ctx, item.rewrite_gen);
 
             DecompositionContext dctx{
                 .opts         = ctx.opts,
-                .vars         = ctx.original_vars,
+                .vars         = active_vars,
                 .sig          = decomp_sig,
                 .current_expr = ast.expr.get(),
                 .cls          = *ast.classification,
@@ -152,18 +169,18 @@ namespace cobra {
             }
 
             auto core_payload   = core.TakePayload();
-            const auto num_vars = static_cast< uint32_t >(ctx.original_vars.size());
+            const auto num_vars = static_cast< uint32_t >(active_vars.size());
 
             // Direct check: does the core alone solve the function?
             auto direct_check =
-                FullWidthCheckEval(*ctx.evaluator, num_vars, *core_payload.expr, ctx.bitwidth);
+                FullWidthCheckEval(*active_eval, num_vars, *core_payload.expr, ctx.bitwidth);
 
             if (direct_check.passed) {
                 auto cost_info = ComputeCost(*core_payload.expr);
                 WorkItem cand_item;
                 cand_item.payload = CandidatePayload{
                     .expr                              = std::move(core_payload.expr),
-                    .real_vars                         = ctx.original_vars,
+                    .real_vars                         = active_vars,
                     .cost                              = cost_info.cost,
                     .producing_pass                    = pass_id,
                     .needs_original_space_verification = false,
@@ -180,6 +197,7 @@ namespace cobra {
                 cand_item.rewrite_gen    = item.rewrite_gen;
                 cand_item.attempted_mask = item.attempted_mask;
                 cand_item.history        = item.history;
+                cand_item.group_id       = item.group_id;
 
                 PassResult result;
                 result.decision    = PassDecision::kSolvedCandidate;
@@ -215,6 +233,11 @@ namespace cobra {
                 .extractor_kind = core_payload.kind,
                 .degree_used    = core_payload.degree_used,
                 .source_sig     = std::move(decomp_sig),
+                .target =
+                    ResidualTargetContext{
+                                          .eval = *active_eval,
+                                          .vars = active_vars,
+                                          },
             };
             core_item.features       = item.features;
             core_item.metadata       = item.metadata;
@@ -222,6 +245,7 @@ namespace cobra {
             core_item.rewrite_gen    = item.rewrite_gen;
             core_item.attempted_mask = item.attempted_mask;
             core_item.history        = item.history;
+            core_item.group_id       = item.group_id;
 
             PassResult result;
             result.decision    = PassDecision::kAdvance;
@@ -273,7 +297,9 @@ namespace cobra {
         if (!IsAstKind(item)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
-        if (!ctx.evaluator) {
+        const auto &active_vars = ActiveAstVars(item, ctx);
+        const auto &active_eval = ActiveAstEvaluator(item, ctx);
+        if (!active_eval) {
             return Ok(
                 PassResult{
                     .decision = PassDecision::kBlocked,
@@ -288,16 +314,14 @@ namespace cobra {
             );
         }
 
-        const auto &ast     = std::get< AstPayload >(item.payload);
-        auto decomp_sig     = ComputeDecompositionSignature(ast, ctx, item.rewrite_gen);
-        const auto num_vars = static_cast< uint32_t >(ctx.original_vars.size());
+        auto decomp_sig     = ComputeDecompositionSignature(item, ctx, item.rewrite_gen);
+        const auto num_vars = static_cast< uint32_t >(active_vars.size());
 
-        auto elim =
-            EliminateAuxVars(decomp_sig, ctx.original_vars, *ctx.evaluator, ctx.bitwidth);
-        auto support = BuildVarSupport(ctx.original_vars, elim.real_vars);
+        auto elim    = EliminateAuxVars(decomp_sig, active_vars, *active_eval, ctx.bitwidth);
+        auto support = BuildVarSupport(active_vars, elim.real_vars);
 
         bool is_bn =
-            IsBooleanNullResidual(*ctx.evaluator, support, num_vars, ctx.bitwidth, decomp_sig);
+            IsBooleanNullResidual(*active_eval, support, num_vars, ctx.bitwidth, decomp_sig);
 
         if (!is_bn) {
             return Ok(
@@ -313,13 +337,18 @@ namespace cobra {
             .origin           = ResidualOrigin::kDirectBooleanNull,
             .core_expr        = nullptr,
             .core_degree      = 0,
-            .residual_eval    = *ctx.evaluator,
+            .residual_eval    = *active_eval,
             .source_sig       = decomp_sig,
             .residual_sig     = decomp_sig,
             .residual_elim    = std::move(elim),
             .residual_support = std::move(support),
             .is_boolean_null  = true,
             .degree_floor     = 2,
+            .target =
+                ResidualTargetContext{
+                                      .eval = *active_eval,
+                                      .vars = active_vars,
+                                      },
         };
         residual_item.features       = item.features;
         residual_item.metadata       = item.metadata;
@@ -327,6 +356,7 @@ namespace cobra {
         residual_item.rewrite_gen    = item.rewrite_gen;
         residual_item.attempted_mask = item.attempted_mask;
         residual_item.history        = item.history;
+        residual_item.group_id       = item.group_id;
 
         PassResult result;
         result.decision    = PassDecision::kAdvance;
@@ -340,7 +370,8 @@ namespace cobra {
         if (!std::holds_alternative< CoreCandidatePayload >(item.payload)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
-        if (!ctx.evaluator) {
+        const auto &core = std::get< CoreCandidatePayload >(item.payload);
+        if (core.target.vars.empty() && !ctx.evaluator) {
             return Ok(
                 PassResult{
                     .decision = PassDecision::kBlocked,
@@ -355,17 +386,18 @@ namespace cobra {
             );
         }
 
-        const auto &core    = std::get< CoreCandidatePayload >(item.payload);
-        const auto num_vars = static_cast< uint32_t >(ctx.original_vars.size());
+        // Resolve target-local variable space from the core's target context.
+        const auto &target_vars =
+            core.target.vars.empty() ? ctx.original_vars : core.target.vars;
+        const auto &target_eval = core.target.vars.empty() ? *ctx.evaluator : core.target.eval;
+        const auto num_vars     = static_cast< uint32_t >(target_vars.size());
 
-        auto residual_eval =
-            BuildResidualEvaluator(*ctx.evaluator, *core.core_expr, ctx.bitwidth);
+        auto residual_eval = BuildResidualEvaluator(target_eval, *core.core_expr, ctx.bitwidth);
 
         auto residual_sig = EvaluateBooleanSignature(residual_eval, num_vars, ctx.bitwidth);
 
-        auto elim =
-            EliminateAuxVars(residual_sig, ctx.original_vars, residual_eval, ctx.bitwidth);
-        auto support = BuildVarSupport(ctx.original_vars, elim.real_vars);
+        auto elim    = EliminateAuxVars(residual_sig, target_vars, residual_eval, ctx.bitwidth);
+        auto support = BuildVarSupport(target_vars, elim.real_vars);
 
         bool is_bn =
             IsBooleanNullResidual(residual_eval, support, num_vars, ctx.bitwidth, residual_sig);
@@ -402,6 +434,12 @@ namespace cobra {
             .residual_support = std::move(support),
             .is_boolean_null  = is_bn,
             .degree_floor     = degree_floor,
+            .target =
+                ResidualTargetContext{
+                                      .eval          = target_eval,
+                                      .vars          = target_vars,
+                                      .remap_support = core.target.remap_support,
+                                      },
         };
         residual_item.features       = item.features;
         residual_item.metadata       = item.metadata;
@@ -409,6 +447,7 @@ namespace cobra {
         residual_item.rewrite_gen    = item.rewrite_gen;
         residual_item.attempted_mask = item.attempted_mask;
         residual_item.history        = item.history;
+        residual_item.group_id       = item.group_id;
 
         PassResult result;
         result.decision    = PassDecision::kAdvance;
@@ -440,7 +479,9 @@ namespace cobra {
             );
         }
 
-        const auto num_vars = static_cast< uint32_t >(ctx.original_vars.size());
+        const auto &target_vars =
+            residual.target.vars.empty() ? ctx.original_vars : residual.target.vars;
+        const auto num_vars = static_cast< uint32_t >(target_vars.size());
         auto ghost          = SolveGhostResidual(
             residual.residual_eval, residual.residual_support, num_vars, ctx.bitwidth
         );
@@ -456,7 +497,7 @@ namespace cobra {
 
         auto ghost_payload = ghost.TakePayload();
         auto recombined    = TryRecombineAndEmit(
-            residual, std::move(ghost_payload.expr), ctx.original_vars, item, ctx,
+            residual, std::move(ghost_payload.expr), target_vars, item, ctx,
             PassId::kResidualGhost, ResidualSolverKind::kGhostResidual
         );
         if (recombined) { return Ok(std::move(*recombined)); }
@@ -497,7 +538,9 @@ namespace cobra {
             );
         }
 
-        const auto num_vars = static_cast< uint32_t >(ctx.original_vars.size());
+        const auto &target_vars =
+            residual.target.vars.empty() ? ctx.original_vars : residual.target.vars;
+        const auto num_vars = static_cast< uint32_t >(target_vars.size());
         auto factored       = SolveFactoredGhostResidual(
             residual.residual_eval, residual.residual_support, num_vars, ctx.bitwidth
         );
@@ -513,7 +556,7 @@ namespace cobra {
 
         auto factored_payload = factored.TakePayload();
         auto recombined       = TryRecombineAndEmit(
-            residual, std::move(factored_payload.expr), ctx.original_vars, item, ctx,
+            residual, std::move(factored_payload.expr), target_vars, item, ctx,
             PassId::kResidualFactoredGhost, ResidualSolverKind::kGhostResidual
         );
         if (recombined) { return Ok(std::move(*recombined)); }
@@ -554,7 +597,9 @@ namespace cobra {
             );
         }
 
-        const auto num_vars = static_cast< uint32_t >(ctx.original_vars.size());
+        const auto &target_vars =
+            residual.target.vars.empty() ? ctx.original_vars : residual.target.vars;
+        const auto num_vars = static_cast< uint32_t >(target_vars.size());
         uint8_t grid        = (res_real_count <= 2) ? 3 : 2;
         auto factored       = SolveFactoredGhostResidual(
             residual.residual_eval, residual.residual_support, num_vars, ctx.bitwidth, 2, grid
@@ -571,7 +616,7 @@ namespace cobra {
 
         auto factored_payload = factored.TakePayload();
         auto recombined       = TryRecombineAndEmit(
-            residual, std::move(factored_payload.expr), ctx.original_vars, item, ctx,
+            residual, std::move(factored_payload.expr), target_vars, item, ctx,
             PassId::kResidualFactoredGhostEscalated, ResidualSolverKind::kGhostResidual
         );
         if (recombined) { return Ok(std::move(*recombined)); }
@@ -604,7 +649,9 @@ namespace cobra {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
 
-        const auto num_vars = static_cast< uint32_t >(ctx.original_vars.size());
+        const auto &target_vars =
+            residual.target.vars.empty() ? ctx.original_vars : residual.target.vars;
+        const auto num_vars = static_cast< uint32_t >(target_vars.size());
         auto res_poly       = RecoverAndVerifyPoly(
             residual.residual_eval, residual.residual_support, num_vars, ctx.bitwidth, 4,
             residual.degree_floor
@@ -621,7 +668,7 @@ namespace cobra {
 
         auto poly_payload = res_poly.TakePayload();
         auto recombined   = TryRecombineAndEmit(
-            residual, std::move(poly_payload.expr), ctx.original_vars, item, ctx,
+            residual, std::move(poly_payload.expr), target_vars, item, ctx,
             PassId::kResidualPolyRecovery, ResidualSolverKind::kPolynomialRecovery
         );
         if (recombined) { return Ok(std::move(*recombined)); }
@@ -648,10 +695,12 @@ namespace cobra {
         }
         const auto &residual = std::get< ResidualStatePayload >(item.payload);
 
-        // Aux-var elimination on residual signature.
-        // The residual_sig lives in the original variable space, so we
-        // eliminate from ctx.original_vars.
-        auto elim                 = EliminateAuxVars(residual.residual_sig, ctx.original_vars);
+        // Resolve target-local variable space.
+        const auto &target_vars =
+            residual.target.vars.empty() ? ctx.original_vars : residual.target.vars;
+
+        // Aux-var elimination on residual signature in the target space.
+        auto elim                 = EliminateAuxVars(residual.residual_sig, target_vars);
         const auto real_var_count = static_cast< uint32_t >(elim.real_vars.size());
         if (real_var_count == 0 || real_var_count > ctx.opts.max_vars) {
             return Ok(
@@ -669,7 +718,20 @@ namespace cobra {
             );
         }
 
-        auto original_indices = BuildVarSupport(ctx.original_vars, elim.real_vars);
+        auto original_indices = BuildVarSupport(target_vars, elim.real_vars);
+
+        // Propagate parent group_id from the incoming item.
+        // Acquire a handle so the parent stays alive until this
+        // child's residual-signature solve completes.
+        std::optional< GroupId > parent_group_id =
+            item.group_id.has_value() ? item.group_id : std::nullopt;
+        if (parent_group_id.has_value()) {
+            AcquireHandle(ctx.competition_groups, *parent_group_id);
+        }
+
+        // Resolve target-local evaluator for verification.
+        const auto &target_eval =
+            residual.target.vars.empty() ? *ctx.evaluator : residual.target.eval;
 
         // Create competition group with ResidualRecombineCont.
         auto group_id      = CreateGroup(ctx.competition_groups, ctx.next_group_id);
@@ -681,7 +743,9 @@ namespace cobra {
             .source_sig       = residual.source_sig,
             .residual_support = residual.residual_support,
             .core_degree      = residual.core_degree,
-            .parent_group_id  = std::nullopt,
+            .parent_group_id  = parent_group_id,
+            .target_eval      = target_eval,
+            .target_vars      = target_vars,
         };
 
         // Emit kSignatureState child with the residual evaluator override.
@@ -715,16 +779,19 @@ namespace cobra {
         const auto res_real_count =
             static_cast< uint32_t >(residual.residual_elim.real_vars.size());
 
+        const auto &target_vars =
+            residual.target.vars.empty() ? ctx.original_vars : residual.target.vars;
+
         SignatureContext res_sig_ctx;
         res_sig_ctx.vars             = residual.residual_elim.real_vars;
         res_sig_ctx.original_indices = residual.residual_support;
 
-        if (residual.residual_elim.real_vars.size() == ctx.original_vars.size()) {
+        if (residual.residual_elim.real_vars.size() == target_vars.size()) {
             res_sig_ctx.eval = residual.residual_eval;
         } else {
             res_sig_ctx.eval = [residual_eval = residual.residual_eval,
                                 idx           = residual.residual_support,
-                                full = std::vector< uint64_t >(ctx.original_vars.size(), 0)](
+                                full          = std::vector< uint64_t >(target_vars.size(), 0)](
                                    const std::vector< uint64_t > &rv
                                ) mutable -> uint64_t {
                 for (size_t i = 0; i < idx.size(); ++i) { full[idx[i]] = rv[i]; }

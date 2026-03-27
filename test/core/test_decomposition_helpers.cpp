@@ -19,11 +19,12 @@ TEST(DecompositionSignature, UsesInputSigWhenFresh) {
         .input_sig     = input_sig,
     };
 
-    AstPayload ast{
+    WorkItem item;
+    item.payload = AstPayload{
         .expr = Expr::Variable(0),
     };
 
-    auto sig = ComputeDecompositionSignature(ast, ctx, 0);
+    auto sig = ComputeDecompositionSignature(item, ctx, 0);
     EXPECT_EQ(sig, ctx.input_sig);
 }
 
@@ -39,13 +40,14 @@ TEST(DecompositionSignature, EvaluatesFromAstWhenRewritten) {
         .input_sig     = input_sig,
     };
 
-    AstPayload ast{
+    WorkItem item;
+    item.payload = AstPayload{
         .expr = Expr::Variable(0),
     };
 
     // rewrite_gen > 0 forces evaluation from AST
-    auto sig      = ComputeDecompositionSignature(ast, ctx, 1);
-    auto expected = EvaluateBooleanSignature(*ast.expr, 1, 64);
+    auto sig      = ComputeDecompositionSignature(item, ctx, 1);
+    auto expected = EvaluateBooleanSignature(*std::get< AstPayload >(item.payload).expr, 1, 64);
     EXPECT_EQ(sig, expected);
 }
 
@@ -62,11 +64,12 @@ TEST(DecompositionSignature, EvaluatesFromAstWhenLoweringFired) {
         .lowering_fired = true,
     };
 
-    AstPayload ast{
+    WorkItem item;
+    item.payload = AstPayload{
         .expr = Expr::Variable(0),
     };
 
-    auto sig      = ComputeDecompositionSignature(ast, ctx, 0);
-    auto expected = EvaluateBooleanSignature(*ast.expr, 1, 64);
+    auto sig      = ComputeDecompositionSignature(item, ctx, 0);
+    auto expected = EvaluateBooleanSignature(*std::get< AstPayload >(item.payload).expr, 1, 64);
     EXPECT_EQ(sig, expected);
 }

@@ -120,7 +120,9 @@ namespace cobra {
             );
         }
 
-        const auto kNumVars = static_cast< uint32_t >(ctx.original_vars.size());
+        const auto &active_vars = ActiveAstVars(item, ctx);
+        const auto &active_eval = ActiveAstEvaluator(item, ctx);
+        const auto kNumVars     = static_cast< uint32_t >(active_vars.size());
 
         if (IsLinearShortcut(*ast.expr, kNumVars, ctx.bitwidth)) {
             return Ok(
@@ -147,7 +149,7 @@ namespace cobra {
             );
         }
 
-        auto ir_result = NormalizeToSemilinear(*ast.expr, ctx.original_vars, ctx.bitwidth);
+        auto ir_result = NormalizeToSemilinear(*ast.expr, active_vars, ctx.bitwidth);
         if (!ir_result.has_value()) {
             ReasonDetail reason{
                 .top = { .code = { ReasonCategory::kRepresentationGap,
@@ -168,7 +170,12 @@ namespace cobra {
 
         WorkItem next;
         next.payload = NormalizedSemilinearPayload{
-            .ctx = SemilinearContext{ .ir = std::move(ir_result.value()) },
+            .ctx =
+                SemilinearContext{
+                                  .ir        = std::move(ir_result.value()),
+                                  .vars      = active_vars,
+                                  .evaluator = active_eval,
+                                  },
         };
         next.features       = item.features;
         next.metadata       = item.metadata;
@@ -176,6 +183,7 @@ namespace cobra {
         next.rewrite_gen    = item.rewrite_gen;
         next.attempted_mask = item.attempted_mask;
         next.history        = item.history;
+        next.group_id       = item.group_id;
 
         PassResult result;
         result.decision    = PassDecision::kAdvance;
@@ -188,13 +196,14 @@ namespace cobra {
         if (!std::holds_alternative< NormalizedSemilinearPayload >(item.payload)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
-        auto ir =
-            CloneSemilinearIR(std::get< NormalizedSemilinearPayload >(item.payload).ctx.ir);
+        const auto &payload = std::get< NormalizedSemilinearPayload >(item.payload);
+        auto ir             = CloneSemilinearIR(payload.ctx.ir);
+        const auto &vars    = payload.ctx.vars.empty() ? ctx.original_vars : payload.ctx.vars;
 
         SimplifyStructure(ir);
 
         auto plain = ReconstructMaskedAtoms(ir, {});
-        auto check = SelfCheckSemilinear(ir, *plain, ctx.original_vars, ctx.bitwidth);
+        auto check = SelfCheckSemilinear(ir, *plain, vars, ctx.bitwidth);
         if (!check.passed) {
             COBRA_TRACE(
                 "Simplifier", "RunSemilinearCheck: self-check failed: {}", check.mismatch_detail
@@ -217,7 +226,12 @@ namespace cobra {
 
         WorkItem next;
         next.payload = CheckedSemilinearPayload{
-            .ctx = SemilinearContext{ .ir = std::move(ir) },
+            .ctx =
+                SemilinearContext{
+                                  .ir        = std::move(ir),
+                                  .vars      = vars,
+                                  .evaluator = payload.ctx.evaluator,
+                                  },
         };
         next.features       = item.features;
         next.metadata       = item.metadata;
@@ -225,6 +239,7 @@ namespace cobra {
         next.rewrite_gen    = item.rewrite_gen;
         next.attempted_mask = item.attempted_mask;
         next.history        = item.history;
+        next.group_id       = item.group_id;
 
         PassResult result;
         result.decision    = PassDecision::kAdvance;
@@ -237,18 +252,22 @@ namespace cobra {
         if (!std::holds_alternative< CheckedSemilinearPayload >(item.payload)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
-        auto ir = CloneSemilinearIR(std::get< CheckedSemilinearPayload >(item.payload).ctx.ir);
+        const auto &payload = std::get< CheckedSemilinearPayload >(item.payload);
+        auto ir             = CloneSemilinearIR(payload.ctx.ir);
+        const auto &vars    = payload.ctx.vars.empty() ? ctx.original_vars : payload.ctx.vars;
+        const auto &local_eval =
+            payload.ctx.evaluator.has_value() ? payload.ctx.evaluator : ctx.evaluator;
 
         if (FlattenComplexAtoms(ir)) { CoalesceTerms(ir); }
         RecoverStructure(ir);
         RefineTerms(ir);
         CoalesceTerms(ir);
 
-        if (ctx.evaluator) {
-            const auto kNumVars = static_cast< uint32_t >(ctx.original_vars.size());
+        if (local_eval) {
+            const auto kNumVars = static_cast< uint32_t >(vars.size());
             auto probe_expr     = ReconstructMaskedAtoms(ir, {});
             auto probe =
-                FullWidthCheckEval(*ctx.evaluator, kNumVars, *probe_expr, ctx.bitwidth, 16);
+                FullWidthCheckEval(*local_eval, kNumVars, *probe_expr, ctx.bitwidth, 16);
             if (!probe.passed) {
                 COBRA_TRACE("Simplifier", "RunSemilinearRewrite: post-rewrite probe failed");
                 ReasonDetail reason{
@@ -269,7 +288,12 @@ namespace cobra {
 
         WorkItem next;
         next.payload = RewrittenSemilinearPayload{
-            .ctx = SemilinearContext{ .ir = std::move(ir) },
+            .ctx =
+                SemilinearContext{
+                                  .ir        = std::move(ir),
+                                  .vars      = vars,
+                                  .evaluator = local_eval,
+                                  },
         };
         next.features       = item.features;
         next.metadata       = item.metadata;
@@ -277,6 +301,7 @@ namespace cobra {
         next.rewrite_gen    = item.rewrite_gen;
         next.attempted_mask = item.attempted_mask;
         next.history        = item.history;
+        next.group_id       = item.group_id;
 
         PassResult result;
         result.decision    = PassDecision::kAdvance;
@@ -290,20 +315,23 @@ namespace cobra {
         if (!std::holds_alternative< RewrittenSemilinearPayload >(item.payload)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
-        auto ir =
-            CloneSemilinearIR(std::get< RewrittenSemilinearPayload >(item.payload).ctx.ir);
+        const auto &payload = std::get< RewrittenSemilinearPayload >(item.payload);
+        auto ir             = CloneSemilinearIR(payload.ctx.ir);
+        const auto &vars    = payload.ctx.vars.empty() ? ctx.original_vars : payload.ctx.vars;
+        const auto &local_eval =
+            payload.ctx.evaluator.has_value() ? payload.ctx.evaluator : ctx.evaluator;
 
         CompactAtomTable(ir);
         auto partitions = ComputePartitions(ir);
         auto simplified = ReconstructMaskedAtoms(ir, partitions);
         simplified      = SimplifyXorConstant(std::move(simplified), ctx.bitwidth);
 
-        const auto kNumVars = static_cast< uint32_t >(ctx.original_vars.size());
+        const auto kNumVars = static_cast< uint32_t >(vars.size());
         auto verification   = VerificationState::kUnverified;
 
-        if (ctx.evaluator) {
+        if (local_eval) {
             auto final_check =
-                FullWidthCheckEval(*ctx.evaluator, kNumVars, *simplified, ctx.bitwidth);
+                FullWidthCheckEval(*local_eval, kNumVars, *simplified, ctx.bitwidth);
             if (!final_check.passed) {
                 COBRA_TRACE(
                     "Simplifier", "RunSemilinearReconstruct: final verification failed"
@@ -330,7 +358,7 @@ namespace cobra {
         WorkItem cand_item;
         cand_item.payload = CandidatePayload{
             .expr                              = std::move(simplified),
-            .real_vars                         = ctx.original_vars,
+            .real_vars                         = vars,
             .cost                              = cost_info.cost,
             .producing_pass                    = PassId::kSemilinearReconstruct,
             .needs_original_space_verification = false,
@@ -342,6 +370,7 @@ namespace cobra {
         cand_item.rewrite_gen           = item.rewrite_gen;
         cand_item.attempted_mask        = item.attempted_mask;
         cand_item.history               = item.history;
+        cand_item.group_id              = item.group_id;
 
         PassResult result;
         result.decision    = PassDecision::kSolvedCandidate;
