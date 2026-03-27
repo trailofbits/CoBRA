@@ -244,6 +244,30 @@ namespace cobra {
             ProbeVals vals;
         };
 
+        struct InnerCompositions
+        {
+            std::vector< InnerComp > comps;
+            ValMap index;
+        };
+
+        InnerCompositions BuildInnerCompositions(
+            const std::vector< Atom > &pool, const ValMap &vmap, uint64_t mask
+        ) {
+            InnerCompositions inner;
+            for (auto g_in : kAllGates) {
+                for (size_t bi = 0; bi < pool.size(); ++bi) {
+                    for (size_t ci = bi; ci < pool.size(); ++ci) {
+                        auto v = GateApply(pool[bi].vals, pool[ci].vals, g_in, mask);
+                        if (vmap.contains(v)) { continue; }
+                        if (inner.index.contains(v)) { continue; }
+                        inner.index[v] = inner.comps.size();
+                        inner.comps.push_back({ .gate = g_in, .bi = bi, .ci = ci, .vals = v });
+                    }
+                }
+            }
+            return inner;
+        }
+
         // Try to verify and update the best result.
         // NOLINTNEXTLINE(readability-identifier-naming)
         bool TryUpdate(
@@ -345,29 +369,43 @@ namespace cobra {
             return true;
         }
 
+        template< typename CandidateVec >
+        std::vector< size_t > CollectCompatibleIndices(
+            const CandidateVec &candidates, const ProbeVals &target, Gate g
+        ) {
+            std::vector< size_t > indices;
+            indices.reserve(candidates.size());
+            for (size_t i = 0; i < candidates.size(); ++i) {
+                if (Compatible(candidates[i].vals, target, g)) { indices.push_back(i); }
+            }
+            return indices;
+        }
+
+        bool AndMatches(const ProbeVals &a, const ProbeVals &b, const ProbeVals &target) {
+            for (size_t i = 0; i < kNProbes; ++i) {
+                if ((a[i] & b[i]) != target[i]) { return false; }
+            }
+            return true;
+        }
+
+        bool OrMatches(const ProbeVals &a, const ProbeVals &b, const ProbeVals &target) {
+            for (size_t i = 0; i < kNProbes; ++i) {
+                if ((a[i] | b[i]) != target[i]) { return false; }
+            }
+            return true;
+        }
+
         // Layer 2: target = G_out(A, G_in(B, C)).
         std::optional< SignaturePayload > Layer2(
             const ProbeVals &target, const std::vector< Atom > &pool, const ValMap &vmap,
-            uint64_t mask, const Evaluator &eval, uint32_t nv, uint32_t bw,
-            const ExprCost *baseline
+            const InnerCompositions &inner_cache, uint64_t mask, const Evaluator &eval,
+            uint32_t nv, uint32_t bw, const ExprCost *baseline
         ) {
-            // Precompute inner compositions not already in base pool.
-            std::vector< InnerComp > inner;
-            ValMap inner_idx;
-
-            for (auto g_in : kAllGates) {
-                for (size_t bi = 0; bi < pool.size(); ++bi) {
-                    for (size_t ci = bi; ci < pool.size(); ++ci) {
-                        auto v = GateApply(pool[bi].vals, pool[ci].vals, g_in, mask);
-                        if (vmap.contains(v)) { continue; }
-                        if (inner_idx.contains(v)) { continue; }
-                        inner_idx[v] = inner.size();
-                        inner.push_back({ .gate = g_in, .bi = bi, .ci = ci, .vals = v });
-                    }
-                }
-            }
-
+            const auto &inner     = inner_cache.comps;
+            const auto &inner_idx = inner_cache.index;
             std::optional< SignaturePayload > best;
+
+            COBRA_PLOT("L2InnerSize", static_cast< int64_t >(inner.size()));
 
             auto make_inner = [&](const InnerComp &ic) {
                 return GateExpr(
@@ -375,9 +413,12 @@ namespace cobra {
                 );
             };
 
-            // Case A: target = G_out(base_atom, inner_comp)
-            for (auto g_out : kAllGates) {
-                if (GateInvertible(g_out)) {
+            // --- Invertible gates (XOR, ADD): hash lookup O(pool + inner) ---
+            {
+                COBRA_ZONE_N("L2Invertible");
+                // Case A: G_out(base_atom, inner_comp)
+                for (auto g_out : kAllGates) {
+                    if (!GateInvertible(g_out)) { continue; }
                     for (const auto &ai : pool) {
                         auto res = GateResidual(target, ai.vals, g_out, mask);
                         auto it  = inner_idx.find(res);
@@ -386,38 +427,136 @@ namespace cobra {
                             GateExpr(g_out, CloneExpr(*ai.expr), make_inner(inner[it->second]));
                         TryUpdate(best, std::move(e), eval, nv, bw, baseline);
                     }
-                } else {
-                    for (const auto &ai : pool) {
-                        if (!Compatible(ai.vals, target, g_out)) { continue; }
-                        for (auto &ii : inner) {
-                            if (!GateMatches(ai.vals, ii.vals, target, g_out, mask)) {
-                                continue;
-                            }
+                    if (best.has_value()) { return best; }
+                }
+                // Case B: G_out(inner_comp, inner_comp)
+                for (auto g_out : kAllGates) {
+                    if (!GateInvertible(g_out)) { continue; }
+                    for (size_t ii = 0; ii < inner.size(); ++ii) {
+                        auto res = GateResidual(target, inner[ii].vals, g_out, mask);
+                        auto it  = inner_idx.find(res);
+                        if (it == inner_idx.end()) { continue; }
+                        auto e = GateExpr(
+                            g_out, make_inner(inner[ii]), make_inner(inner[it->second])
+                        );
+                        TryUpdate(best, std::move(e), eval, nv, bw, baseline);
+                    }
+                    if (best.has_value()) { return best; }
+                }
+            }
+
+            // --- AND/OR gates: pre-filtered compatible scan ---
+            {
+                COBRA_ZONE_N("L2AndOr");
+                const auto compat_pool_and = CollectCompatibleIndices(pool, target, Gate::kAnd);
+                const auto compat_pool_or  = CollectCompatibleIndices(pool, target, Gate::kOr);
+                const auto compat_inner_and =
+                    CollectCompatibleIndices(inner, target, Gate::kAnd);
+                const auto compat_inner_or = CollectCompatibleIndices(inner, target, Gate::kOr);
+                COBRA_PLOT("L2CompatAndPool", static_cast< int64_t >(compat_pool_and.size()));
+                COBRA_PLOT("L2CompatOrPool", static_cast< int64_t >(compat_pool_or.size()));
+                COBRA_PLOT("L2CompatAndInner", static_cast< int64_t >(compat_inner_and.size()));
+                COBRA_PLOT("L2CompatOrInner", static_cast< int64_t >(compat_inner_or.size()));
+
+                for (auto g_out : { Gate::kAnd, Gate::kOr }) {
+                    const auto &pool_compat =
+                        (g_out == Gate::kAnd) ? compat_pool_and : compat_pool_or;
+                    const auto &inner_compat =
+                        (g_out == Gate::kAnd) ? compat_inner_and : compat_inner_or;
+                    for (size_t ai_idx : pool_compat) {
+                        const auto &ai = pool[ai_idx];
+                        for (size_t ii_idx : inner_compat) {
+                            const auto &ii     = inner[ii_idx];
+                            const bool matches = (g_out == Gate::kAnd)
+                                ? AndMatches(ai.vals, ii.vals, target)
+                                : OrMatches(ai.vals, ii.vals, target);
+                            if (!matches) { continue; }
                             auto e = GateExpr(g_out, CloneExpr(*ai.expr), make_inner(ii));
                             TryUpdate(best, std::move(e), eval, nv, bw, baseline);
                             if (best.has_value()) { return best; }
                         }
                     }
+                    if (best.has_value()) { return best; }
                 }
-                if (best.has_value()) { return best; }
             }
 
-            // Case B: target = G_out(inner_comp, inner_comp)
-            //         (invertible outer only — too expensive otherwise)
-            for (auto g_out : kAllGates) {
-                if (!GateInvertible(g_out)) { continue; }
-                for (size_t ii = 0; ii < inner.size(); ++ii) {
-                    auto res = GateResidual(target, inner[ii].vals, g_out, mask);
-                    auto it  = inner_idx.find(res);
-                    if (it == inner_idx.end()) { continue; }
-                    auto e =
-                        GateExpr(g_out, make_inner(inner[ii]), make_inner(inner[it->second]));
-                    TryUpdate(best, std::move(e), eval, nv, bw, baseline);
+            // --- MUL gate: full scan (no algebraic shortcut) ---
+            {
+                COBRA_ZONE_N("L2Mul");
+                for (const auto &ai : pool) {
+                    for (const auto &ii : inner) {
+                        if (!GateMatches(ai.vals, ii.vals, target, Gate::kMul, mask)) {
+                            continue;
+                        }
+                        auto e = GateExpr(Gate::kMul, CloneExpr(*ai.expr), make_inner(ii));
+                        TryUpdate(best, std::move(e), eval, nv, bw, baseline);
+                        if (best.has_value()) { return best; }
+                    }
                 }
-                if (best.has_value()) { return best; }
             }
 
             return best;
+        }
+
+        std::optional< SignaturePayload > Layer3(
+            const ProbeVals &target, const std::vector< Atom > &pool, const ValMap &vmap,
+            const InnerCompositions &inner_cache, uint64_t mask, const Evaluator &eval,
+            uint32_t nv, uint32_t bw, const ExprCost *baseline
+        ) {
+            const auto &inner     = inner_cache.comps;
+            const auto &inner_idx = inner_cache.index;
+
+            auto make_inner = [&](const InnerComp &ic) {
+                return GateExpr(
+                    ic.gate, CloneExpr(*pool[ic.bi].expr), CloneExpr(*pool[ic.ci].expr)
+                );
+            };
+
+            for (auto g1 : kAllGates) {
+                if (!GateInvertible(g1)) { continue; }
+                for (size_t ai = 0; ai < pool.size(); ++ai) {
+                    auto r1 = GateResidual(target, pool[ai].vals, g1, mask);
+                    if (vmap.contains(r1)) { continue; }
+
+                    for (auto g2 : kAllGates) {
+                        if (!GateInvertible(g2)) { continue; }
+                        for (size_t bi = 0; bi < pool.size(); ++bi) {
+                            auto r2 = GateResidual(r1, pool[bi].vals, g2, mask);
+                            std::unique_ptr< Expr > r2_expr;
+                            {
+                                auto it = vmap.find(r2);
+                                if (it != vmap.end()) {
+                                    r2_expr = CloneExpr(*pool[it->second].expr);
+                                }
+                            }
+                            if (!r2_expr) {
+                                auto it = inner_idx.find(r2);
+                                if (it != inner_idx.end()) {
+                                    r2_expr = make_inner(inner[it->second]);
+                                }
+                            }
+                            if (!r2_expr) { continue; }
+                            auto mid =
+                                GateExpr(g2, CloneExpr(*pool[bi].expr), std::move(r2_expr));
+                            auto e   = GateExpr(g1, CloneExpr(*pool[ai].expr), std::move(mid));
+                            auto chk = FullWidthCheckEval(eval, nv, *e, bw);
+                            if (!chk.passed) { continue; }
+                            auto info = ComputeCost(*e);
+                            if ((baseline != nullptr) && !IsBetter(info.cost, *baseline)) {
+                                continue;
+                            }
+                            SignaturePayload s{
+                                .expr         = std::move(e),
+                                .cost         = info.cost,
+                                .verification = VerificationState::kVerified,
+                            };
+                            return s;
+                        }
+                    }
+                }
+            }
+
+            return std::nullopt;
         }
 
     } // namespace
@@ -523,15 +662,20 @@ namespace cobra {
             }
         }
 
+        std::optional< InnerCompositions > inner_cache;
+
         // Layer 2.
         {
             COBRA_ZONE_N("TemplateLayer2");
-            auto r2 = Layer2(
-                target, pool, vmap, kMask, *ctx.eval, num_vars, opts.bitwidth, baseline_cost
+            auto inner = BuildInnerCompositions(pool, vmap, kMask);
+            auto r2    = Layer2(
+                target, pool, vmap, inner, kMask, *ctx.eval, num_vars, opts.bitwidth,
+                baseline_cost
             );
             if (r2.has_value()) {
                 return SolverResult< SignaturePayload >::Success(std::move(*r2));
             }
+            inner_cache = std::move(inner);
         }
 
         // Unary wrapping: check Neg(target) and Not(target)
@@ -593,73 +737,12 @@ namespace cobra {
         // Cost: O(pool^2 * 4) hash lookups — very fast.
         {
             COBRA_ZONE_N("TemplateLayer3");
-            // Precompute inner compositions once.
-            std::vector< InnerComp > inner;
-            ValMap inner_idx;
-            for (auto g_in : kAllGates) {
-                for (size_t bi = 0; bi < pool.size(); ++bi) {
-                    for (size_t ci = bi; ci < pool.size(); ++ci) {
-                        auto v = GateApply(pool[bi].vals, pool[ci].vals, g_in, kMask);
-                        if (vmap.contains(v)) { continue; }
-                        if (inner_idx.contains(v)) { continue; }
-                        inner_idx[v] = inner.size();
-                        inner.push_back({ .gate = g_in, .bi = bi, .ci = ci, .vals = v });
-                    }
-                }
-            }
-
-            auto make_inner = [&](const InnerComp &ic) {
-                return GateExpr(
-                    ic.gate, CloneExpr(*pool[ic.bi].expr), CloneExpr(*pool[ic.ci].expr)
-                );
-            };
-
-            for (auto g1 : kAllGates) {
-                if (!GateInvertible(g1)) { continue; }
-                for (size_t ai = 0; ai < pool.size(); ++ai) {
-                    auto r1 = GateResidual(target, pool[ai].vals, g1, kMask);
-                    if (vmap.contains(r1)) { continue; }
-
-                    for (auto g2 : kAllGates) {
-                        if (!GateInvertible(g2)) { continue; }
-                        for (size_t bi = 0; bi < pool.size(); ++bi) {
-                            auto r2 = GateResidual(r1, pool[bi].vals, g2, kMask);
-                            // Look up r2 in base or inner pool
-                            std::unique_ptr< Expr > r2_expr;
-                            {
-                                auto it = vmap.find(r2);
-                                if (it != vmap.end()) {
-                                    r2_expr = CloneExpr(*pool[it->second].expr);
-                                }
-                            }
-                            if (!r2_expr) {
-                                auto it = inner_idx.find(r2);
-                                if (it != inner_idx.end()) {
-                                    r2_expr = make_inner(inner[it->second]);
-                                }
-                            }
-                            if (!r2_expr) { continue; }
-                            auto mid =
-                                GateExpr(g2, CloneExpr(*pool[bi].expr), std::move(r2_expr));
-                            auto e = GateExpr(g1, CloneExpr(*pool[ai].expr), std::move(mid));
-                            auto chk =
-                                FullWidthCheckEval(*ctx.eval, num_vars, *e, opts.bitwidth);
-                            if (!chk.passed) { continue; }
-                            auto info = ComputeCost(*e);
-                            if ((baseline_cost != nullptr)
-                                && !IsBetter(info.cost, *baseline_cost))
-                            {
-                                continue;
-                            }
-                            SignaturePayload s{
-                                .expr         = std::move(e),
-                                .cost         = info.cost,
-                                .verification = VerificationState::kVerified,
-                            };
-                            return SolverResult< SignaturePayload >::Success(std::move(s));
-                        }
-                    }
-                }
+            auto r3 = Layer3(
+                target, pool, vmap, *inner_cache, kMask, *ctx.eval, num_vars, opts.bitwidth,
+                baseline_cost
+            );
+            if (r3.has_value()) {
+                return SolverResult< SignaturePayload >::Success(std::move(*r3));
             }
         }
 
