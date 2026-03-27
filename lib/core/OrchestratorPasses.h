@@ -52,6 +52,10 @@ namespace cobra {
         kProductIdentityCollapse,
         kXorLowering,
         kVerifyCandidate,
+        // Lifting passes
+        kLiftArithmeticAtoms,
+        kLiftRepeatedSubexpressions,
+        kPrepareLiftedOuterSolve,
     };
 
     inline bool IsDecompositionFamilyPass(PassId id) {
@@ -107,5 +111,19 @@ namespace cobra {
     Result< PassResult > RunProductIdentityCollapse(const WorkItem &, OrchestratorContext &);
     Result< PassResult > RunXorLowering(const WorkItem &, OrchestratorContext &);
     Result< PassResult > RunVerifyCandidate(const WorkItem &, OrchestratorContext &);
+    Result< PassResult > RunPrepareLiftedOuterSolve(const WorkItem &, OrchestratorContext &);
+
+    // ---------------------------------------------------------------
+    // ActiveAst helpers — resolve vars/evaluator/sig from solve_ctx
+    // ---------------------------------------------------------------
+
+    const std::vector< std::string > &
+    ActiveAstVars(const WorkItem &item, const OrchestratorContext &ctx);
+
+    const std::optional< Evaluator > &
+    ActiveAstEvaluator(const WorkItem &item, const OrchestratorContext &ctx);
+
+    const std::vector< uint64_t > *
+    ActiveAstInputSig(const WorkItem &item, const OrchestratorContext &ctx);
 
 } // namespace cobra

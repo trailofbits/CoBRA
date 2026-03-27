@@ -1,6 +1,7 @@
 #include "Orchestrator.h"
 #include "OrchestratorPasses.h"
 #include "cobra/core/Classification.h"
+#include "cobra/core/Classifier.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/SemilinearIR.h"
 #include <gtest/gtest.h>
@@ -284,7 +285,9 @@ TEST(SelectNextPass, RewriteBudgetBlocksTransforms) {
         | (1ULL << static_cast< uint8_t >(PassId::kExtractPolyCoreD2))
         | (1ULL << static_cast< uint8_t >(PassId::kExtractTemplateCore))
         | (1ULL << static_cast< uint8_t >(PassId::kExtractPolyCoreD3))
-        | (1ULL << static_cast< uint8_t >(PassId::kExtractPolyCoreD4));
+        | (1ULL << static_cast< uint8_t >(PassId::kExtractPolyCoreD4))
+        | (1ULL << static_cast< uint8_t >(PassId::kLiftArithmeticAtoms))
+        | (1ULL << static_cast< uint8_t >(PassId::kLiftRepeatedSubexpressions));
     item.rewrite_gen = 3;
 
     OrchestratorPolicy policy;
@@ -668,4 +671,211 @@ TEST(WorkItem, DefaultCompetitionFields) {
 TEST(WorkItemTest, EvaluatorOverrideDefaultsToNullopt) {
     WorkItem item;
     EXPECT_FALSE(item.evaluator_override.has_value());
+}
+
+// --- AstSolveContext fingerprint tests ---
+
+TEST(Fingerprint, AstSolveCtxChangesHash) {
+    WorkItem a, b;
+    a.payload = AstPayload{ .expr = Expr::Variable(0) };
+    b.payload = AstPayload{
+        .expr = Expr::Variable(0),
+        .solve_ctx =
+            AstSolveContext{
+                            .vars = { "x", "v0" },
+                            },
+    };
+    auto fa = ComputeFingerprint(a, 64);
+    auto fb = ComputeFingerprint(b, 64);
+    EXPECT_NE(fa, fb);
+}
+
+TEST(Fingerprint, AstSolveCtxVarsDistinct) {
+    WorkItem a, b;
+    a.payload = AstPayload{
+        .expr      = Expr::Variable(0),
+        .solve_ctx = AstSolveContext{ .vars = { "x" } },
+    };
+    b.payload = AstPayload{
+        .expr      = Expr::Variable(0),
+        .solve_ctx = AstSolveContext{ .vars = { "y" } },
+    };
+    auto fa = ComputeFingerprint(a, 64);
+    auto fb = ComputeFingerprint(b, 64);
+    EXPECT_NE(fa, fb);
+}
+
+TEST(SelectNextPass, SubproblemAstGetsSemilinearRoute) {
+    WorkItem item;
+    auto cls     = MakeClassification(kSfNone, SemanticClass::kSemilinear);
+    item.payload = AstPayload{
+        .expr           = Expr::Constant(0),
+        .classification = cls,
+        .provenance     = Provenance::kRewritten,
+        .solve_ctx      = AstSolveContext{ .vars = { "x" } },
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kRewritten;
+
+    OrchestratorPolicy policy;
+    PassAttemptCache cache;
+    auto pass = SelectNextPass(item, policy, 0, cache);
+    ASSERT_TRUE(pass.has_value());
+    EXPECT_EQ(*pass, PassId::kSemilinearNormalize);
+}
+
+TEST(SelectNextPass, RewrittenNonSemilinearSubproblemFallsThrough) {
+    WorkItem item;
+    auto cls     = MakeClassification(kSfNone, SemanticClass::kLinear);
+    item.payload = AstPayload{
+        .expr           = Expr::Constant(0),
+        .classification = cls,
+        .provenance     = Provenance::kRewritten,
+        .solve_ctx      = AstSolveContext{ .vars = { "x" } },
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kRewritten;
+
+    OrchestratorPolicy policy;
+    PassAttemptCache cache;
+    auto pass = SelectNextPass(item, policy, 0, cache);
+    ASSERT_TRUE(pass.has_value());
+    EXPECT_EQ(*pass, PassId::kBuildSignatureState);
+}
+
+TEST(StateKind, LiftedSkeletonKind) {
+    StateData lifted = LiftedSkeletonPayload{
+        .outer_expr         = Expr::Variable(0),
+        .outer_ctx          = { .vars = { "x", "v0" } },
+        .original_var_count = 1,
+        .baseline_cost      = ExprCost{ .weighted_size = 5 },
+    };
+    EXPECT_EQ(GetStateKind(lifted), StateKind::kLiftedSkeleton);
+}
+
+TEST(Fingerprint, LiftedSkeletonBindingsDistinct) {
+    WorkItem a, b;
+    a.payload = LiftedSkeletonPayload{
+        .outer_expr         = Expr::Variable(0),
+        .outer_ctx          = { .vars = { "x", "v0" } },
+        .original_var_count = 1,
+        .baseline_cost      = ExprCost{ .weighted_size = 5 },
+    };
+    b.payload = LiftedSkeletonPayload{
+        .outer_expr         = Expr::Variable(0),
+        .outer_ctx          = { .vars = { "x", "v0" } },
+        .original_var_count = 1,
+        .baseline_cost      = ExprCost{ .weighted_size = 5 },
+    };
+    std::get< LiftedSkeletonPayload >(b.payload).bindings.push_back(
+        LiftedBinding{
+            .kind            = LiftedValueKind::kArithmeticAtom,
+            .outer_var_index = 1,
+            .subtree         = Expr::Mul(Expr::Variable(0), Expr::Variable(0)),
+            .structural_hash = 42,
+        }
+    );
+
+    auto fa = ComputeFingerprint(a, 64);
+    auto fb = ComputeFingerprint(b, 64);
+    EXPECT_NE(fa, fb);
+}
+
+TEST(Fingerprint, ResidualTargetVarsDistinct) {
+    WorkItem a, b;
+    a.payload = ResidualStatePayload{
+        .origin          = ResidualOrigin::kDirectBooleanNull,
+        .is_boolean_null = true,
+        .target          = { .vars = { "x" } },
+    };
+    b.payload = ResidualStatePayload{
+        .origin          = ResidualOrigin::kDirectBooleanNull,
+        .is_boolean_null = true,
+        .target          = { .vars = { "y" } },
+    };
+    auto fa = ComputeFingerprint(a, 64);
+    auto fb = ComputeFingerprint(b, 64);
+    EXPECT_NE(fa, fb);
+}
+
+TEST(Fingerprint, CoreTargetVarsDistinct) {
+    WorkItem a, b;
+    a.payload = CoreCandidatePayload{
+        .core_expr      = Expr::Variable(0),
+        .extractor_kind = ExtractorKind::kPolynomial,
+        .target         = { .vars = { "x" } },
+    };
+    b.payload = CoreCandidatePayload{
+        .core_expr      = Expr::Variable(0),
+        .extractor_kind = ExtractorKind::kPolynomial,
+        .target         = { .vars = { "y" } },
+    };
+    auto fa = ComputeFingerprint(a, 64);
+    auto fb = ComputeFingerprint(b, 64);
+    EXPECT_NE(fa, fb);
+}
+
+TEST(SelectNextPass, LiftedSkeletonRoutes) {
+    WorkItem item;
+    item.payload = LiftedSkeletonPayload{
+        .outer_expr         = Expr::Variable(0),
+        .outer_ctx          = { .vars = { "x" } },
+        .original_var_count = 1,
+        .baseline_cost      = ExprCost{ .weighted_size = 5 },
+    };
+
+    OrchestratorPolicy policy;
+    PassAttemptCache cache;
+    auto pass = SelectNextPass(item, policy, 0, cache);
+    ASSERT_TRUE(pass.has_value());
+    EXPECT_EQ(*pass, PassId::kPrepareLiftedOuterSolve);
+}
+
+TEST(Fingerprint, AstGroupIdAlwaysHashed) {
+    WorkItem a, b;
+    a.payload  = AstPayload{ .expr = Expr::Variable(0) };
+    a.group_id = 1;
+    b.payload  = AstPayload{ .expr = Expr::Variable(0) };
+    b.group_id = 2;
+    auto fa    = ComputeFingerprint(a, 64);
+    auto fb    = ComputeFingerprint(b, 64);
+    EXPECT_NE(fa, fb);
+}
+
+TEST(OrchestratorPass, ClassifyAstPreservesSolveCtxAndGroupId) {
+    Options opts;
+    opts.bitwidth = 64;
+    OrchestratorContext ctx{
+        .opts          = opts,
+        .original_vars = { "g0", "g1" },
+        .bitwidth      = 64,
+    };
+
+    auto input_sig = std::vector< uint64_t >{ 0, 1 };
+
+    WorkItem item;
+    item.payload = AstPayload{
+        .expr       = Expr::Variable(0),
+        .provenance = Provenance::kRewritten,
+        .solve_ctx  = AstSolveContext{ .vars = { "x" }, .input_sig = input_sig },
+    };
+    item.group_id = 17;
+    item.depth    = 2;
+    item.history  = { PassId::kLowerNotOverArith };
+
+    auto result = RunClassifyAst(item, ctx);
+    ASSERT_TRUE(result.has_value());
+    auto &pr = result.value();
+
+    EXPECT_EQ(pr.decision, PassDecision::kAdvance);
+    ASSERT_EQ(pr.next.size(), 1u);
+    auto &out = pr.next[0];
+    ASSERT_TRUE(out.group_id.has_value());
+    EXPECT_EQ(*out.group_id, 17u);
+    EXPECT_EQ(out.depth, 2u);
+    EXPECT_EQ(out.history, std::vector< PassId >({ PassId::kLowerNotOverArith }));
+    auto &ast = std::get< AstPayload >(out.payload);
+    ASSERT_TRUE(ast.solve_ctx.has_value());
+    EXPECT_EQ(ast.solve_ctx->vars, std::vector< std::string >({ "x" }));
+    EXPECT_EQ(ast.solve_ctx->input_sig, input_sig);
 }

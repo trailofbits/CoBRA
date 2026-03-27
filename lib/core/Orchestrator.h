@@ -34,6 +34,7 @@ namespace cobra {
         kSemilinearNormalizedIr,
         kSemilinearCheckedIr,
         kSemilinearRewrittenIr,
+        kLiftedSkeleton,
         kCandidateExpr,
         kCompetitionResolved,
     };
@@ -65,11 +66,19 @@ namespace cobra {
     // Payload types for StateData variant
     // ---------------------------------------------------------------
 
+    struct AstSolveContext
+    {
+        std::vector< std::string > vars;
+        std::optional< Evaluator > evaluator;
+        std::vector< uint64_t > input_sig;
+    };
+
     struct AstPayload
     {
         std::unique_ptr< Expr > expr;
         std::optional< Classification > classification;
         Provenance provenance = Provenance::kOriginal;
+        std::optional< AstSolveContext > solve_ctx;
     };
 
     struct SignatureSubproblemContext
@@ -106,6 +115,15 @@ namespace cobra {
         kProductCore,
         kPolynomialCore,
         kTemplateCore,
+        kSignatureLowering,
+        kLiftedOuter,
+    };
+
+    struct ResidualTargetContext
+    {
+        Evaluator eval;
+        std::vector< std::string > vars;
+        std::vector< uint32_t > remap_support;
     };
 
     struct CoreCandidatePayload
@@ -114,6 +132,7 @@ namespace cobra {
         ExtractorKind extractor_kind;
         uint8_t degree_used = 0;
         std::vector< uint64_t > source_sig;
+        ResidualTargetContext target;
     };
 
     struct ResidualStatePayload
@@ -128,11 +147,24 @@ namespace cobra {
         std::vector< uint32_t > residual_support;
         bool is_boolean_null = false;
         uint8_t degree_floor = 2;
+        ResidualTargetContext target;
+    };
+
+    struct LiftedSkeletonPayload
+    {
+        std::unique_ptr< Expr > outer_expr;
+        AstSolveContext outer_ctx;
+        std::vector< LiftedBinding > bindings;
+        uint32_t original_var_count = 0;
+        ExprCost baseline_cost;
+        std::vector< uint64_t > source_sig;
     };
 
     struct SemilinearContext
     {
         SemilinearIR ir;
+        std::vector< std::string > vars;
+        std::optional< Evaluator > evaluator;
     };
 
     struct NormalizedSemilinearPayload
@@ -158,7 +190,8 @@ namespace cobra {
     using StateData = std::variant<
         AstPayload, SignatureStatePayload, SignatureCoeffStatePayload, CoreCandidatePayload,
         ResidualStatePayload, NormalizedSemilinearPayload, CheckedSemilinearPayload,
-        RewrittenSemilinearPayload, CandidatePayload, CompetitionResolvedPayload >;
+        RewrittenSemilinearPayload, LiftedSkeletonPayload, CandidatePayload,
+        CompetitionResolvedPayload >;
 
     // ---------------------------------------------------------------
     // State features and item metadata

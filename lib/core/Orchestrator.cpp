@@ -32,6 +32,8 @@ namespace cobra {
                     return StateKind::kSemilinearCheckedIr;
                 } else if constexpr (std::is_same_v< T, RewrittenSemilinearPayload >) {
                     return StateKind::kSemilinearRewrittenIr;
+                } else if constexpr (std::is_same_v< T, LiftedSkeletonPayload >) {
+                    return StateKind::kLiftedSkeleton;
                 } else if constexpr (std::is_same_v< T, CompetitionResolvedPayload >) {
                     return StateKind::kCompetitionResolved;
                 } else {
@@ -65,10 +67,25 @@ namespace cobra {
         };
 
         std::visit(
-            [&fp, &fold_control](const auto &payload) {
+            [&fp, &fold_control, &item](const auto &payload) {
                 using T = std::decay_t< decltype(payload) >;
                 if constexpr (std::is_same_v< T, AstPayload >) {
-                    fp.payload_hash = std::hash< Expr >{}(*payload.expr);
+                    size_t h = std::hash< Expr >{}(*payload.expr);
+                    if (payload.solve_ctx.has_value()) {
+                        for (const auto &v : payload.solve_ctx->vars) {
+                            h = detail::hash_combine(h, std::hash< std::string >{}(v));
+                        }
+                        h = detail::hash_combine(
+                            h, std::hash< bool >{}(payload.solve_ctx->evaluator.has_value())
+                        );
+                        for (uint64_t s : payload.solve_ctx->input_sig) {
+                            h = detail::hash_combine(h, std::hash< uint64_t >{}(s));
+                        }
+                    }
+                    h = detail::hash_combine(
+                        h, std::hash< uint32_t >{}(item.group_id.value_or(UINT32_MAX))
+                    );
+                    fp.payload_hash = h;
                     fp.vars         = {};
                 } else if constexpr (std::is_same_v< T, SignatureStatePayload >) {
                     size_t h = std::hash< size_t >{}(payload.ctx.sig.size());
@@ -94,6 +111,12 @@ namespace cobra {
                         std::hash< uint8_t >{}(static_cast< uint8_t >(payload.extractor_kind))
                     );
                     h = detail::hash_combine(h, std::hash< uint8_t >{}(payload.degree_used));
+                    for (const auto &v : payload.target.vars) {
+                        h = detail::hash_combine(h, std::hash< std::string >{}(v));
+                    }
+                    for (uint32_t r : payload.target.remap_support) {
+                        h = detail::hash_combine(h, std::hash< uint32_t >{}(r));
+                    }
                     fp.payload_hash = h;
                     fp.vars         = {};
                 } else if constexpr (std::is_same_v< T, ResidualStatePayload >) {
@@ -111,6 +134,15 @@ namespace cobra {
                     }
                     h = detail::hash_combine(h, std::hash< bool >{}(payload.is_boolean_null));
                     h = detail::hash_combine(h, std::hash< uint8_t >{}(payload.degree_floor));
+                    for (const auto &v : payload.target.vars) {
+                        h = detail::hash_combine(h, std::hash< std::string >{}(v));
+                    }
+                    for (uint32_t r : payload.target.remap_support) {
+                        h = detail::hash_combine(h, std::hash< uint32_t >{}(r));
+                    }
+                    h = detail::hash_combine(
+                        h, std::hash< uint32_t >{}(item.group_id.value_or(UINT32_MAX))
+                    );
                     fp.payload_hash = h;
                     fp.vars         = {};
                 } else if constexpr (
@@ -121,6 +153,26 @@ namespace cobra {
                 {
                     auto key        = BuildSemilinearFingerprintKey(payload.ctx.ir);
                     fp.payload_hash = std::hash< SemilinearFingerprintKey >{}(key);
+                    fp.vars         = {};
+                } else if constexpr (std::is_same_v< T, LiftedSkeletonPayload >) {
+                    size_t h = std::hash< Expr >{}(*payload.outer_expr);
+                    for (const auto &v : payload.outer_ctx.vars) {
+                        h = detail::hash_combine(h, std::hash< std::string >{}(v));
+                    }
+                    for (uint64_t s : payload.outer_ctx.input_sig) {
+                        h = detail::hash_combine(h, std::hash< uint64_t >{}(s));
+                    }
+                    h = detail::hash_combine(
+                        h, std::hash< uint32_t >{}(payload.original_var_count)
+                    );
+                    for (const auto &b : payload.bindings) {
+                        h = detail::hash_combine(
+                            h, std::hash< uint8_t >{}(static_cast< uint8_t >(b.kind))
+                        );
+                        h = detail::hash_combine(h, std::hash< uint32_t >{}(b.outer_var_index));
+                        h = detail::hash_combine(h, std::hash< uint64_t >{}(b.structural_hash));
+                    }
+                    fp.payload_hash = h;
                     fp.vars         = {};
                 } else if constexpr (std::is_same_v< T, CompetitionResolvedPayload >) {
                     fp.payload_hash = std::hash< uint32_t >{}(payload.group_id);
@@ -299,16 +351,18 @@ namespace cobra {
         }
 
         constexpr FoldedAstPassEntry kFoldedAstPasses[] = {
-            {     PassId::kBuildSignatureState,                                0, 0, false },
-            {   PassId::kPrepareDirectResidual,                                0, 1, false },
-            {      PassId::kExtractProductCore,                                0, 2, false },
-            {       PassId::kExtractPolyCoreD2,                                0, 3, false },
-            {     PassId::kExtractTemplateCore,                                0, 4, false },
-            {       PassId::kExtractPolyCoreD3,                                0, 5, false },
-            {       PassId::kExtractPolyCoreD4,                                0, 6, false },
-            {         PassId::kOperandSimplify, Bit(PassId::kExtractProductCore), 7,  true },
-            { PassId::kProductIdentityCollapse, Bit(PassId::kExtractProductCore), 8,  true },
-            {             PassId::kXorLowering,                                0, 9,  true },
+            {        PassId::kBuildSignatureState,                                0,  0, false },
+            {      PassId::kPrepareDirectResidual,                                0,  1, false },
+            {         PassId::kExtractProductCore,                                0,  2, false },
+            {          PassId::kExtractPolyCoreD2,                                0,  3, false },
+            {        PassId::kExtractTemplateCore,                                0,  4, false },
+            {          PassId::kExtractPolyCoreD3,                                0,  5, false },
+            {          PassId::kExtractPolyCoreD4,                                0,  6, false },
+            {        PassId::kLiftArithmeticAtoms,                                0,  7, false },
+            { PassId::kLiftRepeatedSubexpressions,                                0,  8, false },
+            {            PassId::kOperandSimplify, Bit(PassId::kExtractProductCore),  9,  true },
+            {    PassId::kProductIdentityCollapse, Bit(PassId::kExtractProductCore), 10,  true },
+            {                PassId::kXorLowering,                                0, 11,  true },
         };
 
         struct ResidualPassEntry
@@ -469,17 +523,39 @@ namespace cobra {
             return pass;
         }
 
-        // 8. Original provenance + semilinear → kSemilinearNormalize
-        if (item.features.provenance == Provenance::kOriginal) {
-            if (item.features.classification
+        // 7c. LiftedSkeleton → kPrepareLiftedOuterSolve
+        if (kind == StateKind::kLiftedSkeleton) {
+            auto pass = PassId::kPrepareLiftedOuterSolve;
+            if ((item.attempted_mask & Bit(pass)) != 0) { return std::nullopt; }
+            if (cache.HasAttempted(fp, pass)) { return std::nullopt; }
+            return pass;
+        }
+
+        // 8. Semilinear routing: original OR rewritten-with-solve_ctx
+        {
+            bool eligible_semilinear = false;
+            if (item.features.provenance == Provenance::kOriginal
+                && item.features.classification
                 && item.features.classification->semantic == SemanticClass::kSemilinear)
             {
+                eligible_semilinear = true;
+            } else if (
+                item.features.provenance == Provenance::kRewritten
+                && item.features.classification
+                && item.features.classification->semantic == SemanticClass::kSemilinear
+            )
+            {
+                if (auto *ast = std::get_if< AstPayload >(&item.payload)) {
+                    if (ast->solve_ctx.has_value()) { eligible_semilinear = true; }
+                }
+            }
+            if (eligible_semilinear) {
                 auto pass = PassId::kSemilinearNormalize;
                 if ((item.attempted_mask & Bit(pass)) != 0) { return std::nullopt; }
                 if (cache.HasAttempted(fp, pass)) { return std::nullopt; }
                 return pass;
             }
-            return std::nullopt;
+            if (item.features.provenance == Provenance::kOriginal) { return std::nullopt; }
         }
 
         // 9. Non-original: must have classification and no unknown shape
@@ -822,7 +898,9 @@ namespace cobra {
                 }
             }
 
-            // Candidate acceptance: verified candidates are immediately returned
+            // Candidate acceptance: verified candidates are immediately
+            // returned (top-level) or submitted into their owning group
+            // (lifted/grouped lineages).
             if (auto *cand = std::get_if< CandidatePayload >(&item.payload)) {
                 if (!cand->needs_original_space_verification) {
                     // Stamp transform_produced_candidate if any rewrite
@@ -836,6 +914,28 @@ namespace cobra {
                             break;
                         }
                     }
+
+                    // Grouped candidates: submit into owning group
+                    // so that the group's continuation can recombine.
+                    if (item.group_id.has_value()) {
+                        SubmitCandidate(
+                            context.competition_groups, *item.group_id,
+                            CandidateRecord{
+                                .expr                              = CloneExpr(*cand->expr),
+                                .cost                              = cand->cost,
+                                .verification                      = item.metadata.verification,
+                                .real_vars                         = cand->real_vars,
+                                .source_pass                       = cand->producing_pass,
+                                .needs_original_space_verification = false,
+                                .sig_vector                        = item.metadata.sig_vector,
+                            }
+                        );
+                        auto resolved =
+                            ReleaseHandle(context.competition_groups, *item.group_id);
+                        if (resolved.has_value()) { worklist.Push(std::move(*resolved)); }
+                        continue;
+                    }
+
                     telemetry.queue_high_water = worklist.HighWaterMark();
                     return Ok(ToSimplifyOutcome(
                         OrchestratorResult{

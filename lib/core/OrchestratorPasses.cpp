@@ -3,6 +3,7 @@
 #include "ContinuationTypes.h"
 #include "DecompositionPassHelpers.h"
 #include "JoinState.h"
+#include "LiftingPasses.h"
 #include "SemilinearPasses.h"
 #include "SignaturePasses.h"
 #include "SimplifierInternal.h"
@@ -26,6 +27,16 @@ namespace cobra {
 
         bool IsAstKind(const WorkItem &item) {
             return std::holds_alternative< AstPayload >(item.payload);
+        }
+
+        std::optional< AstSolveContext >
+        CloneSolveContext(const std::optional< AstSolveContext > &solve_ctx) {
+            if (!solve_ctx.has_value()) { return std::nullopt; }
+            return AstSolveContext{
+                .vars      = solve_ctx->vars,
+                .evaluator = solve_ctx->evaluator,
+                .input_sig = solve_ctx->input_sig,
+            };
         }
 
         bool IsCandidateKind(const WorkItem &item) {
@@ -181,7 +192,8 @@ namespace cobra {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
 
-        const auto &ast = std::get< AstPayload >(item.payload);
+        const auto &ast         = std::get< AstPayload >(item.payload);
+        const auto &active_vars = ActiveAstVars(item, ctx);
         if (ast.provenance != Provenance::kOriginal) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
@@ -197,14 +209,17 @@ namespace cobra {
 
         auto lowered = internal::LowerNotOverArith(CloneExpr(*ast.expr), ctx.bitwidth);
 
-        const auto num_vars = static_cast< uint32_t >(ctx.original_vars.size());
+        const auto num_vars = static_cast< uint32_t >(active_vars.size());
         auto new_sig        = EvaluateBooleanSignature(*lowered, num_vars, ctx.bitwidth);
+        auto solve_ctx      = CloneSolveContext(ast.solve_ctx);
+        if (solve_ctx.has_value()) { solve_ctx->input_sig = new_sig; }
 
         WorkItem new_item;
         new_item.payload = AstPayload{
             .expr           = std::move(lowered),
             .classification = ast.classification,
             .provenance     = Provenance::kLowered,
+            .solve_ctx      = std::move(solve_ctx),
         };
         new_item.features            = item.features;
         new_item.features.provenance = Provenance::kLowered;
@@ -213,6 +228,7 @@ namespace cobra {
         new_item.depth               = item.depth;
         new_item.rewrite_gen         = item.rewrite_gen;
         new_item.attempted_mask      = item.attempted_mask;
+        new_item.group_id            = item.group_id;
         new_item.history             = item.history;
 
         PassResult result;
@@ -235,6 +251,7 @@ namespace cobra {
             .expr           = CloneExpr(*ast.expr),
             .classification = cls,
             .provenance     = ast.provenance,
+            .solve_ctx      = CloneSolveContext(ast.solve_ctx),
         };
         new_item.features                = item.features;
         new_item.features.classification = cls;
@@ -242,6 +259,7 @@ namespace cobra {
         new_item.depth                   = item.depth;
         new_item.rewrite_gen             = item.rewrite_gen;
         new_item.attempted_mask          = item.attempted_mask;
+        new_item.group_id                = item.group_id;
         new_item.history                 = item.history;
 
         ctx.run_metadata.input_classification = cls;
@@ -259,8 +277,11 @@ namespace cobra {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
 
-        const auto &ast     = std::get< AstPayload >(item.payload);
-        const auto num_vars = static_cast< uint32_t >(ctx.original_vars.size());
+        const auto &ast         = std::get< AstPayload >(item.payload);
+        const auto &active_vars = ActiveAstVars(item, ctx);
+        const auto &active_eval = ActiveAstEvaluator(item, ctx);
+        const auto *active_sig  = ActiveAstInputSig(item, ctx);
+        const auto num_vars     = static_cast< uint32_t >(active_vars.size());
 
         // Step 1: Compute signature.
         // For the initial (non-rewritten) item, use the parser's
@@ -268,15 +289,15 @@ namespace cobra {
         // This matches the legacy's working_sig exactly.  For
         // lowered or rewritten items, recompute from the AST.
         bool use_input_sig =
-            !ctx.input_sig.empty() && !ctx.lowering_fired && item.rewrite_gen == 0;
-        auto sig = use_input_sig ? ctx.input_sig
+            active_sig != nullptr && !ctx.lowering_fired && item.rewrite_gen == 0;
+        auto sig = use_input_sig ? *active_sig
                                  : EvaluateBooleanSignature(*ast.expr, num_vars, ctx.bitwidth);
 
         // Step 2: Constant match
         {
             auto pm = MatchPattern(sig, num_vars, ctx.bitwidth);
             if (pm && (*pm)->kind == Expr::Kind::kConstant) {
-                bool needs_verify = ctx.evaluator.has_value();
+                bool needs_verify = active_eval.has_value();
                 WorkItem cand_item;
                 cand_item.payload = CandidatePayload{
                     .expr                              = std::move(*pm),
@@ -294,6 +315,7 @@ namespace cobra {
                 cand_item.rewrite_gen           = item.rewrite_gen;
                 cand_item.attempted_mask        = item.attempted_mask;
                 cand_item.history               = item.history;
+                cand_item.group_id              = item.group_id;
 
                 PassResult result;
                 result.decision    = PassDecision::kSolvedCandidate;
@@ -304,7 +326,7 @@ namespace cobra {
         }
 
         // Step 3: Eliminate auxiliary variables
-        auto elim                 = EliminateAuxVars(sig, ctx.original_vars);
+        auto elim                 = EliminateAuxVars(sig, active_vars);
         const auto real_var_count = static_cast< uint32_t >(elim.real_vars.size());
 
         // Step 4: Check max_vars
@@ -317,13 +339,19 @@ namespace cobra {
         }
 
         // Step 5: Build original_indices
-        auto original_indices = BuildVarSupport(ctx.original_vars, elim.real_vars);
+        auto original_indices = BuildVarSupport(active_vars, elim.real_vars);
 
         // Step 6: Determine verification needs
-        bool needs_verification = ctx.evaluator.has_value();
+        bool needs_verification = active_eval.has_value();
 
-        // Step 7: Create competition group for technique passes
-        auto group_id = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+        // Step 7: Reuse incoming group or create a fresh one
+        GroupId group_id;
+        if (item.group_id.has_value()) {
+            group_id = *item.group_id;
+            AcquireHandle(ctx.competition_groups, group_id);
+        } else {
+            group_id = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+        }
 
         // Step 8: Emit SignatureStatePayload
         WorkItem sig_item;
@@ -343,6 +371,15 @@ namespace cobra {
         sig_item.attempted_mask = item.attempted_mask;
         sig_item.group_id       = group_id;
         sig_item.history        = item.history;
+
+        // Thread subproblem-local evaluator so BuildMappedEvaluator
+        // verifies against the reduced outer function, not the
+        // top-level ctx.evaluator.
+        if (auto *a = std::get_if< AstPayload >(&item.payload)) {
+            if (a->solve_ctx.has_value() && a->solve_ctx->evaluator.has_value()) {
+                sig_item.evaluator_override = *a->solve_ctx->evaluator;
+            }
+        }
 
         PassResult result;
         result.decision    = PassDecision::kAdvance;
@@ -371,18 +408,27 @@ namespace cobra {
             );
         }
 
-        const auto &vars    = ctx.original_vars;
-        const auto num_vars = static_cast< uint32_t >(vars.size());
-        auto baseline_cost  = ComputeCost(*site->mul).cost;
+        const auto &active_vars = ActiveAstVars(item, ctx);
+        const auto num_vars     = static_cast< uint32_t >(active_vars.size());
+        auto baseline_cost      = ComputeCost(*site->mul).cost;
 
         OperandJoinState join;
-        join.full_ast      = CloneExpr(*ast.expr);
-        join.original_mul  = CloneExpr(*site->mul);
-        join.target_hash   = site->mul_hash;
-        join.baseline_cost = baseline_cost;
-        join.vars          = vars;
-        join.bitwidth      = ctx.bitwidth;
-        join.rewrite_gen   = item.rewrite_gen;
+        join.full_ast        = CloneExpr(*ast.expr);
+        join.original_mul    = CloneExpr(*site->mul);
+        join.target_hash     = site->mul_hash;
+        join.baseline_cost   = baseline_cost;
+        join.vars            = active_vars;
+        join.parent_group_id = item.group_id;
+        if (ast.solve_ctx.has_value()) {
+            join.has_solve_ctx       = true;
+            join.solve_ctx_vars      = ast.solve_ctx->vars;
+            join.solve_ctx_evaluator = ast.solve_ctx->evaluator;
+            join.solve_ctx_input_sig = ast.solve_ctx->input_sig;
+        }
+        join.bitwidth       = ctx.bitwidth;
+        join.parent_depth   = item.depth;
+        join.rewrite_gen    = item.rewrite_gen;
+        join.parent_history = item.history;
 
         auto join_id =
             CreateJoin(ctx.join_states, ctx.next_join_id, JoinState{ std::move(join) });
@@ -414,15 +460,19 @@ namespace cobra {
             child.payload = SignatureStatePayload{
                     .ctx = {
                         .sig              = std::move(sig),
-                        .real_vars        = vars,
-                        .elimination      = { .reduced_sig = {}, .real_vars = vars },
+                        .real_vars        = active_vars,
+                        .elimination      = { .reduced_sig = {}, .real_vars = active_vars },
                         .original_indices = std::move(indices),
                         .needs_original_space_verification = false,
                     },
                 };
             child.features              = item.features;
             child.metadata              = item.metadata;
+            child.depth                 = item.depth;
+            child.rewrite_gen           = item.rewrite_gen;
+            child.attempted_mask        = item.attempted_mask;
             child.group_id              = group_id;
+            child.history               = item.history;
             // Copy sig into elimination.reduced_sig for technique passes.
             auto &sub                   = std::get< SignatureStatePayload >(child.payload).ctx;
             sub.elimination.reduced_sig = sub.sig;
@@ -457,8 +507,8 @@ namespace cobra {
             );
         }
 
-        const auto &vars    = ctx.original_vars;
-        const auto num_vars = static_cast< uint32_t >(vars.size());
+        const auto &active_vars = ActiveAstVars(item, ctx);
+        const auto num_vars     = static_cast< uint32_t >(active_vars.size());
 
         auto assignments = EnumerateValidAssignments(*site->add_node, num_vars, ctx.bitwidth);
         if (assignments.empty()) {
@@ -481,13 +531,22 @@ namespace cobra {
 
         for (const auto &assign : assignments) {
             ProductJoinState join;
-            join.original_expr = CloneExpr(*site->add_node);
-            join.baseline_cost = baseline_cost;
-            join.vars          = vars;
-            join.bitwidth      = ctx.bitwidth;
-            join.rewrite_gen   = item.rewrite_gen;
-            join.full_ast      = CloneExpr(*ast.expr);
-            join.target_hash   = site->add_hash;
+            join.original_expr   = CloneExpr(*site->add_node);
+            join.baseline_cost   = baseline_cost;
+            join.vars            = active_vars;
+            join.parent_group_id = item.group_id;
+            if (ast.solve_ctx.has_value()) {
+                join.has_solve_ctx       = true;
+                join.solve_ctx_vars      = ast.solve_ctx->vars;
+                join.solve_ctx_evaluator = ast.solve_ctx->evaluator;
+                join.solve_ctx_input_sig = ast.solve_ctx->input_sig;
+            }
+            join.bitwidth       = ctx.bitwidth;
+            join.parent_depth   = item.depth;
+            join.rewrite_gen    = item.rewrite_gen;
+            join.parent_history = item.history;
+            join.full_ast       = CloneExpr(*ast.expr);
+            join.target_hash    = site->add_hash;
 
             auto join_id =
                 CreateJoin(ctx.join_states, ctx.next_join_id, JoinState{ std::move(join) });
@@ -502,15 +561,20 @@ namespace cobra {
             x_child.payload = SignatureStatePayload{
                 .ctx = {
                     .sig              = assign.sig_x,
-                    .real_vars        = vars,
-                    .elimination      = { .reduced_sig = assign.sig_x, .real_vars = vars },
+                    .real_vars        = active_vars,
+                    .elimination      = { .reduced_sig = assign.sig_x,
+                                     .real_vars = active_vars },
                     .original_indices = indices,
                     .needs_original_space_verification = false,
                 },
             };
-            x_child.features = item.features;
-            x_child.metadata = item.metadata;
-            x_child.group_id = x_group;
+            x_child.features       = item.features;
+            x_child.metadata       = item.metadata;
+            x_child.depth          = item.depth;
+            x_child.rewrite_gen    = item.rewrite_gen;
+            x_child.attempted_mask = item.attempted_mask;
+            x_child.group_id       = x_group;
+            x_child.history        = item.history;
             result.next.push_back(std::move(x_child));
 
             auto y_group = CreateGroup(ctx.competition_groups, ctx.next_group_id);
@@ -523,15 +587,20 @@ namespace cobra {
             y_child.payload = SignatureStatePayload{
                 .ctx = {
                     .sig              = assign.sig_y,
-                    .real_vars        = vars,
-                    .elimination      = { .reduced_sig = assign.sig_y, .real_vars = vars },
+                    .real_vars        = active_vars,
+                    .elimination      = { .reduced_sig = assign.sig_y,
+                                     .real_vars = active_vars },
                     .original_indices = indices,
                     .needs_original_space_verification = false,
                 },
             };
-            y_child.features = item.features;
-            y_child.metadata = item.metadata;
-            y_child.group_id = y_group;
+            y_child.features       = item.features;
+            y_child.metadata       = item.metadata;
+            y_child.depth          = item.depth;
+            y_child.rewrite_gen    = item.rewrite_gen;
+            y_child.attempted_mask = item.attempted_mask;
+            y_child.group_id       = y_group;
+            y_child.history        = item.history;
             result.next.push_back(std::move(y_child));
         }
 
@@ -592,6 +661,7 @@ namespace cobra {
             .expr           = std::move(rw.expr),
             .classification = new_cls,
             .provenance     = Provenance::kRewritten,
+            .solve_ctx      = CloneSolveContext(ast.solve_ctx),
         };
         rewritten.features                             = item.features;
         rewritten.features.classification              = new_cls;
@@ -601,12 +671,84 @@ namespace cobra {
         rewritten.depth                                = item.depth;
         rewritten.rewrite_gen                          = item.rewrite_gen + 1;
         rewritten.attempted_mask                       = 0;
+        rewritten.group_id                             = item.group_id;
         rewritten.history                              = item.history;
 
         PassResult result;
         result.decision    = PassDecision::kAdvance;
         result.disposition = ItemDisposition::kReplaceCurrent;
         result.next.push_back(std::move(rewritten));
+        return Ok(std::move(result));
+    }
+
+    // ---------------------------------------------------------------
+    // Lifting passes
+    // ---------------------------------------------------------------
+
+    Result< PassResult >
+    RunPrepareLiftedOuterSolve(const WorkItem &item, OrchestratorContext &ctx) {
+        auto *skel = std::get_if< LiftedSkeletonPayload >(&item.payload);
+        if (skel == nullptr) {
+            return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
+        }
+
+        auto group_id =
+            CreateGroup(ctx.competition_groups, ctx.next_group_id, skel->baseline_cost);
+        auto &group = ctx.competition_groups.at(group_id);
+
+        LiftedSubstituteCont cont;
+        cont.bindings.reserve(skel->bindings.size());
+        for (const auto &b : skel->bindings) {
+            cont.bindings.push_back(
+                LiftedBinding{
+                    .kind             = b.kind,
+                    .outer_var_index  = b.outer_var_index,
+                    .subtree          = CloneExpr(*b.subtree),
+                    .structural_hash  = b.structural_hash,
+                    .original_support = b.original_support,
+                }
+            );
+        }
+        cont.outer_vars         = skel->outer_ctx.vars;
+        cont.original_var_count = skel->original_var_count;
+        cont.original_vars      = ctx.original_vars;
+        cont.source_sig         = skel->source_sig;
+        if (ctx.evaluator.has_value()) { cont.original_eval = *ctx.evaluator; }
+        group.continuation = std::move(cont);
+
+        auto cls = ClassifyStructural(*skel->outer_expr);
+
+        // Build a proper outer evaluator so downstream families
+        // (decomposition, signature) can verify against the
+        // reduced outer problem.  Use a shared_ptr so the
+        // std::function (Evaluator) is copy-constructible.
+        auto solve_ctx      = skel->outer_ctx; // copy before moving outer_expr
+        auto shared_oe      = std::shared_ptr< Expr >(CloneExpr(*skel->outer_expr));
+        auto outer_bw       = ctx.bitwidth;
+        solve_ctx.evaluator = [shared_oe,
+                               outer_bw](const std::vector< uint64_t > &vals) -> uint64_t {
+            return EvaluateExpr(*shared_oe, vals, outer_bw);
+        };
+
+        WorkItem child;
+        child.payload = AstPayload{
+            .expr           = CloneExpr(*skel->outer_expr),
+            .classification = cls,
+            .provenance     = Provenance::kRewritten,
+            .solve_ctx      = std::move(solve_ctx),
+        };
+        child.features.classification = cls;
+        child.features.provenance     = Provenance::kRewritten;
+        child.metadata                = item.metadata;
+        child.depth                   = item.depth;
+        child.rewrite_gen             = item.rewrite_gen;
+        child.group_id                = group_id;
+        child.history                 = item.history;
+
+        PassResult result;
+        result.decision    = PassDecision::kAdvance;
+        result.disposition = ItemDisposition::kConsumeCurrent;
+        result.next.push_back(std::move(child));
         return Ok(std::move(result));
     }
 
@@ -895,6 +1037,31 @@ namespace cobra {
              .run = RunXorLowering,
              },
             {
+             .id         = PassId::kLiftArithmeticAtoms,
+             .consumes   = StateKind::kFoldedAst,
+             .tag        = PassTag::kRewrite,
+             .applicable = [](const WorkItem &item, const OrchestratorContext & /*ctx*/)
+ -> bool { return std::holds_alternative< AstPayload >(item.payload); },
+             .run = RunLiftArithmeticAtoms,
+             },
+            {
+             .id         = PassId::kLiftRepeatedSubexpressions,
+             .consumes   = StateKind::kFoldedAst,
+             .tag        = PassTag::kRewrite,
+             .applicable = [](const WorkItem &item, const OrchestratorContext & /*ctx*/)
+ -> bool { return std::holds_alternative< AstPayload >(item.payload); },
+             .run = RunLiftRepeatedSubexpressions,
+             },
+            {
+             .id         = PassId::kPrepareLiftedOuterSolve,
+             .consumes   = StateKind::kLiftedSkeleton,
+             .tag        = PassTag::kAnalysis,
+             .applicable = [](const WorkItem &item,
+             const OrchestratorContext & /*ctx*/) -> bool {
+             return std::holds_alternative< LiftedSkeletonPayload >(item.payload);
+             },        .run = RunPrepareLiftedOuterSolve,
+             },
+            {
              .id         = PassId::kVerifyCandidate,
              .consumes   = StateKind::kCandidateExpr,
              .tag        = PassTag::kVerifier,
@@ -904,6 +1071,37 @@ namespace cobra {
              },
         };
         return kRegistry;
+    }
+
+    // ---------------------------------------------------------------
+    // ActiveAst helpers
+    // ---------------------------------------------------------------
+
+    const std::vector< std::string > &
+    ActiveAstVars(const WorkItem &item, const OrchestratorContext &ctx) {
+        if (auto *ast = std::get_if< AstPayload >(&item.payload)) {
+            if (ast->solve_ctx.has_value()) { return ast->solve_ctx->vars; }
+        }
+        return ctx.original_vars;
+    }
+
+    const std::optional< Evaluator > &
+    ActiveAstEvaluator(const WorkItem &item, const OrchestratorContext &ctx) {
+        if (auto *ast = std::get_if< AstPayload >(&item.payload)) {
+            if (ast->solve_ctx.has_value()) { return ast->solve_ctx->evaluator; }
+        }
+        return ctx.evaluator;
+    }
+
+    const std::vector< uint64_t > *
+    ActiveAstInputSig(const WorkItem &item, const OrchestratorContext &ctx) {
+        if (auto *ast = std::get_if< AstPayload >(&item.payload)) {
+            if (ast->solve_ctx.has_value() && !ast->solve_ctx->input_sig.empty()) {
+                return &ast->solve_ctx->input_sig;
+            }
+        }
+        if (!ctx.input_sig.empty()) { return &ctx.input_sig; }
+        return nullptr;
     }
 
 } // namespace cobra
