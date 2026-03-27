@@ -255,7 +255,6 @@ namespace cobra {
         std::vector< std::string > vars;
         uint32_t bitwidth;
         Provenance provenance;
-        uint64_t attempted_mask = 0;
 
         bool operator==(const StateFingerprint &) const = default;
     };

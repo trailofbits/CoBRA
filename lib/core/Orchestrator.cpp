@@ -48,10 +48,9 @@ namespace cobra {
 
     StateFingerprint ComputeFingerprint(const WorkItem &item, uint32_t bitwidth) {
         StateFingerprint fp;
-        fp.kind           = GetStateKind(item.payload);
-        fp.bitwidth       = bitwidth;
-        fp.provenance     = item.features.provenance;
-        fp.attempted_mask = item.attempted_mask;
+        fp.kind       = GetStateKind(item.payload);
+        fp.bitwidth   = bitwidth;
+        fp.provenance = item.features.provenance;
 
         // Fold Phase 3 control state into signature-family hashes so
         // the pass-attempt cache distinguishes subproblems that share
@@ -269,7 +268,6 @@ std::hash< cobra::StateFingerprint >::operator()(const cobra::StateFingerprint &
     h        = hash_combine(h, std::hash< int >{}(static_cast< int >(fp.kind)));
     h        = hash_combine(h, std::hash< uint32_t >{}(fp.bitwidth));
     h        = hash_combine(h, std::hash< int >{}(static_cast< int >(fp.provenance)));
-    h        = hash_combine(h, std::hash< uint64_t >{}(fp.attempted_mask));
     for (const auto &v : fp.vars) { h = hash_combine(h, std::hash< std::string >{}(v)); }
     return h;
 }
