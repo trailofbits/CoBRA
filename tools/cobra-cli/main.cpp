@@ -116,10 +116,9 @@ namespace {
         cobra::Options opts{ .bitwidth = bitwidth, .max_vars = max_vars, .spot_check = true };
 
         if (original_ast != nullptr) {
-            opts.evaluator = [original_ast, num_vars,
-                              bitwidth](const std::vector< uint64_t > &v) -> uint64_t {
-                return cobra::EvalExpr(*original_ast, v, bitwidth);
-            };
+            opts.evaluator = cobra::Evaluator::FromExpr(
+                *original_ast, bitwidth, cobra::EvaluatorTraceKind::kCliOriginalAst
+            );
         }
 
         if (verbose) { std::cerr << "Simplifying...\n"; }

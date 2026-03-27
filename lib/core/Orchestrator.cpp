@@ -794,15 +794,22 @@ namespace cobra {
     ) {
         COBRA_ZONE_N("Simplify");
         COBRA_ZONE_VALUE(static_cast< int64_t >(vars.size()));
+        Options effective_opts = opts;
+        if (input_expr != nullptr && opts.evaluator) {
+            effective_opts.evaluator = Evaluator::FromExpr(*input_expr, opts.bitwidth);
+        }
         OrchestratorPolicy policy;
         OrchestratorContext context{
-            .opts          = opts,
+            .opts          = effective_opts,
             .original_vars = vars,
-            .evaluator =
-                opts.evaluator ? std::optional< Evaluator >(opts.evaluator) : std::nullopt,
-            .bitwidth     = opts.bitwidth,
-            .run_metadata = {},
-            .input_sig    = sig,
+            .evaluator     = effective_opts.evaluator
+                ? std::optional< Evaluator >(
+                      effective_opts.evaluator.WithTrace(EvaluatorTraceKind::kRoot)
+                  )
+                : std::nullopt,
+            .bitwidth      = opts.bitwidth,
+            .run_metadata  = {},
+            .input_sig     = sig,
         };
 
         Worklist worklist;

@@ -83,15 +83,21 @@ namespace cobra {
 
     Evaluator
     BuildRemainderEvaluator(const Evaluator &original, const Expr &core, uint32_t bitwidth) {
-        // shared_ptr because std::function requires copy-constructible captures.
-        std::shared_ptr< Expr > core_shared = CloneExpr(core);
-        const uint64_t kMask                = Bitmask(bitwidth);
-        return [original, core = std::move(core_shared), kMask,
-                bitwidth](const std::vector< uint64_t > &v) -> uint64_t {
-            const uint64_t kF = original(v);
-            const uint64_t kP = EvalExpr(*core, v, bitwidth);
-            return (kF - kP) & kMask;
-        };
+        auto compiled_core   = std::make_shared< CompiledExpr >(CompileExpr(core, bitwidth));
+        const uint64_t kMask = Bitmask(bitwidth);
+        return Evaluator(
+            [original, compiled_core = std::move(compiled_core), kMask,
+             original_workspace = EvaluatorWorkspace{}, core_stack = std::vector< uint64_t >{}](
+                const std::vector< uint64_t > &v
+            ) mutable -> uint64_t {
+                const uint64_t kF = original.HasCompiledExpr()
+                    ? original.EvaluateWithWorkspace(v, original_workspace)
+                    : original(v);
+                const uint64_t kP = EvalCompiledExpr(*compiled_core, v, core_stack);
+                return (kF - kP) & kMask;
+            },
+            EvaluatorTraceKind::kRemainder
+        );
     }
 
     SolverResult< CoreCandidate > ExtractProductCore(const DecompositionContext &ctx) {

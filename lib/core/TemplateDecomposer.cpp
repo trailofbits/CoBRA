@@ -1,6 +1,7 @@
 #include "cobra/core/TemplateDecomposer.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/ExprCost.h"
+#include "cobra/core/MathUtils.h"
 #include "cobra/core/PassContract.h"
 #include "cobra/core/Profile.h"
 #include "cobra/core/SignatureChecker.h"
@@ -8,6 +9,7 @@
 #include "cobra/core/Simplifier.h"
 #include "cobra/core/Trace.h"
 #include <array>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -285,6 +287,7 @@ namespace cobra {
         {
             std::vector< InnerComp > comps;
             ValMap index;
+            std::unordered_map< uint64_t, std::vector< size_t > > mul_probe0_buckets;
         };
 
         InnerCompositions BuildInnerCompositions(
@@ -297,7 +300,9 @@ namespace cobra {
                         auto v = GateApply(pool[bi].vals, pool[ci].vals, g_in, mask);
                         if (vmap.contains(v)) { continue; }
                         if (inner.index.contains(v)) { continue; }
-                        inner.index.insert(v, inner.comps.size());
+                        const auto slot = inner.comps.size();
+                        inner.index.insert(v, slot);
+                        inner.mul_probe0_buckets[v[0]].push_back(slot);
                         inner.comps.push_back({ .gate = g_in, .bi = bi, .ci = ci, .vals = v });
                     }
                 }
@@ -431,6 +436,75 @@ namespace cobra {
             return true;
         }
 
+        bool MulMatches(
+            const ProbeVals &a, const ProbeVals &b, const ProbeVals &target, uint64_t mask,
+            size_t start_probe = 0
+        ) {
+            for (size_t i = start_probe; i < kNProbes; ++i) {
+                if (((a[i] * b[i]) & mask) != target[i]) { return false; }
+            }
+            return true;
+        }
+
+        // For target = A * inner (mod 2^bw), use probe 0 to derive the set of
+        // admissible inner[0] values and restrict the scan to matching buckets.
+        // Falls back to a full scan when probe 0 is too degenerate to be useful.
+        bool CollectMulProbe0Candidates(
+            const std::unordered_map< uint64_t, std::vector< size_t > > &probe0_buckets,
+            uint64_t lhs_probe0, uint64_t target_probe0, uint32_t bitwidth,
+            std::vector< size_t > &out
+        ) {
+            constexpr uint32_t kMaxEnumeratedShift = 8;
+
+            out.clear();
+            lhs_probe0    &= Bitmask(bitwidth);
+            target_probe0 &= Bitmask(bitwidth);
+
+            if (lhs_probe0 == 0) {
+                // 0 * x == 0 for all x; this probe gives no filtering power.
+                return target_probe0 != 0;
+            }
+
+            const auto twos =
+                std::min(bitwidth, static_cast< uint32_t >(std::countr_zero(lhs_probe0)));
+            if ((target_probe0 & Bitmask(twos)) != 0) {
+                // No modular solutions exist for probe 0.
+                return true;
+            }
+            if (twos > kMaxEnumeratedShift) {
+                // Too many residue classes; keep the exact legacy scan.
+                return false;
+            }
+
+            const uint32_t reduced_bits = bitwidth - twos;
+            uint64_t base_solution      = 0;
+            if (reduced_bits > 0) {
+                const auto odd_part       = lhs_probe0 >> twos;
+                const auto reduced_target = target_probe0 >> twos;
+                base_solution = (ModInverseOdd(odd_part, reduced_bits) * reduced_target)
+                    & Bitmask(reduced_bits);
+            }
+
+            const auto append_bucket = [&](uint64_t probe0_value) {
+                auto it = probe0_buckets.find(probe0_value);
+                if (it == probe0_buckets.end()) { return; }
+                out.insert(out.end(), it->second.begin(), it->second.end());
+            };
+
+            if (twos == 0) {
+                append_bucket(base_solution & Bitmask(bitwidth));
+                return true;
+            }
+
+            const uint64_t step           = 1ULL << reduced_bits;
+            const uint64_t solution_count = 1ULL << twos;
+            const uint64_t full_mask      = Bitmask(bitwidth);
+            for (uint64_t k = 0; k < solution_count; ++k) {
+                append_bucket((base_solution + (k * step)) & full_mask);
+            }
+            return true;
+        }
+
         // Layer 2: target = G_out(A, G_in(B, C)).
         std::optional< SignaturePayload > Layer2(
             const ProbeVals &target, const std::vector< Atom > &pool, const ValMap &vmap,
@@ -517,16 +591,38 @@ namespace cobra {
             // --- MUL gate: full scan (no algebraic shortcut) ---
             {
                 COBRA_ZONE_N("L2Mul");
+                std::vector< size_t > mul_probe0_candidates;
+                size_t mul_bucketed_outer = 0;
+                size_t mul_fallback_outer = 0;
+
                 for (const auto &ai : pool) {
-                    for (const auto &ii : inner) {
-                        if (!GateMatches(ai.vals, ii.vals, target, Gate::kMul, mask)) {
-                            continue;
+                    const bool used_probe0_filter = CollectMulProbe0Candidates(
+                        inner_cache.mul_probe0_buckets, ai.vals[0], target[0], bw,
+                        mul_probe0_candidates
+                    );
+                    if (used_probe0_filter) {
+                        ++mul_bucketed_outer;
+                        for (size_t ii_idx : mul_probe0_candidates) {
+                            const auto &ii = inner[ii_idx];
+                            if (!MulMatches(ai.vals, ii.vals, target, mask, 1)) { continue; }
+                            auto e = GateExpr(Gate::kMul, CloneExpr(*ai.expr), make_inner(ii));
+                            TryUpdate(best, std::move(e), eval, nv, bw, baseline);
+                            if (best.has_value()) { return best; }
                         }
+                        continue;
+                    }
+
+                    ++mul_fallback_outer;
+                    for (const auto &ii : inner) {
+                        if (!MulMatches(ai.vals, ii.vals, target, mask)) { continue; }
                         auto e = GateExpr(Gate::kMul, CloneExpr(*ai.expr), make_inner(ii));
                         TryUpdate(best, std::move(e), eval, nv, bw, baseline);
                         if (best.has_value()) { return best; }
                     }
                 }
+
+                COBRA_PLOT("L2MulBucketedOuter", static_cast< int64_t >(mul_bucketed_outer));
+                COBRA_PLOT("L2MulFallbackOuter", static_cast< int64_t >(mul_fallback_outer));
             }
 
             return best;

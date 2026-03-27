@@ -65,40 +65,16 @@ namespace cobra {
                                           std::views::iota(uint32_t{ 0 }, arity));
                 if (identity_map) { return *item.evaluator_override; }
 
-                // Remap from reduced space to the override's variable space.
-                return Evaluator(
-                    [eval = *item.evaluator_override, idx_map = sub_ctx.original_indices,
-                     original_vals = std::vector< uint64_t >(arity, 0)](
-                        const std::vector< uint64_t > &reduced_vals
-                    ) mutable -> uint64_t {
-                        for (size_t i = 0; i < idx_map.size(); ++i) {
-                            original_vals[idx_map[i]] = reduced_vals[i];
-                        }
-                        uint64_t result = eval(original_vals);
-                        for (size_t i = 0; i < idx_map.size(); ++i) {
-                            original_vals[idx_map[i]] = 0;
-                        }
-                        return result;
-                    }
+                return item.evaluator_override->Remap(
+                    sub_ctx.original_indices, arity, EvaluatorTraceKind::kMappedOverride
                 );
             }
             // Fall back to run-global evaluator.
             if (!ctx.evaluator) { return std::nullopt; }
             if (sub_ctx.real_vars.size() == ctx.original_vars.size()) { return *ctx.evaluator; }
-            return Evaluator(
-                [eval = *ctx.evaluator, idx_map = sub_ctx.original_indices,
-                 original_vals = std::vector< uint64_t >(ctx.original_vars.size(), 0)](
-                    const std::vector< uint64_t > &reduced_vals
-                ) mutable -> uint64_t {
-                    for (size_t i = 0; i < idx_map.size(); ++i) {
-                        original_vals[idx_map[i]] = reduced_vals[i];
-                    }
-                    uint64_t result = eval(original_vals);
-                    for (size_t i = 0; i < idx_map.size(); ++i) {
-                        original_vals[idx_map[i]] = 0;
-                    }
-                    return result;
-                }
+            return ctx.evaluator->Remap(
+                sub_ctx.original_indices, static_cast< uint32_t >(ctx.original_vars.size()),
+                EvaluatorTraceKind::kMappedGlobal
             );
         }
 

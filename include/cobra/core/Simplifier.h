@@ -1,19 +1,17 @@
 #pragma once
 
 #include "cobra/core/Classification.h"
+#include "cobra/core/Evaluator.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/PassContract.h"
 #include "cobra/core/Result.h"
 #include "cobra/core/SimplifyOutcome.h"
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
 
 namespace cobra {
-
-    using Evaluator = std::function< uint64_t(const std::vector< uint64_t > &) >;
 
     struct Options
     {

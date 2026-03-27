@@ -1,7 +1,7 @@
 #pragma once
 
+#include "cobra/core/Evaluator.h"
 #include <cstdint>
-#include <functional>
 #include <vector>
 
 namespace cobra {
@@ -16,9 +16,6 @@ namespace cobra {
         std::vector< uint64_t > and_coeffs;
         std::vector< uint64_t > mul_coeffs;
     };
-
-    /// Evaluator signature: (var_values) -> result mod 2^w.
-    using Evaluator = std::function< uint64_t(const std::vector< uint64_t > &) >;
 
     /// Deterministic coefficient splitting.
     ///

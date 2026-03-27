@@ -5,7 +5,6 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -70,8 +69,7 @@ namespace cobra {
         }
 
         bool IsSpuriousFullWidth(
-            const std::function< uint64_t(const std::vector< uint64_t > &) > &eval,
-            uint32_t var_index, uint32_t num_vars, uint32_t bitwidth
+            const Evaluator &eval, uint32_t var_index, uint32_t num_vars, uint32_t bitwidth
         ) {
             constexpr uint32_t kNumSamples = 8;
             const uint64_t kMask = (bitwidth >= 64) ? UINT64_MAX : ((1ULL << bitwidth) - 1);
@@ -219,8 +217,7 @@ namespace cobra {
 
     EliminationResult EliminateAuxVars(
         const std::vector< uint64_t > &sig, const std::vector< std::string > &vars,
-        const std::function< uint64_t(const std::vector< uint64_t > &) > &eval,
-        uint32_t bitwidth
+        const Evaluator &eval, uint32_t bitwidth
     ) {
         // Start with the boolean-signature-based elimination
         auto result = EliminateAuxVars(sig, vars);

@@ -727,15 +727,11 @@ namespace cobra {
 
         // Build a proper outer evaluator so downstream families
         // (decomposition, signature) can verify against the
-        // reduced outer problem.  Use a shared_ptr so the
-        // std::function (Evaluator) is copy-constructible.
-        auto solve_ctx      = skel->outer_ctx; // copy before moving outer_expr
-        auto shared_oe      = std::shared_ptr< Expr >(CloneExpr(*skel->outer_expr));
-        auto outer_bw       = ctx.bitwidth;
-        solve_ctx.evaluator = [shared_oe,
-                               outer_bw](const std::vector< uint64_t > &vals) -> uint64_t {
-            return EvaluateExpr(*shared_oe, vals, outer_bw);
-        };
+        // reduced outer problem.
+        auto solve_ctx = skel->outer_ctx; // copy before moving outer_expr
+        auto outer_bw  = ctx.bitwidth;
+        solve_ctx.evaluator =
+            Evaluator::FromExpr(*skel->outer_expr, outer_bw, EvaluatorTraceKind::kLiftedOuter);
 
         WorkItem child;
         child.payload = AstPayload{

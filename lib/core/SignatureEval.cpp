@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <vector>
 
 namespace cobra {
@@ -97,17 +96,18 @@ namespace cobra {
         return EvalSigRecursive(expr, kLen, bitwidth);
     }
 
-    std::vector< uint64_t > EvaluateBooleanSignature(
-        const std::function< uint64_t(const std::vector< uint64_t > &) > &eval,
-        uint32_t num_vars, uint32_t bitwidth
-    ) {
+    std::vector< uint64_t >
+    EvaluateBooleanSignature(const Evaluator &eval, uint32_t num_vars, uint32_t bitwidth) {
         const size_t kLen    = size_t{ 1 } << num_vars;
         const uint64_t kMask = Bitmask(bitwidth);
         std::vector< uint64_t > sig(kLen);
         std::vector< uint64_t > point(num_vars);
+        EvaluatorWorkspace workspace;
         for (size_t i = 0; i < kLen; ++i) {
             for (uint32_t v = 0; v < num_vars; ++v) { point[v] = (i >> v) & 1; }
-            sig[i] = eval(point) & kMask;
+            sig[i] = (eval.HasCompiledExpr() ? eval.EvaluateWithWorkspace(point, workspace)
+                                             : eval(point))
+                & kMask;
         }
         return sig;
     }
