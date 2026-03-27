@@ -2,6 +2,7 @@
 #include "cobra/core/Expr.h"
 #include "cobra/core/ExprCost.h"
 #include "cobra/core/PassContract.h"
+#include "cobra/core/Profile.h"
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/SignatureSimplifier.h"
 #include "cobra/core/Simplifier.h"
@@ -249,6 +250,7 @@ namespace cobra {
             std::optional< SignaturePayload > &best, std::unique_ptr< Expr > candidate,
             const Evaluator &eval, uint32_t num_vars, uint32_t bw, const ExprCost *baseline
         ) {
+            COBRA_ZONE_N("TemplateFWCheck");
             auto chk = FullWidthCheckEval(eval, num_vars, *candidate, bw);
             if (!chk.passed) { return false; }
 
@@ -484,7 +486,11 @@ namespace cobra {
         // Build atom pool.
         std::vector< Atom > pool;
         ValMap vmap;
-        Populate(pool, vmap, num_vars, pts, opts.bitwidth);
+        {
+            COBRA_ZONE_N("TemplatePopulate");
+            Populate(pool, vmap, num_vars, pts, opts.bitwidth);
+        }
+        COBRA_PLOT("TemplatePoolSize", static_cast< int64_t >(pool.size()));
 
         // Direct atom match.
         {
@@ -507,23 +513,30 @@ namespace cobra {
         }
 
         // Layer 1.
-        auto r1 = Layer1(
-            target, pool, vmap, kMask, *ctx.eval, num_vars, opts.bitwidth, baseline_cost
-        );
-        if (r1.has_value()) {
-            return SolverResult< SignaturePayload >::Success(std::move(*r1));
+        {
+            COBRA_ZONE_N("TemplateLayer1");
+            auto r1 = Layer1(
+                target, pool, vmap, kMask, *ctx.eval, num_vars, opts.bitwidth, baseline_cost
+            );
+            if (r1.has_value()) {
+                return SolverResult< SignaturePayload >::Success(std::move(*r1));
+            }
         }
 
         // Layer 2.
-        auto r2 = Layer2(
-            target, pool, vmap, kMask, *ctx.eval, num_vars, opts.bitwidth, baseline_cost
-        );
-        if (r2.has_value()) {
-            return SolverResult< SignaturePayload >::Success(std::move(*r2));
+        {
+            COBRA_ZONE_N("TemplateLayer2");
+            auto r2 = Layer2(
+                target, pool, vmap, kMask, *ctx.eval, num_vars, opts.bitwidth, baseline_cost
+            );
+            if (r2.has_value()) {
+                return SolverResult< SignaturePayload >::Success(std::move(*r2));
+            }
         }
 
         // Unary wrapping: check Neg(target) and Not(target)
         // against Layers 1 and 2.
+        COBRA_ZONE_N("TemplateUnaryWrap");
         for (int wrap = 0; wrap < 2; ++wrap) {
             ProbeVals lifted;
             for (size_t i = 0; i < kNProbes; ++i) {
@@ -579,6 +592,7 @@ namespace cobra {
         // G1, G2 must be invertible (XOR, ADD) for hash-lookup.
         // Cost: O(pool^2 * 4) hash lookups — very fast.
         {
+            COBRA_ZONE_N("TemplateLayer3");
             // Precompute inner compositions once.
             std::vector< InnerComp > inner;
             ValMap inner_idx;

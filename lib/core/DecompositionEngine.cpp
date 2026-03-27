@@ -259,44 +259,47 @@ namespace cobra {
         // Reduced-variable attempt first
         auto elim           = EliminateAuxVars(ctx.sig, ctx.vars);
         const auto kRvCount = static_cast< uint32_t >(elim.real_vars.size());
+        COBRA_PLOT("TemplateNumVars", static_cast< int64_t >(kNv));
+        COBRA_PLOT("TemplateReducedVars", static_cast< int64_t >(kRvCount));
 
-        SignatureContext sig_ctx;
-        sig_ctx.vars             = elim.real_vars;
-        sig_ctx.original_indices = BuildVarSupport(ctx.vars, elim.real_vars);
-        if (elim.real_vars.size() == ctx.vars.size()) {
-            sig_ctx.eval = ctx.opts.evaluator;
-        } else {
-            sig_ctx.eval = [eval = ctx.opts.evaluator, idx = sig_ctx.original_indices,
-                            full = std::vector< uint64_t >(ctx.vars.size(), 0)](
-                               const std::vector< uint64_t > &rv
-                           ) mutable -> uint64_t {
-                for (size_t i = 0; i < idx.size(); ++i) { full[idx[i]] = rv[i]; }
-                uint64_t result = eval(full);
-                for (size_t i = 0; i < idx.size(); ++i) { full[idx[i]] = 0; }
-                return result;
-            };
-        }
-
-        auto td = TryTemplateDecomposition(sig_ctx, ctx.opts, kRvCount, nullptr);
-        if (td.Succeeded()) {
-            auto td_payload = td.TakePayload();
-            // Remap to original variable space if reduced
-            if (elim.real_vars.size() < ctx.vars.size()) {
-                RemapVarIndices(*td_payload.expr, sig_ctx.original_indices);
+        {
+            COBRA_ZONE_N("TemplateReducedVar");
+            SignatureContext sig_ctx;
+            sig_ctx.vars             = elim.real_vars;
+            sig_ctx.original_indices = BuildVarSupport(ctx.vars, elim.real_vars);
+            if (elim.real_vars.size() == ctx.vars.size()) {
+                sig_ctx.eval = ctx.opts.evaluator;
+            } else {
+                sig_ctx.eval = [eval = ctx.opts.evaluator, idx = sig_ctx.original_indices,
+                                full = std::vector< uint64_t >(ctx.vars.size(), 0)](
+                                   const std::vector< uint64_t > &rv
+                               ) mutable -> uint64_t {
+                    for (size_t i = 0; i < idx.size(); ++i) { full[idx[i]] = rv[i]; }
+                    uint64_t result = eval(full);
+                    for (size_t i = 0; i < idx.size(); ++i) { full[idx[i]] = 0; }
+                    return result;
+                };
             }
-            // Verify in original variable space — reject false positives from
-            // reduced-var template before consuming this extractor slot.
-            auto check = FullWidthCheckEval(ctx.opts.evaluator, kNv, *td_payload.expr, kBw);
-            if (check.passed) {
-                CoreCandidate core;
-                core.expr = std::move(td_payload.expr);
-                core.kind = ExtractorKind::kTemplate;
-                return SolverResult< CoreCandidate >::Success(std::move(core));
+
+            auto td = TryTemplateDecomposition(sig_ctx, ctx.opts, kRvCount, nullptr);
+            if (td.Succeeded()) {
+                auto td_payload = td.TakePayload();
+                if (elim.real_vars.size() < ctx.vars.size()) {
+                    RemapVarIndices(*td_payload.expr, sig_ctx.original_indices);
+                }
+                auto check = FullWidthCheckEval(ctx.opts.evaluator, kNv, *td_payload.expr, kBw);
+                if (check.passed) {
+                    CoreCandidate core;
+                    core.expr = std::move(td_payload.expr);
+                    core.kind = ExtractorKind::kTemplate;
+                    return SolverResult< CoreCandidate >::Success(std::move(core));
+                }
             }
         }
 
         // Full-variable fallback (only when reduced != full)
         if (elim.real_vars.size() < ctx.vars.size()) {
+            COBRA_ZONE_N("TemplateFullVarFallback");
             SignatureContext full_ctx;
             full_ctx.vars = ctx.vars;
             full_ctx.original_indices.resize(ctx.vars.size());
