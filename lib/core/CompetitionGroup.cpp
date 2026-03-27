@@ -54,7 +54,9 @@ namespace cobra {
     std::optional< WorkItem >
     ReleaseHandle(std::unordered_map< GroupId, CompetitionGroup > &groups, GroupId group_id) {
         auto it = groups.find(group_id);
-        assert(it != groups.end());
+        // A child may finish after the parent group has already
+        // resolved and been erased; treat the late release as a no-op.
+        if (it == groups.end()) { return std::nullopt; }
         auto &group = it->second;
         assert(group.open_handles > 0);
 

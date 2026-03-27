@@ -257,3 +257,16 @@ TEST(FullWidthCheckEvalTest, UsesCompiledEvaluatorWithRemap) {
     auto result = FullWidthCheckEval(eval, 2, *simplified, 64);
     EXPECT_TRUE(result.passed);
 }
+
+TEST(FullWidthCheckEvalTest, UsesCompiledEvaluatorWithSparseRemapSpan) {
+    auto original   = Expr::Variable(0);
+    auto simplified = Expr::Variable(0);
+    auto eval       = Evaluator::FromExpr(*original, 64)
+                          .Remap({ 0, 3 }, 4, EvaluatorTraceKind::kMappedGlobal);
+
+    EvaluatorWorkspace workspace;
+    EXPECT_EQ(eval.EvaluateWithWorkspace({ 7, 11 }, workspace), 7u);
+
+    auto result = FullWidthCheckEval(eval, 2, *simplified, 64);
+    EXPECT_TRUE(result.passed);
+}

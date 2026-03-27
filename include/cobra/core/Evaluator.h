@@ -202,8 +202,12 @@ namespace cobra {
             const std::vector< uint64_t > *inputs = &vals;
 
             if (!input_map_.empty()) {
-                if (wksp.remapped_inputs.size() < compiled_->arity) {
-                    wksp.remapped_inputs.resize(compiled_->arity);
+                size_t remapped_arity = compiled_->arity;
+                for (uint32_t idx : input_map_) {
+                    remapped_arity = std::max(remapped_arity, static_cast< size_t >(idx) + 1);
+                }
+                if (wksp.remapped_inputs.size() < remapped_arity) {
+                    wksp.remapped_inputs.resize(remapped_arity);
                 }
                 std::fill(wksp.remapped_inputs.begin(), wksp.remapped_inputs.end(), 0);
                 for (size_t i = 0; i < input_map_.size(); ++i) {

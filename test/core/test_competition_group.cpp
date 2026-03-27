@@ -184,6 +184,11 @@ TEST(CompetitionGroup, AcquireAndReleaseMultipleHandles) {
     EXPECT_TRUE(ReleaseHandle(groups, id).has_value());
 }
 
+TEST(CompetitionGroup, ReleaseMissingGroupReturnsNullopt) {
+    std::unordered_map< GroupId, CompetitionGroup > groups;
+    EXPECT_FALSE(ReleaseHandle(groups, 42).has_value());
+}
+
 // --- State model integration tests ---
 
 TEST(CompetitionGroup, GetStateKindForResolved) {
