@@ -1,8 +1,9 @@
 #include "cobra/core/AuxVarEliminator.h"
 #include "cobra/core/Classification.h"
 #include "cobra/core/Classifier.h"
-#include "cobra/core/ExprCost.h"
 #include "cobra/core/Expr.h"
+#include "cobra/core/ExprCost.h"
+#include "cobra/core/ExprUtils.h"
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/SignatureEval.h"
 #include "cobra/core/Simplifier.h"
@@ -367,7 +368,7 @@ TEST(SimplifierTest, ProductIdentityCollapsesToPlainProduct) {
     );
 
     auto original_cost = ComputeCost(*obf).cost;
-    auto evaluator     = [](const std::vector< uint64_t > &v) -> uint64_t { return v[0] * v[1]; };
+    auto evaluator = [](const std::vector< uint64_t > &v) -> uint64_t { return v[0] * v[1]; };
 
     auto sig                        = EvaluateBooleanSignature(*obf, 2, 64);
     std::vector< std::string > vars = { "x", "y" };
@@ -1177,6 +1178,54 @@ TEST(SimplifierTest, OperandSimplificationEnablesPipeline) {
     auto result = Simplify(sig, vars, e.get(), opts);
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
+}
+
+TEST(SimplifierTest, OperandSimplifyCollapsesObfuscatedProjectionFactor) {
+    auto hidden_a = Expr::Add(
+        Expr::Add(
+            Expr::Add(
+                Expr::Negate(
+                    Expr::Mul(
+                        Expr::Constant(6),
+                        Expr::BitwiseAnd(Expr::Variable(0), Expr::Variable(1))
+                    )
+                ),
+                Expr::Mul(
+                    Expr::Constant(7),
+                    Expr::BitwiseNot(Expr::BitwiseXor(Expr::Variable(0), Expr::Variable(1)))
+                )
+            ),
+            Expr::Negate(
+                Expr::Mul(
+                    Expr::Constant(8),
+                    Expr::BitwiseNot(Expr::BitwiseOr(Expr::Variable(0), Expr::Variable(1)))
+                )
+            )
+        ),
+        Expr::BitwiseNot(Expr::Variable(1))
+    );
+    auto input    = Expr::Mul(std::move(hidden_a), Expr::Variable(2));
+    auto original = CloneExpr(*input);
+
+    auto sig                        = EvaluateBooleanSignature(*input, 3, 64);
+    std::vector< std::string > vars = { "a", "b", "y" };
+    auto eval = [&](const std::vector< uint64_t > &v) { return EvalExpr(*original, v, 64); };
+
+    Options opts;
+    opts.bitwidth  = 64;
+    opts.evaluator = eval;
+
+    auto result = Simplify(sig, vars, input.get(), opts);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
+    EXPECT_EQ(Render(*result.value().expr, result.value().real_vars), "a * y");
+
+    auto remapped = CloneExpr(*result.value().expr);
+    auto support  = BuildVarSupport(vars, result.value().real_vars);
+    RemapVarIndices(*remapped, support);
+
+    auto fw = FullWidthCheckEval(eval, 3, *remapped, 64);
+    EXPECT_TRUE(fw.passed);
 }
 
 TEST(SimplifierTest, NoOpOperandSimplFallsToXorLowering) {

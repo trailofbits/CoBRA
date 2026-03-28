@@ -113,21 +113,22 @@ namespace cobra {
 
         bool ExprStructurallyEqual(const Expr &lhs, const Expr &rhs) {
             if (lhs.kind != rhs.kind || lhs.constant_val != rhs.constant_val
-                || lhs.var_index != rhs.var_index
-                || lhs.children.size() != rhs.children.size())
+                || lhs.var_index != rhs.var_index || lhs.children.size() != rhs.children.size())
             {
                 return false;
             }
             for (size_t i = 0; i < lhs.children.size(); ++i) {
-                if (!ExprStructurallyEqual(*lhs.children[i], *rhs.children[i])) { return false; }
+                if (!ExprStructurallyEqual(*lhs.children[i], *rhs.children[i])) {
+                    return false;
+                }
             }
             return true;
         }
 
-        std::unique_ptr< Expr > ReconstructMaskedProductFactor(
-            const Expr &inclusive_term, const Expr &exclusive_term
-        ) {
-            if (inclusive_term.kind != Expr::Kind::kAnd || exclusive_term.kind != Expr::Kind::kAnd
+        std::unique_ptr< Expr >
+        ReconstructMaskedProductFactor(const Expr &inclusive_term, const Expr &exclusive_term) {
+            if (inclusive_term.kind != Expr::Kind::kAnd
+                || exclusive_term.kind != Expr::Kind::kAnd
                 || inclusive_term.children.size() != 2 || exclusive_term.children.size() != 2)
             {
                 return nullptr;
@@ -291,11 +292,12 @@ namespace cobra {
         }
 
         const auto &ast = std::get< AstPayload >(item.payload);
-        auto cls        = ClassifyStructural(*ast.expr);
+        auto expr       = SimplifyPatternSubtrees(CloneExpr(*ast.expr), ctx.bitwidth);
+        auto cls        = ClassifyStructural(*expr);
 
         WorkItem new_item;
         new_item.payload = AstPayload{
-            .expr           = CloneExpr(*ast.expr),
+            .expr           = std::move(expr),
             .classification = cls,
             .provenance     = ast.provenance,
             .solve_ctx      = CloneSolveContext(ast.solve_ctx),
@@ -570,7 +572,7 @@ namespace cobra {
             );
         }
 
-        auto baseline_cost = ComputeCost(*site->add_node).cost;
+        auto baseline_cost     = ComputeCost(*site->add_node).cost;
         const Expr *factors[4] = {
             site->add_node->children[0]->children[0].get(),
             site->add_node->children[0]->children[1].get(),
@@ -593,9 +595,7 @@ namespace cobra {
 
             auto direct_cost = ComputeCost(*direct_candidate).cost;
             if (!IsBetter(direct_cost, baseline_cost)) { continue; }
-            if (best_direct_cost.has_value()
-                && !IsBetter(direct_cost, *best_direct_cost))
-            {
+            if (best_direct_cost.has_value() && !IsBetter(direct_cost, *best_direct_cost)) {
                 continue;
             }
 
@@ -608,7 +608,7 @@ namespace cobra {
             auto rebuilt_ast = ReplaceByHash(
                 CloneExpr(*ast.expr), site->add_hash, best_direct_candidate, replaced
             );
-            auto new_cls     = ClassifyStructural(*rebuilt_ast);
+            auto new_cls = ClassifyStructural(*rebuilt_ast);
 
             WorkItem rewritten;
             rewritten.payload = AstPayload{

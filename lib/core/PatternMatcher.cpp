@@ -1,7 +1,11 @@
 #include "cobra/core/PatternMatcher.h"
 #include "cobra/core/BitWidth.h"
 #include "cobra/core/Expr.h"
+#include "cobra/core/ExprCost.h"
+#include "cobra/core/ExprUtils.h"
 #include "cobra/core/Profile.h"
+#include "cobra/core/SignatureChecker.h"
+#include "cobra/core/SignatureEval.h"
 #include "cobra/core/Trace.h"
 #include <algorithm>
 #include <cstddef>
@@ -14,6 +18,49 @@
 namespace cobra {
 
     namespace {
+
+        void CollectSupport(const Expr &expr, std::vector< uint32_t > &support) {
+            if (expr.kind == Expr::Kind::kVariable) {
+                if (std::find(support.begin(), support.end(), expr.var_index) == support.end())
+                {
+                    support.push_back(expr.var_index);
+                }
+                return;
+            }
+            for (const auto &child : expr.children) { CollectSupport(*child, support); }
+        }
+
+        std::optional< std::unique_ptr< Expr > >
+        TrySimplifyPatternSubtree(const Expr &expr, uint32_t bitwidth) {
+            const auto baseline_cost = ComputeCost(expr).cost;
+            if (baseline_cost.weighted_size <= 1) { return std::nullopt; }
+
+            std::vector< uint32_t > support;
+            CollectSupport(expr, support);
+            std::sort(support.begin(), support.end());
+
+            const auto num_vars = static_cast< uint32_t >(support.size());
+            if (num_vars > 5) { return std::nullopt; }
+
+            auto dense_expr = CloneExpr(expr);
+            if (!support.empty()) {
+                const uint32_t max_idx = support.back();
+                std::vector< uint32_t > dense_map(max_idx + 1, 0);
+                for (uint32_t i = 0; i < support.size(); ++i) { dense_map[support[i]] = i; }
+                RemapVarIndices(*dense_expr, dense_map);
+            }
+
+            const auto sig = EvaluateBooleanSignature(*dense_expr, num_vars, bitwidth);
+            auto match     = MatchPattern(sig, num_vars, bitwidth);
+            if (!match.has_value()) { return std::nullopt; }
+            if (!IsBetter(ComputeCost(**match).cost, baseline_cost)) { return std::nullopt; }
+
+            auto check = FullWidthCheck(*dense_expr, num_vars, **match, {}, bitwidth);
+            if (!check.passed) { return std::nullopt; }
+
+            if (!support.empty()) { RemapVarIndices(**match, support); }
+            return match;
+        }
 
         bool AllEqual(const std::vector< uint64_t > &sig) {
             return std::all_of(sig.begin(), sig.end(), [&](uint64_t v) { return v == sig[0]; });
@@ -1097,6 +1144,17 @@ namespace cobra {
 
         COBRA_TRACE("PatternMatcher", "MatchPattern: {}", result ? "HIT" : "MISS");
         return result;
+    }
+
+    std::unique_ptr< Expr >
+    SimplifyPatternSubtrees(std::unique_ptr< Expr > expr, uint32_t bitwidth) {
+        for (auto &child : expr->children) {
+            child = SimplifyPatternSubtrees(std::move(child), bitwidth);
+        }
+
+        auto rewritten = TrySimplifyPatternSubtree(*expr, bitwidth);
+        if (!rewritten.has_value()) { return expr; }
+        return SimplifyPatternSubtrees(std::move(*rewritten), bitwidth);
     }
 
 } // namespace cobra

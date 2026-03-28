@@ -43,6 +43,21 @@ namespace cobra {
 
     namespace {
 
+        CandidateRecord NormalizeCandidateRecord(CandidateRecord record, uint32_t bitwidth) {
+            record.expr = SimplifyPatternSubtrees(std::move(record.expr), bitwidth);
+            record.cost = ComputeCost(*record.expr).cost;
+            return record;
+        }
+
+        bool SubmitNormalizedCandidate(
+            std::unordered_map< GroupId, CompetitionGroup > &groups, GroupId group_id,
+            CandidateRecord record, uint32_t bitwidth
+        ) {
+            return SubmitCandidate(
+                groups, group_id, NormalizeCandidateRecord(std::move(record), bitwidth)
+            );
+        }
+
         // Build a mapped evaluator for the reduced variable space.
         // Prefers item-level evaluator_override (set for residual
         // children), falling back to the run-global ctx.evaluator.
@@ -156,7 +171,7 @@ namespace cobra {
 
                 if (fw_ok) {
                     auto cost_info = ComputeCost(*composed);
-                    SubmitCandidate(
+                    SubmitNormalizedCandidate(
                         ctx.competition_groups, cont.parent_group_id,
                         CandidateRecord{
                             .expr         = std::move(composed),
@@ -167,7 +182,8 @@ namespace cobra {
                             .source_pass  = PassId::kSignatureBitwiseDecompose,
                             .needs_original_space_verification =
                                 cont.parent_needs_original_space_verification,
-                        }
+                        },
+                        ctx.bitwidth
                     );
                 }
             }
@@ -201,7 +217,7 @@ namespace cobra {
 
                 if (fw_ok) {
                     auto cost_info = ComputeCost(*composed);
-                    SubmitCandidate(
+                    SubmitNormalizedCandidate(
                         ctx.competition_groups, cont.parent_group_id,
                         CandidateRecord{
                             .expr         = std::move(composed),
@@ -212,7 +228,8 @@ namespace cobra {
                             .source_pass  = PassId::kSignatureHybridDecompose,
                             .needs_original_space_verification =
                                 cont.parent_needs_original_space_verification,
-                        }
+                        },
+                        ctx.bitwidth
                     );
                 }
             }
@@ -307,9 +324,7 @@ namespace cobra {
                 );
             }
 
-            if (best.has_value()) {
-                EmitJoinRewrite(*join, item, std::move(best->expr), pr);
-            }
+            if (best.has_value()) { EmitJoinRewrite(*join, item, std::move(best->expr), pr); }
 
             ctx.join_states.erase(join_it);
             return pr;
@@ -568,7 +583,7 @@ namespace cobra {
             auto cost_info = ComputeCost(*combined);
 
             if (cont.parent_group_id.has_value()) {
-                SubmitCandidate(
+                SubmitNormalizedCandidate(
                     ctx.competition_groups, *cont.parent_group_id,
                     CandidateRecord{
                         .expr                              = std::move(combined),
@@ -577,7 +592,8 @@ namespace cobra {
                         .real_vars                         = target_vars,
                         .source_pass                       = PassId::kResidualSupported,
                         .needs_original_space_verification = false,
-                    }
+                    },
+                    ctx.bitwidth
                 );
                 release_parent();
                 pr.decision = PassDecision::kAdvance;
@@ -774,7 +790,7 @@ namespace cobra {
         auto cost_info = ComputeCost(**pm);
 
         assert(item.group_id.has_value());
-        SubmitCandidate(
+        SubmitNormalizedCandidate(
             ctx.competition_groups, *item.group_id,
             CandidateRecord{
                 .expr                              = std::move(*pm),
@@ -784,7 +800,8 @@ namespace cobra {
                 .source_pass                       = PassId::kSignaturePatternMatch,
                 .needs_original_space_verification = sub_ctx.needs_original_space_verification,
                 .sig_vector                        = sub_ctx.elimination.reduced_sig,
-            }
+            },
+            ctx.bitwidth
         );
 
         return Ok(
@@ -851,7 +868,7 @@ namespace cobra {
         auto cost_info = ComputeCost(*anf_expr);
 
         assert(item.group_id.has_value());
-        SubmitCandidate(
+        SubmitNormalizedCandidate(
             ctx.competition_groups, *item.group_id,
             CandidateRecord{
                 .expr                              = std::move(anf_expr),
@@ -861,7 +878,8 @@ namespace cobra {
                 .source_pass                       = PassId::kSignatureAnf,
                 .needs_original_space_verification = sub_ctx.needs_original_space_verification,
                 .sig_vector                        = sub_ctx.elimination.reduced_sig,
-            }
+            },
+            ctx.bitwidth
         );
 
         return Ok(
@@ -965,7 +983,7 @@ namespace cobra {
         auto cost_info = ComputeCost(*expr);
 
         assert(item.group_id.has_value());
-        SubmitCandidate(
+        SubmitNormalizedCandidate(
             ctx.competition_groups, *item.group_id,
             CandidateRecord{
                 .expr                              = std::move(expr),
@@ -975,7 +993,8 @@ namespace cobra {
                 .source_pass                       = PassId::kSignatureCobCandidate,
                 .needs_original_space_verification = sub_ctx.needs_original_space_verification,
                 .sig_vector                        = sub_ctx.elimination.reduced_sig,
-            }
+            },
+            ctx.bitwidth
         );
 
         return Ok(
@@ -1087,7 +1106,7 @@ namespace cobra {
             }
 
             auto cost_info = ComputeCost(*prefix);
-            SubmitCandidate(
+            SubmitNormalizedCandidate(
                 ctx.competition_groups, *item.group_id,
                 CandidateRecord{
                     .expr         = std::move(prefix),
@@ -1098,7 +1117,8 @@ namespace cobra {
                     .needs_original_space_verification =
                         sub_ctx.needs_original_space_verification,
                     .sig_vector = sub_ctx.elimination.reduced_sig,
-                }
+                },
+                ctx.bitwidth
             );
 
             return Ok(
@@ -1133,7 +1153,7 @@ namespace cobra {
             }
 
             auto cost_info = ComputeCost(*combined);
-            SubmitCandidate(
+            SubmitNormalizedCandidate(
                 ctx.competition_groups, *item.group_id,
                 CandidateRecord{
                     .expr         = std::move(combined),
@@ -1144,7 +1164,8 @@ namespace cobra {
                     .needs_original_space_verification =
                         sub_ctx.needs_original_space_verification,
                     .sig_vector = sub_ctx.elimination.reduced_sig,
-                }
+                },
+                ctx.bitwidth
             );
 
             return Ok(
@@ -1253,7 +1274,7 @@ namespace cobra {
         auto cost_info = ComputeCost(*payload.expr);
 
         assert(item.group_id.has_value());
-        SubmitCandidate(
+        SubmitNormalizedCandidate(
             ctx.competition_groups, *item.group_id,
             CandidateRecord{
                 .expr                              = std::move(payload.expr),
@@ -1263,7 +1284,8 @@ namespace cobra {
                 .source_pass                       = PassId::kSignatureMultivarPolyRecovery,
                 .needs_original_space_verification = sub_ctx.needs_original_space_verification,
                 .sig_vector                        = sub_ctx.elimination.reduced_sig,
-            }
+            },
+            ctx.bitwidth
         );
 
         return Ok(
@@ -1362,7 +1384,7 @@ namespace cobra {
                 if (!fw.passed) { continue; }
 
                 auto cost_info = ComputeCost(*composed);
-                SubmitCandidate(
+                SubmitNormalizedCandidate(
                     ctx.competition_groups, parent_group_id,
                     CandidateRecord{
                         .expr         = std::move(composed),
@@ -1372,7 +1394,8 @@ namespace cobra {
                         .source_pass  = PassId::kSignatureBitwiseDecompose,
                         .needs_original_space_verification =
                             sub_ctx.needs_original_space_verification,
-                    }
+                    },
+                    ctx.bitwidth
                 );
                 continue;
             }
