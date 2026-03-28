@@ -3,6 +3,7 @@
 #include "ContinuationTypes.h"
 #include "JoinState.h"
 #include "OrchestratorPasses.h"
+#include "SemilinearPasses.h"
 #include "cobra/core/AnfTransform.h"
 #include "cobra/core/ArithmeticLowering.h"
 #include "cobra/core/AuxVarEliminator.h"
@@ -44,7 +45,7 @@ namespace cobra {
     namespace {
 
         CandidateRecord NormalizeCandidateRecord(CandidateRecord record, uint32_t bitwidth) {
-            record.expr = SimplifyPatternSubtrees(std::move(record.expr), bitwidth);
+            record.expr = NormalizeLateCandidateExpr(std::move(record.expr), bitwidth);
             record.cost = ComputeCost(*record.expr).cost;
             return record;
         }

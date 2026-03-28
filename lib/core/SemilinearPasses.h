@@ -19,7 +19,10 @@ namespace cobra {
     } // namespace semilinear_pass
 
     std::unique_ptr< Expr >
-    SimplifyXorConstant(std::unique_ptr< Expr > expr, uint32_t bitwidth);
+    CanonicalizeScaledBooleanSum(std::unique_ptr< Expr > expr, uint32_t bitwidth);
+
+    std::unique_ptr< Expr >
+    NormalizeLateCandidateExpr(std::unique_ptr< Expr > expr, uint32_t bitwidth);
 
     SemilinearIR CloneSemilinearIR(const SemilinearIR &src);
 

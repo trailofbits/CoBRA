@@ -1,7 +1,9 @@
 #include "Orchestrator.h"
 #include "OrchestratorPasses.h"
+#include "SemilinearPasses.h"
 #include "SimplifierInternal.h"
 #include "cobra/core/AuxVarEliminator.h"
+#include "cobra/core/ExprCost.h"
 #include "cobra/core/ExprUtils.h"
 #include "cobra/core/PatternMatcher.h"
 #include "cobra/core/Profile.h"
@@ -906,6 +908,10 @@ namespace cobra {
             // (lifted/grouped lineages).
             if (auto *cand = std::get_if< CandidatePayload >(&item.payload)) {
                 if (!cand->needs_original_space_verification) {
+                    auto normalized_expr =
+                        NormalizeLateCandidateExpr(CloneExpr(*cand->expr), context.bitwidth);
+                    auto normalized_cost = ComputeCost(*normalized_expr).cost;
+
                     // Stamp transform_produced_candidate if any rewrite
                     // pass is in this candidate's lineage.
                     for (auto h : item.history) {
@@ -924,8 +930,8 @@ namespace cobra {
                         SubmitCandidate(
                             context.competition_groups, *item.group_id,
                             CandidateRecord{
-                                .expr                              = CloneExpr(*cand->expr),
-                                .cost                              = cand->cost,
+                                .expr                              = std::move(normalized_expr),
+                                .cost                              = normalized_cost,
                                 .verification                      = item.metadata.verification,
                                 .real_vars                         = cand->real_vars,
                                 .source_pass                       = cand->producing_pass,
@@ -943,7 +949,7 @@ namespace cobra {
                     return Ok(ToSimplifyOutcome(
                         OrchestratorResult{
                             .outcome = PassOutcome::Success(
-                                CloneExpr(*cand->expr), cand->real_vars,
+                                std::move(normalized_expr), cand->real_vars,
                                 item.metadata.verification
                             ),
                             .metadata     = std::move(item.metadata),

@@ -1228,6 +1228,157 @@ TEST(SimplifierTest, OperandSimplifyCollapsesObfuscatedProjectionFactor) {
     EXPECT_TRUE(fw.passed);
 }
 
+TEST(SimplifierTest, SemilinearCanonicalizesMaskedComplementSum) {
+    auto input = Expr::Add(
+        Expr::Constant(1),
+        Expr::BitwiseAnd(Expr::BitwiseNot(Expr::Variable(0)), Expr::Variable(1))
+    );
+    auto original = CloneExpr(*input);
+
+    auto sig                        = EvaluateBooleanSignature(*input, 2, 64);
+    std::vector< std::string > vars = { "a", "y" };
+
+    Options opts;
+    opts.bitwidth  = 64;
+    opts.evaluator = [&](const std::vector< uint64_t > &v) {
+        return EvalExpr(*original, v, 64);
+    };
+
+    auto result = Simplify(sig, vars, input.get(), opts);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
+    EXPECT_EQ(Render(*result.value().expr, result.value().real_vars), "-(a | ~y)");
+
+    auto remapped = CloneExpr(*result.value().expr);
+    auto support  = BuildVarSupport(vars, result.value().real_vars);
+    RemapVarIndices(*remapped, support);
+
+    auto fw = FullWidthCheckEval(opts.evaluator, 2, *remapped, 64);
+    EXPECT_TRUE(fw.passed);
+}
+
+TEST(SimplifierTest, SemilinearCanonicalizesScaledComplement) {
+    constexpr uint64_t kNegThree = UINT64_MAX - 2;
+
+    auto input = Expr::Add(
+        Expr::Constant(kNegThree),
+        Expr::Mul(
+            Expr::Constant(kNegThree),
+            Expr::BitwiseOr(
+                Expr::Variable(0), Expr::BitwiseOr(Expr::Variable(1), Expr::Variable(2))
+            )
+        )
+    );
+    auto original = CloneExpr(*input);
+
+    auto sig                        = EvaluateBooleanSignature(*input, 3, 64);
+    std::vector< std::string > vars = { "a", "y", "z" };
+
+    Options opts;
+    opts.bitwidth  = 64;
+    opts.evaluator = [&](const std::vector< uint64_t > &v) {
+        return EvalExpr(*original, v, 64);
+    };
+
+    auto result = Simplify(sig, vars, input.get(), opts);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
+    EXPECT_EQ(Render(*result.value().expr, result.value().real_vars), "3 * ~(a | y | z)");
+
+    auto remapped = CloneExpr(*result.value().expr);
+    auto support  = BuildVarSupport(vars, result.value().real_vars);
+    RemapVarIndices(*remapped, support);
+
+    auto fw = FullWidthCheckEval(opts.evaluator, 3, *remapped, 64);
+    EXPECT_TRUE(fw.passed);
+}
+
+TEST(SimplifierTest, SemilinearCanonicalizesTwoVarXorAffineCombo) {
+    auto input = Expr::Add(
+        Expr::Constant(3),
+        Expr::Add(
+            Expr::Mul(Expr::Constant(3), Expr::Variable(0)),
+            Expr::Add(
+                Expr::Mul(Expr::Constant(2), Expr::Variable(1)),
+                Expr::Negate(
+                    Expr::Mul(
+                        Expr::Constant(4),
+                        Expr::BitwiseAnd(Expr::Variable(0), Expr::Variable(1))
+                    )
+                )
+            )
+        )
+    );
+    auto original = CloneExpr(*input);
+
+    auto sig                        = EvaluateBooleanSignature(*input, 2, 64);
+    std::vector< std::string > vars = { "b", "x" };
+
+    Options opts;
+    opts.bitwidth  = 64;
+    opts.evaluator = [&](const std::vector< uint64_t > &v) {
+        return EvalExpr(*original, v, 64);
+    };
+
+    auto result = Simplify(sig, vars, input.get(), opts);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
+
+    auto rendered = Render(*result.value().expr, result.value().real_vars);
+    EXPECT_NE(rendered.find("^"), std::string::npos);
+    EXPECT_TRUE(IsBetter(ComputeCost(*result.value().expr).cost, ComputeCost(*original).cost));
+
+    auto remapped = CloneExpr(*result.value().expr);
+    auto support  = BuildVarSupport(vars, result.value().real_vars);
+    RemapVarIndices(*remapped, support);
+
+    auto fw = FullWidthCheckEval(opts.evaluator, 2, *remapped, 64);
+    EXPECT_TRUE(fw.passed);
+}
+
+TEST(SimplifierTest, SemilinearCanonicalizesTwoVarOrNotAffineCombo) {
+    auto input = Expr::Add(
+        Expr::Constant(2),
+        Expr::Add(
+            Expr::Negate(Expr::Variable(0)),
+            Expr::Add(
+                Expr::Mul(Expr::Constant(2), Expr::Variable(1)),
+                Expr::Negate(
+                    Expr::Mul(
+                        Expr::Constant(2),
+                        Expr::BitwiseAnd(Expr::Variable(0), Expr::Variable(1))
+                    )
+                )
+            )
+        )
+    );
+    auto original = CloneExpr(*input);
+
+    auto sig                        = EvaluateBooleanSignature(*input, 2, 64);
+    std::vector< std::string > vars = { "a", "y" };
+
+    Options opts;
+    opts.bitwidth  = 64;
+    opts.evaluator = [&](const std::vector< uint64_t > &v) {
+        return EvalExpr(*original, v, 64);
+    };
+
+    auto result = Simplify(sig, vars, input.get(), opts);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
+
+    auto rendered = Render(*result.value().expr, result.value().real_vars);
+    EXPECT_NE(rendered.find("a | ~y"), std::string::npos);
+    EXPECT_TRUE(IsBetter(ComputeCost(*result.value().expr).cost, ComputeCost(*original).cost));
+
+    auto remapped = CloneExpr(*result.value().expr);
+    auto support  = BuildVarSupport(vars, result.value().real_vars);
+    RemapVarIndices(*remapped, support);
+
+    auto fw = FullWidthCheckEval(opts.evaluator, 2, *remapped, 64);
+    EXPECT_TRUE(fw.passed);
+}
+
 TEST(SimplifierTest, NoOpOperandSimplFallsToXorLowering) {
     // (x^y) * z: operands are already simple (no MBA to collapse).
     // Operand simplification returns changed=false.

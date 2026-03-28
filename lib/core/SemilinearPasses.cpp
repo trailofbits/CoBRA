@@ -6,6 +6,7 @@
 #include "cobra/core/ExprCost.h"
 #include "cobra/core/ExprUtils.h"
 #include "cobra/core/MaskedAtomReconstructor.h"
+#include "cobra/core/PatternMatcher.h"
 #include "cobra/core/Profile.h"
 #include "cobra/core/SelfCheck.h"
 #include "cobra/core/SemilinearNormalizer.h"
@@ -16,6 +17,64 @@
 #include "cobra/core/Trace.h"
 
 namespace cobra {
+
+    namespace {
+
+        bool MatchAppliedCoefficient(
+            const Expr &expr, uint64_t coeff, uint32_t bitwidth, const Expr *&term
+        ) {
+            if (coeff == 1) {
+                term = &expr;
+                return true;
+            }
+
+            if (coeff == Bitmask(bitwidth) && expr.kind == Expr::Kind::kNeg
+                && expr.children.size() == 1)
+            {
+                term = expr.children[0].get();
+                return true;
+            }
+
+            if (expr.kind != Expr::Kind::kMul || expr.children.size() != 2) { return false; }
+
+            if (expr.children[0]->kind == Expr::Kind::kConstant
+                && expr.children[0]->constant_val == coeff)
+            {
+                term = expr.children[1].get();
+                return true;
+            }
+            if (expr.children[1]->kind == Expr::Kind::kConstant
+                && expr.children[1]->constant_val == coeff)
+            {
+                term = expr.children[0].get();
+                return true;
+            }
+            return false;
+        }
+
+        bool MatchScaledAddTerm(
+            const Expr &expr, uint32_t bitwidth, const Expr *&term, uint64_t &coeff
+        ) {
+            if (expr.kind != Expr::Kind::kAdd || expr.children.size() != 2) { return false; }
+
+            const Expr *const_node = nullptr;
+            int const_idx          = -1;
+            for (int i = 0; i < 2; ++i) {
+                if (expr.children[i]->kind == Expr::Kind::kConstant) {
+                    const_node = expr.children[i].get();
+                    const_idx  = i;
+                    break;
+                }
+            }
+            if (const_node == nullptr) { return false; }
+
+            coeff = const_node->constant_val;
+            return MatchAppliedCoefficient(
+                *expr.children[1 - const_idx], coeff, bitwidth, term
+            );
+        }
+
+    } // namespace
 
     SemilinearIR CloneSemilinearIR(const SemilinearIR &src) {
         SemilinearIR dst;
@@ -36,65 +95,42 @@ namespace cobra {
         return dst;
     }
 
-    // Rewrite k + k*(c^x) -> (-k)*(~c ^ x).
-    // The semilinear XOR recovery produces a negated coefficient
-    // and an additive constant that cancel via this identity.
+    // Rewrite k + k*(c^x) -> (-k)*(~c ^ x), and more generally
+    // k + k*x -> (-k)*~x. The XOR-specialized form keeps the recovered
+    // atom in its cheaper XOR-with-constant representation.
     std::unique_ptr< Expr >
-    SimplifyXorConstant(std::unique_ptr< Expr > expr, uint32_t bitwidth) {
-        if (expr->kind != Expr::Kind::kAdd) { return expr; }
-        if (expr->children.size() != 2) { return expr; }
+    CanonicalizeScaledBooleanSum(std::unique_ptr< Expr > expr, uint32_t bitwidth) {
+        const Expr *term = nullptr;
+        uint64_t coeff   = 0;
+        if (!MatchScaledAddTerm(*expr, bitwidth, term, coeff) || coeff == 0) { return expr; }
 
-        // Match Add(Constant(k), Mul(Constant(k), XOR(Constant(c), ...)))
-        // or   Add(Mul(Constant(k), XOR(Constant(c), ...)), Constant(k))
-        const Expr *const_node = nullptr;
-        const Expr *mul_node   = nullptr;
-        int const_idx          = -1;
+        if (term->kind == Expr::Kind::kXor && term->children.size() == 2) {
+            int xor_const_idx = -1;
+            if (term->children[0]->kind == Expr::Kind::kConstant) {
+                xor_const_idx = 0;
+            } else if (term->children[1]->kind == Expr::Kind::kConstant) {
+                xor_const_idx = 1;
+            }
+            if (xor_const_idx >= 0) {
+                const uint64_t kMask = Bitmask(bitwidth);
+                const uint64_t kNegK = ModNeg(coeff, bitwidth);
+                const uint64_t kC    = term->children[xor_const_idx]->constant_val;
+                const uint64_t kNotC = (~kC) & kMask;
 
-        for (int i = 0; i < 2; ++i) {
-            if (expr->children[i]->kind == Expr::Kind::kConstant
-                && expr->children[1 - i]->kind == Expr::Kind::kMul)
-            {
-                const_node = expr->children[i].get();
-                mul_node   = expr->children[1 - i].get();
-                const_idx  = i;
-                break;
+                auto var_child = CloneExpr(*term->children[1 - xor_const_idx]);
+                auto new_xor   = Expr::BitwiseXor(Expr::Constant(kNotC), std::move(var_child));
+                return ApplyCoefficient(std::move(new_xor), kNegK, bitwidth);
             }
         }
-        (void) const_idx;
-        if (const_node == nullptr) { return expr; }
 
-        // Mul must have Constant(k) as first child and XOR as second.
-        if (mul_node->children.size() != 2) { return expr; }
-        const auto &mul_lhs = *mul_node->children[0];
-        const auto &mul_rhs = *mul_node->children[1];
-        if (mul_lhs.kind != Expr::Kind::kConstant) { return expr; }
-        if (mul_rhs.kind != Expr::Kind::kXor) { return expr; }
+        auto complemented = SimplifyAtom(Expr::BitwiseNot(CloneExpr(*term)), bitwidth);
+        return ApplyCoefficient(std::move(complemented), ModNeg(coeff, bitwidth), bitwidth);
+    }
 
-        // Constants must match: k == k
-        if (const_node->constant_val != mul_lhs.constant_val) { return expr; }
-
-        // XOR must have a constant child.
-        const auto &xor_node = mul_rhs;
-        if (xor_node.children.size() != 2) { return expr; }
-
-        int xor_const_idx = -1;
-        if (xor_node.children[0]->kind == Expr::Kind::kConstant) {
-            xor_const_idx = 0;
-        } else if (xor_node.children[1]->kind == Expr::Kind::kConstant) {
-            xor_const_idx = 1;
-        }
-        if (xor_const_idx < 0) { return expr; }
-
-        // k + k*(c^x) = (-k)*(~c^x)
-        const uint64_t kMask = Bitmask(bitwidth);
-        const uint64_t kK    = const_node->constant_val;
-        const uint64_t kNegK = ModNeg(kK, bitwidth);
-        const uint64_t kC    = xor_node.children[xor_const_idx]->constant_val;
-        const uint64_t kNotC = (~kC) & kMask;
-
-        auto var_child = CloneExpr(*xor_node.children[1 - xor_const_idx]);
-        auto new_xor   = Expr::BitwiseXor(Expr::Constant(kNotC), std::move(var_child));
-        return ApplyCoefficient(std::move(new_xor), kNegK, bitwidth);
+    std::unique_ptr< Expr >
+    NormalizeLateCandidateExpr(std::unique_ptr< Expr > expr, uint32_t bitwidth) {
+        expr = CanonicalizeScaledBooleanSum(std::move(expr), bitwidth);
+        return SimplifyPatternSubtrees(std::move(expr), bitwidth);
     }
 
     Result< PassResult >
@@ -329,7 +365,7 @@ namespace cobra {
         CompactAtomTable(ir);
         auto partitions = ComputePartitions(ir);
         auto simplified = ReconstructMaskedAtoms(ir, partitions);
-        simplified      = SimplifyXorConstant(std::move(simplified), ctx.bitwidth);
+        simplified      = NormalizeLateCandidateExpr(std::move(simplified), ctx.bitwidth);
 
         const auto kNumVars = static_cast< uint32_t >(vars.size());
         auto verification   = VerificationState::kUnverified;
