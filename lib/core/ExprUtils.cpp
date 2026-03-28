@@ -199,11 +199,144 @@ namespace cobra {
             return expr;
         }
 
+        // Flatten binary Mul chain into factor list.
+        void FlattenMul(
+            std::unique_ptr< Expr > node, std::vector< std::unique_ptr< Expr > > &factors
+        ) {
+            if (node->kind == Expr::Kind::kMul) {
+                FlattenMul(std::move(node->children[0]), factors);
+                FlattenMul(std::move(node->children[1]), factors);
+            } else {
+                factors.push_back(std::move(node));
+            }
+        }
+
+        // Rebuild a left-folded Mul chain from a factor list.
+        std::unique_ptr< Expr > RebuildMul(std::vector< std::unique_ptr< Expr > > &factors) {
+            auto result = std::move(factors[0]);
+            for (size_t i = 1; i < factors.size(); ++i) {
+                result = Expr::Mul(std::move(result), std::move(factors[i]));
+            }
+            return result;
+        }
+
+        // Extract a common multiplicand from all terms of an Add chain.
+        // a*M + b*M + c*M → (a + b + c) * M
+        // This is the distributive law, always valid in modular arithmetic.
+        std::unique_ptr< Expr > ExtractCommonFactor(std::unique_ptr< Expr > expr) {
+            // Recurse into children first.
+            for (auto &child : expr->children) {
+                child = ExtractCommonFactor(std::move(child));
+            }
+
+            if (expr->kind != Expr::Kind::kAdd) { return expr; }
+
+            // Flatten the Add chain.
+            std::vector< std::unique_ptr< Expr > > terms;
+            FlattenAdd(std::move(expr), terms);
+
+            if (terms.size() < 2) {
+                if (terms.size() == 1) { return std::move(terms[0]); }
+                return Expr::Constant(0);
+            }
+
+            // For each term, flatten its Mul chain into factors.
+            // Separate constants from non-constants.
+            struct TermFactors
+            {
+                std::vector< std::unique_ptr< Expr > > factors;
+            };
+
+            std::vector< TermFactors > all_factors;
+            for (auto &t : terms) {
+                TermFactors tf;
+                if (t->kind == Expr::Kind::kMul) {
+                    FlattenMul(std::move(t), tf.factors);
+                } else {
+                    tf.factors.push_back(std::move(t));
+                }
+                all_factors.push_back(std::move(tf));
+            }
+
+            // For each non-constant factor in the first term, check if
+            // it appears (structurally) in ALL other terms.
+            for (size_t fi = 0; fi < all_factors[0].factors.size(); ++fi) {
+                auto &candidate = all_factors[0].factors[fi];
+                if (candidate->kind == Expr::Kind::kConstant) { continue; }
+                if (candidate->kind == Expr::Kind::kVariable) { continue; }
+
+                auto candidate_hash = std::hash< Expr >{}(*candidate);
+
+                // Check all other terms for this factor.
+                bool universal = true;
+                std::vector< size_t > match_indices;
+                match_indices.push_back(fi);
+                for (size_t ti = 1; ti < all_factors.size(); ++ti) {
+                    bool found = false;
+                    for (size_t fj = 0; fj < all_factors[ti].factors.size(); ++fj) {
+                        auto &f = all_factors[ti].factors[fj];
+                        if (f->kind == Expr::Kind::kConstant) { continue; }
+                        if (std::hash< Expr >{}(*f) == candidate_hash
+                            && f->kind == candidate->kind)
+                        {
+                            // Deep equality check via CloneExpr comparison.
+                            // Use the hash as strong filter — collisions are rare.
+                            found = true;
+                            match_indices.push_back(fj);
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        universal = false;
+                        break;
+                    }
+                }
+
+                if (!universal) { continue; }
+
+                // Found a universal factor! Extract it.
+                auto common = std::move(all_factors[0].factors[fi]);
+
+                // Remove the common factor from each term and rebuild remainders.
+                std::vector< std::unique_ptr< Expr > > remainders;
+                for (size_t ti = 0; ti < all_factors.size(); ++ti) {
+                    auto &tf = all_factors[ti].factors;
+                    tf.erase(tf.begin() + static_cast< ptrdiff_t >(match_indices[ti]));
+                    if (tf.empty()) {
+                        remainders.push_back(Expr::Constant(1));
+                    } else {
+                        remainders.push_back(RebuildMul(tf));
+                    }
+                }
+
+                // Rebuild: (remainder_0 + remainder_1 + ...) * common
+                auto sum = std::move(remainders[0]);
+                for (size_t i = 1; i < remainders.size(); ++i) {
+                    sum = Expr::Add(std::move(sum), std::move(remainders[i]));
+                }
+                // Recurse — there might be more common factors in the sum.
+                sum = ExtractCommonFactor(std::move(sum));
+                return Expr::Mul(std::move(sum), std::move(common));
+            }
+
+            // No universal factor found. Rebuild original Add chain.
+            std::vector< std::unique_ptr< Expr > > rebuilt_terms;
+            for (auto &tf : all_factors) { rebuilt_terms.push_back(RebuildMul(tf.factors)); }
+            auto result = std::move(rebuilt_terms[0]);
+            for (size_t i = 1; i < rebuilt_terms.size(); ++i) {
+                result = Expr::Add(std::move(result), std::move(rebuilt_terms[i]));
+            }
+            return result;
+        }
+
     } // namespace
 
     std::unique_ptr< Expr > CleanupFinalExpr(std::unique_ptr< Expr > expr, uint32_t bitwidth) {
         expr = FoldConstantArithmetic(std::move(expr), bitwidth);
         expr = RefoldNegation(std::move(expr), bitwidth);
+        expr = ExtractCommonFactor(std::move(expr));
+        // Re-fold constants that the extraction may have exposed.
+        expr = FoldConstantArithmetic(std::move(expr), bitwidth);
         return expr;
     }
 
