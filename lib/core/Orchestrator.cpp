@@ -757,13 +757,13 @@ namespace cobra {
 
         SimplifyOutcome ToSimplifyOutcome(
             OrchestratorResult result, const Expr *original_expr,
-            const OrchestratorTelemetry &telemetry
+            const OrchestratorTelemetry &telemetry, uint32_t bitwidth
         ) {
             SimplifyOutcome outcome;
 
             if (result.outcome.Succeeded()) {
                 outcome.kind      = SimplifyOutcome::Kind::kSimplified;
-                outcome.expr      = result.outcome.TakeExpr();
+                outcome.expr      = CleanupFinalExpr(result.outcome.TakeExpr(), bitwidth);
                 outcome.real_vars = result.outcome.RealVars();
                 outcome.verified = result.metadata.verification == VerificationState::kVerified;
                 outcome.sig_vector = std::move(result.metadata.sig_vector);
@@ -805,7 +805,7 @@ namespace cobra {
         COBRA_ZONE_N("Simplify");
         COBRA_ZONE_VALUE(static_cast< int64_t >(vars.size()));
         Options effective_opts = opts;
-        if (input_expr != nullptr && opts.evaluator) {
+        if (input_expr != nullptr && !opts.evaluator) {
             effective_opts.evaluator = Evaluator::FromExpr(*input_expr, opts.bitwidth);
         }
         OrchestratorPolicy policy;
@@ -830,17 +830,17 @@ namespace cobra {
             auto seed_result = SeedNoAst(sig, vars, context, worklist);
             if (!seed_result.has_value()) { return std::unexpected(seed_result.error()); }
             if (seed_result.value().has_value()) {
-                return Ok(
-                    ToSimplifyOutcome(std::move(*seed_result.value()), input_expr, telemetry)
-                );
+                return Ok(ToSimplifyOutcome(
+                    std::move(*seed_result.value()), input_expr, telemetry, context.bitwidth
+                ));
             }
         } else {
             auto seed_result = SeedWithAst(*input_expr, context, worklist);
             if (!seed_result.has_value()) { return std::unexpected(seed_result.error()); }
             if (seed_result.value().has_value()) {
-                return Ok(
-                    ToSimplifyOutcome(std::move(*seed_result.value()), input_expr, telemetry)
-                );
+                return Ok(ToSimplifyOutcome(
+                    std::move(*seed_result.value()), input_expr, telemetry, context.bitwidth
+                ));
             }
         }
 
@@ -955,7 +955,7 @@ namespace cobra {
                             .metadata     = std::move(item.metadata),
                             .run_metadata = context.run_metadata,
                         },
-                        input_expr, telemetry
+                        input_expr, telemetry, context.bitwidth
                     ));
                 }
             }
@@ -1144,7 +1144,7 @@ namespace cobra {
                 .metadata     = std::move(final_meta),
                 .run_metadata = context.run_metadata,
             },
-            input_expr, telemetry
+            input_expr, telemetry, context.bitwidth
         ));
     }
 

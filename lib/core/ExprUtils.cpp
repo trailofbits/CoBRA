@@ -26,7 +26,7 @@ namespace cobra {
 
     void RemapVarIndices(Expr &expr, const std::vector< uint32_t > &index_map) {
         if (expr.kind == Expr::Kind::kVariable) {
-            expr.var_index = index_map[expr.var_index];
+            expr.var_index = index_map.at(expr.var_index);
             return;
         }
         for (auto &child : expr.children) { RemapVarIndices(*child, index_map); }
@@ -114,6 +114,97 @@ namespace cobra {
         return std::ranges::any_of(expr.children, [](const auto &c) {
             return HasNonleafBitwise(*c);
         });
+    }
+
+    namespace {
+
+        // Flatten a left-folded Add chain into a list of terms.
+        void FlattenAdd(
+            std::unique_ptr< Expr > node, std::vector< std::unique_ptr< Expr > > &terms
+        ) {
+            if (node->kind == Expr::Kind::kAdd) {
+                FlattenAdd(std::move(node->children[0]), terms);
+                FlattenAdd(std::move(node->children[1]), terms);
+            } else {
+                terms.push_back(std::move(node));
+            }
+        }
+
+        std::unique_ptr< Expr >
+        FoldConstantArithmetic(std::unique_ptr< Expr > expr, uint32_t bitwidth) {
+            // Recurse into children first.
+            for (auto &child : expr->children) {
+                child = FoldConstantArithmetic(std::move(child), bitwidth);
+            }
+
+            // Fold fully-constant subtrees.
+            if (IsConstantSubtree(*expr) && expr->kind != Expr::Kind::kConstant) {
+                return Expr::Constant(EvalConstantExpr(*expr, bitwidth));
+            }
+
+            // Flatten Add chains and combine constant terms.
+            if (expr->kind != Expr::Kind::kAdd) { return expr; }
+
+            std::vector< std::unique_ptr< Expr > > terms;
+            FlattenAdd(std::move(expr), terms);
+
+            uint64_t const_sum = 0;
+            std::vector< std::unique_ptr< Expr > > non_const;
+            for (auto &t : terms) {
+                if (t->kind == Expr::Kind::kConstant) {
+                    const_sum = ModAdd(const_sum, t->constant_val, bitwidth);
+                } else {
+                    non_const.push_back(std::move(t));
+                }
+            }
+
+            // Rebuild: non-constant terms first, then constant if nonzero.
+            if (non_const.empty()) { return Expr::Constant(const_sum); }
+
+            auto result = std::move(non_const[0]);
+            for (size_t i = 1; i < non_const.size(); ++i) {
+                result = Expr::Add(std::move(result), std::move(non_const[i]));
+            }
+            if (const_sum != 0) {
+                result = Expr::Add(std::move(result), Expr::Constant(const_sum));
+            }
+            return result;
+        }
+
+        std::unique_ptr< Expr >
+        RefoldNegation(std::unique_ptr< Expr > expr, uint32_t bitwidth) {
+            for (auto &child : expr->children) {
+                child = RefoldNegation(std::move(child), bitwidth);
+            }
+
+            // Add(Neg(x), all_ones) or Add(all_ones, Neg(x)) → Not(x)
+            // since -x + (2^n - 1) = ~x in modular arithmetic.
+            if (expr->kind != Expr::Kind::kAdd) { return expr; }
+
+            const uint64_t kMask = Bitmask(bitwidth);
+            auto &lhs            = expr->children[0];
+            auto &rhs            = expr->children[1];
+
+            if (lhs->kind == Expr::Kind::kNeg && rhs->kind == Expr::Kind::kConstant
+                && rhs->constant_val == kMask)
+            {
+                return Expr::BitwiseNot(std::move(lhs->children[0]));
+            }
+            if (rhs->kind == Expr::Kind::kNeg && lhs->kind == Expr::Kind::kConstant
+                && lhs->constant_val == kMask)
+            {
+                return Expr::BitwiseNot(std::move(rhs->children[0]));
+            }
+
+            return expr;
+        }
+
+    } // namespace
+
+    std::unique_ptr< Expr > CleanupFinalExpr(std::unique_ptr< Expr > expr, uint32_t bitwidth) {
+        expr = FoldConstantArithmetic(std::move(expr), bitwidth);
+        expr = RefoldNegation(std::move(expr), bitwidth);
+        return expr;
     }
 
 } // namespace cobra
