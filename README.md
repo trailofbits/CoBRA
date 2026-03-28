@@ -160,7 +160,6 @@ cobra-cli --mba "(x&y)+(x|y)" --verbose
 | `--bitwidth <n>` | 64 | Modular arithmetic width (1-64) |
 | `--max-vars <n>` | 16 | Maximum variable count |
 | `--verify` | off | Z3 equivalence check |
-| `--strict` | off | Require Z3 for semilinear results |
 | `--verbose` | off | Print pipeline internals |
 
 ## Project Structure
