@@ -447,6 +447,18 @@ TEST(OSESDataset, Fast) {
     EXPECT_EQ(stats.has_structured_reason, stats.unsupported);
 }
 
+// -- ObfuscatorX dataset -------------------------------------------------
+
+TEST(ObfuscatorXDataset, All) {
+    auto stats = run_dataset(DATASET_DIR "/obfuscatorx.txt");
+    EXPECT_EQ(stats.total, 8);
+    EXPECT_EQ(stats.skipped_parse, 1); // header
+    EXPECT_EQ(stats.parsed, 7);
+    EXPECT_EQ(stats.simplified, 7);
+    EXPECT_EQ(stats.unsupported, 0);
+    EXPECT_EQ(stats.failed_simplify, 0);
+}
+
 TEST(OSESDataset, DISABLED_Slow) {
     auto stats = run_dataset(DATASET_DIR "/oses/oses_slow.txt");
     EXPECT_EQ(stats.total, 7);
