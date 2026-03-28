@@ -353,15 +353,17 @@ namespace cobra {
         constexpr FoldedAstPassEntry kFoldedAstPasses[] = {
             {        PassId::kBuildSignatureState,                                0,  0, false },
             {     PassId::kPrepareDirectRemainder,                                0,  1, false },
-            {         PassId::kExtractProductCore,                                0,  2, false },
-            {          PassId::kExtractPolyCoreD2,                                0,  3, false },
-            {        PassId::kExtractTemplateCore,                                0,  4, false },
-            {          PassId::kExtractPolyCoreD3,                                0,  5, false },
-            {          PassId::kExtractPolyCoreD4,                                0,  6, false },
-            {        PassId::kLiftArithmeticAtoms,                                0,  7, false },
-            { PassId::kLiftRepeatedSubexpressions,                                0,  8, false },
-            {            PassId::kOperandSimplify, Bit(PassId::kExtractProductCore),  9,  true },
-            {    PassId::kProductIdentityCollapse, Bit(PassId::kExtractProductCore), 10,  true },
+            // Try the masked-product rewrite before direct product extraction
+            // can return the original encoding as a verified top-level winner.
+            {    PassId::kProductIdentityCollapse,                                0,  2,  true },
+            {         PassId::kExtractProductCore,                                0,  3, false },
+            {          PassId::kExtractPolyCoreD2,                                0,  4, false },
+            {        PassId::kExtractTemplateCore,                                0,  5, false },
+            {          PassId::kExtractPolyCoreD3,                                0,  6, false },
+            {          PassId::kExtractPolyCoreD4,                                0,  7, false },
+            {        PassId::kLiftArithmeticAtoms,                                0,  8, false },
+            { PassId::kLiftRepeatedSubexpressions,                                0,  9, false },
+            {            PassId::kOperandSimplify, Bit(PassId::kExtractProductCore), 10,  true },
             {                PassId::kXorLowering,                                0, 11,  true },
         };
 

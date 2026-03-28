@@ -1,6 +1,7 @@
 #include "cobra/core/AuxVarEliminator.h"
 #include "cobra/core/Classification.h"
 #include "cobra/core/Classifier.h"
+#include "cobra/core/ExprCost.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/SignatureEval.h"
@@ -353,6 +354,41 @@ TEST(SimplifierTest, PolynomialTargetRecoveredViaSplit) {
     EXPECT_TRUE(fw.passed);
 }
 
+TEST(SimplifierTest, ProductIdentityCollapsesToPlainProduct) {
+    auto x = []() { return Expr::Variable(0); };
+    auto y = []() { return Expr::Variable(1); };
+
+    auto obf = Expr::Add(
+        Expr::Mul(Expr::BitwiseAnd(x(), y()), Expr::BitwiseOr(x(), y())),
+        Expr::Mul(
+            Expr::BitwiseAnd(x(), Expr::BitwiseNot(y())),
+            Expr::BitwiseAnd(Expr::BitwiseNot(x()), y())
+        )
+    );
+
+    auto original_cost = ComputeCost(*obf).cost;
+    auto evaluator     = [](const std::vector< uint64_t > &v) -> uint64_t { return v[0] * v[1]; };
+
+    auto sig                        = EvaluateBooleanSignature(*obf, 2, 64);
+    std::vector< std::string > vars = { "x", "y" };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
+    opts.evaluator = evaluator;
+
+    auto result = Simplify(sig, vars, obf.get(), opts);
+    ASSERT_TRUE(result.has_value());
+    ASSERT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
+    EXPECT_TRUE(result.value().verified);
+
+    auto simplified_cost = ComputeCost(*result.value().expr).cost;
+    EXPECT_TRUE(IsBetter(simplified_cost, original_cost));
+
+    auto rendered = Render(*result.value().expr, result.value().real_vars);
+    EXPECT_TRUE(rendered == "x * y" || rendered == "y * x") << rendered;
+
+    auto fw = FullWidthCheckEval(evaluator, 2, *result.value().expr, 64);
+    EXPECT_TRUE(fw.passed);
+}
+
 TEST(SimplifierTest, PolynomialXSquaredRecovered) {
     // f(x) = x^2. sig = [0, 1]. CoB gives coefficient 1 for {x}.
     // Pattern matcher matches "x" but full-width check rejects it
@@ -577,6 +613,9 @@ TEST(SimplifierTest, EarlyDecomposition_ProductCoreSurvivesPreconditioning) {
     auto result = Simplify(sig, vars, obf.get(), opts);
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
+    auto original_cost   = ComputeCost(*obf).cost;
+    auto simplified_cost = ComputeCost(*result.value().expr).cost;
+    EXPECT_TRUE(IsBetter(simplified_cost, original_cost));
 
     if (result.value().kind == SimplifyOutcome::Kind::kSimplified) {
         auto check = FullWidthCheckEval(evaluator, 3, *result.value().expr, 64);

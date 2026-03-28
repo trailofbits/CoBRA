@@ -2059,29 +2059,20 @@ TEST(ProductEmission, FindsSiteAndEmitsChildPairs) {
     EXPECT_EQ(pr.decision, PassDecision::kAdvance);
     EXPECT_EQ(pr.disposition, ItemDisposition::kConsumeCurrent);
 
-    // Children are emitted in pairs (x, y) per valid assignment.
-    EXPECT_GE(pr.next.size(), 2);
-    EXPECT_EQ(pr.next.size() % 2, 0);
+    ASSERT_EQ(pr.next.size(), 1u);
+    EXPECT_EQ(GetStateKind(pr.next[0].payload), StateKind::kFoldedAst);
+    EXPECT_FALSE(pr.next[0].group_id.has_value());
 
-    for (const auto &child : pr.next) {
-        EXPECT_EQ(GetStateKind(child.payload), StateKind::kSignatureState);
-        EXPECT_TRUE(child.group_id.has_value());
-    }
+    auto &rewritten = std::get< AstPayload >(pr.next[0].payload);
+    EXPECT_EQ(rewritten.provenance, Provenance::kRewritten);
+    EXPECT_EQ(rewritten.expr->kind, Expr::Kind::kMul);
+    EXPECT_TRUE(
+        rewritten.expr->children[0]->kind == Expr::Kind::kVariable
+        && rewritten.expr->children[1]->kind == Expr::Kind::kVariable
+    );
 
-    // Join states populated with ProductJoinState entries.
-    EXPECT_GE(ctx.join_states.size(), 1);
-    for (auto &[jid, jstate] : ctx.join_states) {
-        auto *pjs = std::get_if< ProductJoinState >(&jstate);
-        ASSERT_NE(pjs, nullptr);
-        EXPECT_NE(pjs->full_ast, nullptr);
-        EXPECT_NE(pjs->target_hash, 0);
-    }
-
-    // Competition groups have ProductCollapseCont.
-    for (auto &[gid, group] : ctx.competition_groups) {
-        ASSERT_TRUE(group.continuation.has_value());
-        EXPECT_TRUE(std::holds_alternative< ProductCollapseCont >(*group.continuation));
-    }
+    EXPECT_TRUE(ctx.join_states.empty());
+    EXPECT_TRUE(ctx.competition_groups.empty());
 }
 
 TEST(ProductEmission, UsesSolveCtxVarsAndPreservesParentContext) {
@@ -2121,33 +2112,26 @@ TEST(ProductEmission, UsesSolveCtxVarsAndPreservesParentContext) {
     auto &pr = result.value();
 
     EXPECT_EQ(pr.decision, PassDecision::kAdvance);
-    EXPECT_GE(pr.next.size(), 2u);
-    for (const auto &child : pr.next) {
-        auto &sub = std::get< SignatureStatePayload >(child.payload).ctx;
-        EXPECT_EQ(sub.real_vars, local_vars);
-        EXPECT_EQ(sub.original_indices, std::vector< uint32_t >({ 0, 1 }));
-        EXPECT_EQ(child.depth, 4u);
-        EXPECT_EQ(
-            child.history,
-            std::vector< PassId >({ PassId::kClassifyAst, PassId::kProductIdentityCollapse })
-        );
-    }
+    ASSERT_EQ(pr.next.size(), 1u);
+    EXPECT_EQ(GetStateKind(pr.next[0].payload), StateKind::kFoldedAst);
+    ASSERT_TRUE(pr.next[0].group_id.has_value());
+    EXPECT_EQ(*pr.next[0].group_id, 52u);
+    EXPECT_EQ(pr.next[0].depth, 4u);
+    EXPECT_EQ(
+        pr.next[0].history,
+        std::vector< PassId >({ PassId::kClassifyAst, PassId::kProductIdentityCollapse })
+    );
+    EXPECT_EQ(pr.next[0].rewrite_gen, 1u);
 
-    ASSERT_FALSE(ctx.join_states.empty());
-    for (auto &[_, state] : ctx.join_states) {
-        auto *join = std::get_if< ProductJoinState >(&state);
-        ASSERT_NE(join, nullptr);
-        ASSERT_TRUE(join->parent_group_id.has_value());
-        EXPECT_EQ(*join->parent_group_id, 52u);
-        EXPECT_TRUE(join->has_solve_ctx);
-        EXPECT_EQ(join->solve_ctx_vars, local_vars);
-        EXPECT_EQ(join->solve_ctx_input_sig, input_sig);
-        EXPECT_EQ(join->parent_depth, 4u);
-        EXPECT_EQ(
-            join->parent_history,
-            std::vector< PassId >({ PassId::kClassifyAst, PassId::kProductIdentityCollapse })
-        );
-    }
+    auto &rewritten = std::get< AstPayload >(pr.next[0].payload);
+    EXPECT_EQ(rewritten.provenance, Provenance::kRewritten);
+    ASSERT_TRUE(rewritten.solve_ctx.has_value());
+    EXPECT_EQ(rewritten.solve_ctx->vars, local_vars);
+    EXPECT_EQ(rewritten.solve_ctx->input_sig, input_sig);
+    EXPECT_EQ(rewritten.expr->kind, Expr::Kind::kMul);
+
+    EXPECT_TRUE(ctx.join_states.empty());
+    EXPECT_TRUE(ctx.competition_groups.empty());
 }
 
 // --- LiftedSubstituteCont resolution tests ---

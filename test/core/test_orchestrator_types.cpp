@@ -233,6 +233,32 @@ TEST(SelectNextPass, AfterBuildSigGetsPrepareDirectResidual) {
     EXPECT_EQ(*pass, PassId::kPrepareDirectRemainder);
 }
 
+TEST(SelectNextPass, ProductIdentityCollapseRunsBeforeExtractProductCore) {
+    WorkItem item;
+    auto cls     = MakeClassification(kSfHasMixedProduct);
+    item.payload = AstPayload{
+        .expr           = Expr::Constant(0),
+        .classification = cls,
+        .provenance     = Provenance::kLowered,
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kLowered;
+    item.attempted_mask = (1ULL << static_cast< uint8_t >(PassId::kBuildSignatureState))
+        | (1ULL << static_cast< uint8_t >(PassId::kPrepareDirectRemainder));
+
+    OrchestratorPolicy policy;
+    PassAttemptCache cache;
+
+    auto pass = SelectNextPass(item, policy, 0, cache);
+    ASSERT_TRUE(pass.has_value());
+    EXPECT_EQ(*pass, PassId::kProductIdentityCollapse);
+
+    item.attempted_mask |= (1ULL << static_cast< uint8_t >(PassId::kProductIdentityCollapse));
+    pass = SelectNextPass(item, policy, 0, cache);
+    ASSERT_TRUE(pass.has_value());
+    EXPECT_EQ(*pass, PassId::kExtractProductCore);
+}
+
 TEST(SelectNextPass, PrereqBlocksOperandSimplifyBeforeExtract) {
     WorkItem item;
     auto cls     = MakeClassification(kSfHasMixedProduct);

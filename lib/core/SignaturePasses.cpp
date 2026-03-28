@@ -88,6 +88,38 @@ namespace cobra {
             };
         }
 
+        template< typename JoinT >
+        void EmitJoinRewrite(
+            const JoinT &join, const WorkItem &item, std::unique_ptr< Expr > replacement,
+            PassResult &pr
+        ) {
+            auto rebuilt_ast = CloneExpr(*join.full_ast);
+            bool replaced    = false;
+            rebuilt_ast =
+                ReplaceByHash(std::move(rebuilt_ast), join.target_hash, replacement, replaced);
+
+            auto new_cls = ClassifyStructural(*rebuilt_ast);
+
+            WorkItem rewritten;
+            rewritten.payload = AstPayload{
+                .expr           = std::move(rebuilt_ast),
+                .classification = new_cls,
+                .provenance     = Provenance::kRewritten,
+                .solve_ctx      = RebuildSolveContext(join),
+            };
+            rewritten.features                = item.features;
+            rewritten.features.classification = new_cls;
+            rewritten.features.provenance     = Provenance::kRewritten;
+            rewritten.metadata                = item.metadata;
+            rewritten.depth                   = join.parent_depth;
+            rewritten.rewrite_gen             = join.rewrite_gen + 1;
+            rewritten.attempted_mask          = 0;
+            rewritten.group_id                = join.parent_group_id;
+            rewritten.history                 = join.parent_history;
+
+            pr.next.push_back(std::move(rewritten));
+        }
+
         // Evaluate the singleton polynomial S_i(t) at t=2.
         // Only degrees 1 and 2 contribute because
         // falling_factorial(2, k) = 0 for k >= 3.
@@ -276,33 +308,7 @@ namespace cobra {
             }
 
             if (best.has_value()) {
-                // Splice the replacement Mul into the full AST.
-                auto rebuilt_ast = CloneExpr(*join->full_ast);
-                bool replaced    = false;
-                rebuilt_ast      = ReplaceByHash(
-                    std::move(rebuilt_ast), join->target_hash, best->expr, replaced
-                );
-
-                auto new_cls = ClassifyStructural(*rebuilt_ast);
-
-                WorkItem rewritten;
-                rewritten.payload = AstPayload{
-                    .expr           = std::move(rebuilt_ast),
-                    .classification = new_cls,
-                    .provenance     = Provenance::kRewritten,
-                    .solve_ctx      = RebuildSolveContext(*join),
-                };
-                rewritten.features                = item.features;
-                rewritten.features.classification = new_cls;
-                rewritten.features.provenance     = Provenance::kRewritten;
-                rewritten.metadata                = item.metadata;
-                rewritten.depth                   = join->parent_depth;
-                rewritten.rewrite_gen             = join->rewrite_gen + 1;
-                rewritten.attempted_mask          = 0;
-                rewritten.group_id                = join->parent_group_id;
-                rewritten.history                 = join->parent_history;
-
-                pr.next.push_back(std::move(rewritten));
+                EmitJoinRewrite(*join, item, std::move(best->expr), pr);
             }
 
             ctx.join_states.erase(join_it);
@@ -344,7 +350,6 @@ namespace cobra {
 
             if (!join->x_resolved || !join->y_resolved) { return pr; }
 
-            // Both resolved. Product collapse requires BOTH factors.
             if (join->x_winner.has_value() && join->y_winner.has_value()) {
                 auto candidate = Expr::Mul(
                     CloneExpr(*join->x_winner->expr), CloneExpr(*join->y_winner->expr)
@@ -358,33 +363,7 @@ namespace cobra {
                 if (check.passed) {
                     auto cand_cost = ComputeCost(*candidate).cost;
                     if (IsBetter(cand_cost, join->baseline_cost)) {
-                        // Splice into full AST.
-                        auto rebuilt_ast = CloneExpr(*join->full_ast);
-                        bool replaced    = false;
-                        rebuilt_ast      = ReplaceByHash(
-                            std::move(rebuilt_ast), join->target_hash, candidate, replaced
-                        );
-
-                        auto new_cls = ClassifyStructural(*rebuilt_ast);
-
-                        WorkItem rewritten;
-                        rewritten.payload = AstPayload{
-                            .expr           = std::move(rebuilt_ast),
-                            .classification = new_cls,
-                            .provenance     = Provenance::kRewritten,
-                            .solve_ctx      = RebuildSolveContext(*join),
-                        };
-                        rewritten.features                = item.features;
-                        rewritten.features.classification = new_cls;
-                        rewritten.features.provenance     = Provenance::kRewritten;
-                        rewritten.metadata                = item.metadata;
-                        rewritten.depth                   = join->parent_depth;
-                        rewritten.rewrite_gen             = join->rewrite_gen + 1;
-                        rewritten.attempted_mask          = 0;
-                        rewritten.group_id                = join->parent_group_id;
-                        rewritten.history                 = join->parent_history;
-
-                        pr.next.push_back(std::move(rewritten));
+                        EmitJoinRewrite(*join, item, std::move(candidate), pr);
                     }
                 }
             }

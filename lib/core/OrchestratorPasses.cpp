@@ -106,7 +106,43 @@ namespace cobra {
         {
             std::vector< uint64_t > sig_x;
             std::vector< uint64_t > sig_y;
+            int i = 0;
+            int l = 0;
+            int r = 0;
         };
+
+        bool ExprStructurallyEqual(const Expr &lhs, const Expr &rhs) {
+            if (lhs.kind != rhs.kind || lhs.constant_val != rhs.constant_val
+                || lhs.var_index != rhs.var_index
+                || lhs.children.size() != rhs.children.size())
+            {
+                return false;
+            }
+            for (size_t i = 0; i < lhs.children.size(); ++i) {
+                if (!ExprStructurallyEqual(*lhs.children[i], *rhs.children[i])) { return false; }
+            }
+            return true;
+        }
+
+        std::unique_ptr< Expr > ReconstructMaskedProductFactor(
+            const Expr &inclusive_term, const Expr &exclusive_term
+        ) {
+            if (inclusive_term.kind != Expr::Kind::kAnd || exclusive_term.kind != Expr::Kind::kAnd
+                || inclusive_term.children.size() != 2 || exclusive_term.children.size() != 2)
+            {
+                return nullptr;
+            }
+
+            for (const auto &lhs_child : inclusive_term.children) {
+                for (const auto &rhs_child : exclusive_term.children) {
+                    if (ExprStructurallyEqual(*lhs_child, *rhs_child)) {
+                        return CloneExpr(*lhs_child);
+                    }
+                }
+            }
+
+            return nullptr;
+        }
 
         std::vector< ProductAssignment > EnumerateValidAssignments(
             const Expr &add_node, uint32_t num_vars, uint32_t bitwidth,
@@ -175,7 +211,15 @@ namespace cobra {
                     sig_y[j] = (sig_i[j] | sig_r[j]) & mask;
                 }
 
-                out.push_back(ProductAssignment{ .sig_x = sig_x, .sig_y = sig_y });
+                out.push_back(
+                    ProductAssignment{
+                        .sig_x = sig_x,
+                        .sig_y = sig_y,
+                        .i     = a.i,
+                        .l     = a.l,
+                        .r     = a.r,
+                    }
+                );
                 if (out.size() >= max_assignments) { break; }
             }
 
@@ -527,6 +571,68 @@ namespace cobra {
         }
 
         auto baseline_cost = ComputeCost(*site->add_node).cost;
+        const Expr *factors[4] = {
+            site->add_node->children[0]->children[0].get(),
+            site->add_node->children[0]->children[1].get(),
+            site->add_node->children[1]->children[0].get(),
+            site->add_node->children[1]->children[1].get(),
+        };
+        std::unique_ptr< Expr > best_direct_candidate;
+        std::optional< ExprCost > best_direct_cost;
+        for (const auto &assign : assignments) {
+            auto direct_x =
+                ReconstructMaskedProductFactor(*factors[assign.i], *factors[assign.l]);
+            auto direct_y =
+                ReconstructMaskedProductFactor(*factors[assign.i], *factors[assign.r]);
+            if (!direct_x || !direct_y) { continue; }
+
+            auto direct_candidate = Expr::Mul(std::move(direct_x), std::move(direct_y));
+            auto direct_check =
+                FullWidthCheck(*site->add_node, num_vars, *direct_candidate, {}, ctx.bitwidth);
+            if (!direct_check.passed) { continue; }
+
+            auto direct_cost = ComputeCost(*direct_candidate).cost;
+            if (!IsBetter(direct_cost, baseline_cost)) { continue; }
+            if (best_direct_cost.has_value()
+                && !IsBetter(direct_cost, *best_direct_cost))
+            {
+                continue;
+            }
+
+            best_direct_cost      = direct_cost;
+            best_direct_candidate = std::move(direct_candidate);
+        }
+
+        if (best_direct_candidate) {
+            bool replaced    = false;
+            auto rebuilt_ast = ReplaceByHash(
+                CloneExpr(*ast.expr), site->add_hash, best_direct_candidate, replaced
+            );
+            auto new_cls     = ClassifyStructural(*rebuilt_ast);
+
+            WorkItem rewritten;
+            rewritten.payload = AstPayload{
+                .expr           = std::move(rebuilt_ast),
+                .classification = new_cls,
+                .provenance     = Provenance::kRewritten,
+                .solve_ctx      = CloneSolveContext(ast.solve_ctx),
+            };
+            rewritten.features                = item.features;
+            rewritten.features.classification = new_cls;
+            rewritten.features.provenance     = Provenance::kRewritten;
+            rewritten.metadata                = item.metadata;
+            rewritten.depth                   = item.depth;
+            rewritten.rewrite_gen             = item.rewrite_gen + 1;
+            rewritten.attempted_mask          = 0;
+            rewritten.group_id                = item.group_id;
+            rewritten.history                 = item.history;
+
+            PassResult result;
+            result.decision    = PassDecision::kAdvance;
+            result.disposition = ItemDisposition::kConsumeCurrent;
+            result.next.push_back(std::move(rewritten));
+            return Ok(std::move(result));
+        }
 
         PassResult result;
         result.decision    = PassDecision::kAdvance;
