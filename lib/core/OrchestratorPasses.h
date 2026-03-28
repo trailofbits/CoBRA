@@ -56,10 +56,35 @@ namespace cobra {
         kLiftArithmeticAtoms,
         kLiftRepeatedSubexpressions,
         kPrepareLiftedOuterSolve,
+        // Sentinel — must remain last.
+        kCount_,
     };
+
+    static_assert(
+        static_cast< uint8_t >(PassId::kCount_) <= 64,
+        "PassId count exceeds attempted_mask width (uint64_t)"
+    );
 
     inline bool IsDecompositionFamilyPass(PassId id) {
         return id >= PassId::kExtractProductCore && id <= PassId::kResidualTemplate;
+    }
+
+    inline ExtractorKind ProjectExtractorKind(RemainderOrigin origin) {
+        switch (origin) {
+            case RemainderOrigin::kDirectBooleanNull:
+                return ExtractorKind::kBooleanNullDirect;
+            case RemainderOrigin::kProductCore:
+                return ExtractorKind::kProductAST;
+            case RemainderOrigin::kPolynomialCore:
+                return ExtractorKind::kPolynomial;
+            case RemainderOrigin::kTemplateCore:
+                return ExtractorKind::kTemplate;
+            case RemainderOrigin::kSignatureLowering:
+                return ExtractorKind::kBooleanNullDirect;
+            case RemainderOrigin::kLiftedOuter:
+                return ExtractorKind::kBooleanNullDirect;
+        }
+        return ExtractorKind::kBooleanNullDirect;
     }
 
     // ---------------------------------------------------------------

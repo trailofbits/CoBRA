@@ -2153,11 +2153,10 @@ TEST(ResolveCompetition, LiftedSubstituteContRemapsAndVerifies) {
     auto &group   = ctx.competition_groups.at(group_id);
 
     LiftedSubstituteCont lifted_cont{
-        .outer_vars             = { "x", "a", "v0" },
-        .outer_original_indices = { 0, 1 },
-        .original_var_count     = 2,
-        .original_eval          = original_eval,
-        .original_vars          = vars,
+        .outer_vars         = { "x", "a", "v0" },
+        .original_var_count = 2,
+        .original_eval      = original_eval,
+        .original_vars      = vars,
     };
     lifted_cont.bindings.push_back(
         LiftedBinding{
@@ -2218,11 +2217,10 @@ TEST(ResolveCompetition, LiftedSubstituteNoWinnerBlocks) {
     auto &group   = ctx.competition_groups.at(group_id);
 
     LiftedSubstituteCont lifted_cont{
-        .outer_vars             = { "x", "a", "v0" },
-        .outer_original_indices = { 0, 1 },
-        .original_var_count     = 2,
-        .original_eval          = original_eval,
-        .original_vars          = vars,
+        .outer_vars         = { "x", "a", "v0" },
+        .original_var_count = 2,
+        .original_eval      = original_eval,
+        .original_vars      = vars,
     };
     group.continuation = ContinuationData{ std::move(lifted_cont) };
 
@@ -2349,7 +2347,8 @@ TEST(ResolveCompetition, NestedLiftedSubstituteUsesParentLocalContext) {
     auto *cont = std::get_if< LiftedSubstituteCont >(&*group_it->second.continuation);
     ASSERT_NE(cont, nullptr);
     EXPECT_EQ(cont->original_vars, (std::vector< std::string >{ "x", "v0" }));
-    EXPECT_EQ(cont->original_eval.InputArity(), 2u);
+    ASSERT_TRUE(cont->original_eval.has_value());
+    EXPECT_EQ(cont->original_eval->InputArity(), 2u);
 
     CandidateRecord rec;
     rec.expr         = Expr::BitwiseAnd(Expr::Variable(1), Expr::Variable(2));

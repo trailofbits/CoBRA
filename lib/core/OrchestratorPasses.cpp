@@ -292,12 +292,11 @@ namespace cobra {
         }
 
         const auto &ast = std::get< AstPayload >(item.payload);
-        auto expr       = SimplifyPatternSubtrees(CloneExpr(*ast.expr), ctx.bitwidth);
-        auto cls        = ClassifyStructural(*expr);
+        auto cls        = ClassifyStructural(*ast.expr);
 
         WorkItem new_item;
         new_item.payload = AstPayload{
-            .expr           = std::move(expr),
+            .expr           = CloneExpr(*ast.expr),
             .classification = cls,
             .provenance     = ast.provenance,
             .solve_ctx      = CloneSolveContext(ast.solve_ctx),

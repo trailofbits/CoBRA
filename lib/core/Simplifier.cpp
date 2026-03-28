@@ -22,16 +22,7 @@ namespace cobra {
             if (real_vars.empty() || real_vars.size() == all_vars.size()) {
                 return FullWidthCheckEval(eval, kAllCount, reduced_expr, bitwidth);
             }
-            std::vector< uint32_t > idx_map;
-            idx_map.reserve(real_vars.size());
-            for (const auto &rv : real_vars) {
-                for (uint32_t j = 0; j < all_vars.size(); ++j) {
-                    if (all_vars[j] == rv) {
-                        idx_map.push_back(j);
-                        break;
-                    }
-                }
-            }
+            auto idx_map  = BuildVarSupport(all_vars, real_vars);
             auto remapped = CloneExpr(reduced_expr);
             RemapVarIndices(*remapped, idx_map);
             return FullWidthCheckEval(eval, kAllCount, *remapped, bitwidth);

@@ -27,24 +27,6 @@ namespace cobra {
             return std::holds_alternative< RemainderStatePayload >(item.payload);
         }
 
-        ExtractorKind ProjectExtractorKind(RemainderOrigin origin) {
-            switch (origin) {
-                case RemainderOrigin::kDirectBooleanNull:
-                    return ExtractorKind::kBooleanNullDirect;
-                case RemainderOrigin::kProductCore:
-                    return ExtractorKind::kProductAST;
-                case RemainderOrigin::kPolynomialCore:
-                    return ExtractorKind::kPolynomial;
-                case RemainderOrigin::kTemplateCore:
-                    return ExtractorKind::kTemplate;
-                case RemainderOrigin::kSignatureLowering:
-                    return ExtractorKind::kBooleanNullDirect;
-                case RemainderOrigin::kLiftedOuter:
-                    return ExtractorKind::kBooleanNullDirect;
-            }
-            return ExtractorKind::kBooleanNullDirect;
-        }
-
         std::optional< PassResult > TryRecombineAndEmit(
             const RemainderStatePayload &residual, std::unique_ptr< Expr > solved_expr,
             const std::vector< std::string > &solved_expr_vars, const WorkItem &parent,

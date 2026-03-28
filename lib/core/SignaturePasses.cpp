@@ -453,9 +453,22 @@ namespace cobra {
                 SubstituteBindings(*remapped, cont.bindings, cont.original_var_count);
 
             // Full-width verify against original evaluator.
+            if (!cont.original_eval.has_value()) {
+                pr.decision = PassDecision::kBlocked;
+                pr.reason   = ReasonDetail{
+                    .top = {
+                        .code    = { ReasonCategory::kGuardFailed,
+                                     ReasonDomain::kOrchestrator },
+                        .message = "Lifted substitute requires "
+                                   "original evaluator for "
+                                   "full-width verification",
+                    },
+                };
+                return pr;
+            }
             const auto num_vars = static_cast< uint32_t >(cont.original_vars.size());
             auto check =
-                FullWidthCheckEval(cont.original_eval, num_vars, *substituted, ctx.bitwidth);
+                FullWidthCheckEval(*cont.original_eval, num_vars, *substituted, ctx.bitwidth);
             if (!check.passed) {
                 pr.decision = PassDecision::kBlocked;
                 pr.reason   = ReasonDetail{
@@ -491,24 +504,6 @@ namespace cobra {
             pr.decision = PassDecision::kSolvedCandidate;
             pr.next.push_back(std::move(cand_item));
             return pr;
-        }
-
-        ExtractorKind ProjectExtractorKind(RemainderOrigin origin) {
-            switch (origin) {
-                case RemainderOrigin::kDirectBooleanNull:
-                    return ExtractorKind::kBooleanNullDirect;
-                case RemainderOrigin::kProductCore:
-                    return ExtractorKind::kProductAST;
-                case RemainderOrigin::kPolynomialCore:
-                    return ExtractorKind::kPolynomial;
-                case RemainderOrigin::kTemplateCore:
-                    return ExtractorKind::kTemplate;
-                case RemainderOrigin::kSignatureLowering:
-                    return ExtractorKind::kBooleanNullDirect;
-                case RemainderOrigin::kLiftedOuter:
-                    return ExtractorKind::kBooleanNullDirect;
-            }
-            return ExtractorKind::kBooleanNullDirect;
         }
 
         PassResult ResolveResidualRecombine(

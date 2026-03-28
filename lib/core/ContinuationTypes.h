@@ -98,9 +98,8 @@ namespace cobra {
     {
         std::vector< LiftedBinding > bindings;
         std::vector< std::string > outer_vars;
-        std::vector< uint32_t > outer_original_indices;
         uint32_t original_var_count = 0;
-        Evaluator original_eval;
+        std::optional< Evaluator > original_eval;
         std::vector< std::string > original_vars;
         std::vector< uint64_t > source_sig;
     };
