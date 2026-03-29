@@ -125,10 +125,14 @@ namespace cobra {
                 return eval;
             }
 
-            Evaluator base = *this;
+            Evaluator base    = *this;
+            // Buffer must be large enough for the max index in idx_map
+            // (which may exceed source_arity when lifted variables are
+            // remapped through the elimination pipeline).
+            uint32_t buf_size = source_arity;
+            for (uint32_t idx : idx_map) { buf_size = std::max(buf_size, idx + 1); }
             return Evaluator(
-                [base, idx_map, source_arity,
-                 original_vals = std::vector< uint64_t >(source_arity, 0)](
+                [base, idx_map, buf_size, original_vals = std::vector< uint64_t >(buf_size, 0)](
                     const std::vector< uint64_t > &reduced_vals
                 ) mutable -> uint64_t {
                     for (size_t i = 0; i < idx_map.size(); ++i) {

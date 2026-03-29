@@ -441,6 +441,13 @@ namespace cobra {
         const auto &active_eval       = ActiveAstEvaluator(item, ctx);
         const auto original_var_count = static_cast< uint32_t >(vars.size());
 
+        // Guard: skip for very large expression trees to avoid
+        // stack overflow in recursive helpers.
+        constexpr uint32_t kMaxLiftableNodes = 50'000;
+        if (CountNodes(*ast.expr) > kMaxLiftableNodes) {
+            return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
+        }
+
         // Candidate discovery: traverse all non-leaf subtrees,
         // group by structural hash + rendered string equality,
         // track occurrence count, size, and first pre-order index.

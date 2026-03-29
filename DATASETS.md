@@ -1,8 +1,8 @@
 # Dataset Benchmark Report
 
-CoBRA is validated against **73,126 lines** drawn from **33 dataset files** spanning 7 independent sources. Every expression is parsed, simplified, and spot-checked at runtime. The numbers below are enforced by automated test assertions in [`test/verify/test_dataset_benchmarks.cpp`](test/verify/test_dataset_benchmarks.cpp) and verified on every CI run.
+CoBRA is validated against **73,136 lines** drawn from **34 dataset files** spanning 7 independent sources. Every expression is parsed, simplified, and spot-checked at runtime. The numbers below are enforced by automated test assertions in [`test/verify/test_dataset_benchmarks.cpp`](test/verify/test_dataset_benchmarks.cpp) and verified on every CI run. OSES Fast is currently disabled (OOM on deeply nested expressions); its numbers are from the last successful run on master.
 
-**Overall: 69,798 / 70,059 parsed expressions simplified (99.63%), zero failures.**
+**Overall: 72,883 / 73,066 parsed expressions simplified (99.75%).**
 
 ---
 
@@ -66,17 +66,15 @@ Each file contains 1,000 obfuscated linear MBA expressions plus a header comment
 
 | Dataset | Total Lines | Parsed | Simplified | Notes | Rate |
 |---------|:-----------:|:------:|:----------:|-------|:----:|
-| `pldi_linear.txt` | 1,012 | 1,008 | **1,008** | 4 comment headers skipped | **100%** |
-| `pldi_poly.txt` | 1,009 | 1,008 | **952** | 1 comment header skipped | **94.4%** |
-| `pldi_nonpoly.txt` | 1,004 | 1,003 | **992** | 1 comment header skipped | **98.9%** |
-
-- **pldi_nonpoly**: Of the 1,003 parseable expressions, 844 are linear, 55 are polynomial, 92 are mixed expressions (marked unsolvable by the original PLDI/SiMBA tooling) that CoBRA handles via decomposition and lifting, and 12 contain wrapped product identities resolved via full-variable verification and template decomposition fallback.
+| `pldi_linear.txt` | 1,012 | 1,008 | **1,007** | 4 comment headers skipped | **99.9%** |
+| `pldi_poly.txt` | 1,009 | 1,008 | **1,008** | 1 comment header skipped | **100%** |
+| `pldi_nonpoly.txt` | 1,004 | 1,003 | **1,002** | 1 comment header skipped | **99.9%** |
 
 #### Other SiMBA Datasets
 
 | Dataset | Expressions | Parsed | Simplified | Rate |
 |---------|:-----------:|:------:|:----------:|:----:|
-| `test_data.txt` | 10,000 | 10,000 | **9,998** | **99.98%** |
+| `test_data.txt` | 10,000 | 10,000 | **10,000** | **100%** |
 | `blast_dataset1.txt` | 63 | 62 | **62** | **100%** |
 | `blast_dataset2.txt` | 2,501 | 2,500 | **2,500** | **100%** |
 
@@ -87,16 +85,16 @@ Source: [GAMBA](https://github.com/DenuvoSoftwareSolutions/GAMBA)
 | Dataset | Origin | Total Lines | Parsed | Simplified | Unsupported | Rate |
 |---------|--------|:-----------:|:------:|:----------:|:-----------:|:----:|
 | `loki_tiny.txt` | LOKI | 25,025 | 25,000 | **25,000** | 0 | **100%** |
-| `neureduce.txt` | NeuReduce | 10,000 | 10,000 | **9,998** | 2 | **99.98%** |
+| `neureduce.txt` | NeuReduce | 10,000 | 10,000 | **10,000** | 0 | **100%** |
 | `mba_obf_linear.txt` | GAMBA | 1,001 | 1,000 | **1,000** | 0 | **100%** |
 | `mba_obf_nonlinear.txt` | GAMBA | 1,002 | 1,000 | **1,000** | 0 | **100%** |
-| `syntia.txt` | Syntia | 501 | 500 | **498** | 2 | **99.6%** |
-| `qsynth_ea.txt` | QSynth | 501 | 500 | **381** | 119 | **76.2%** |
+| `syntia.txt` | Syntia | 501 | 500 | **500** | 0 | **100%** |
+| `qsynth_ea.txt` | QSynth | 501 | 500 | **388** | 112 | **77.6%** |
 
 - **loki_tiny**: 25 sections covering add, subtract, AND, OR, XOR at depths 1-5. All 25,000 are 2-variable linear MBAs.
 - **mba_obf_nonlinear**: 500 polynomial + 500 linear expressions, all with linear ground-truth targets. All 1,000 pass full-width verification.
-- **syntia**: 498 of 500 expressions simplify via the orchestrator's decomposition and lifting passes. The 2 unsupported fall outside current decomposition coverage.
-- **qsynth_ea**: The most challenging dataset. 381 of 500 expressions simplify. The 119 unsupported expressions break down into 18 verify-failed (arithmetic-under-bitwise expressions where boolean-domain results don't generalize to full width), 6 representation-gap, and 89 search-exhausted (expressions that fall outside current decomposition and lifting coverage).
+- **syntia**: All 500 expressions simplify via the orchestrator's decomposition and lifting passes.
+- **qsynth_ea**: The most challenging dataset. 388 of 500 expressions simplify. The 112 unsupported expressions break down into 14 verify-failed (arithmetic-under-bitwise expressions where boolean-domain results don't generalize to full width), 7 representation-gap, and 77 search-exhausted (expressions that fall outside current decomposition and lifting coverage).
 
 ### OSES Dataset
 
@@ -108,7 +106,15 @@ Source: [oracle-synthesis-meets-equality-saturation](https://github.com/fvrmatte
 | `oses_slow.txt` | 7 | 7 | **6** | 1 | **85.7%** |
 | **OSES Total** | **480** | **465** | **396** | **69** | **85.2%** |
 
-- **oses**: 479 MBA expressions extracted from the OSES `synth.py` evaluation script (plus 1 header comment). Expressions span linear, nonlinear/product, and constant categories with 1-14 variables. The dataset is split into fast (472 expressions under 50K characters) and slow (7 mega-expressions over 50K characters); only the fast subset runs in CI. The unsupported expressions include arithmetic-under-bitwise patterns that fail full-width verification and mixed products that fall outside current decomposition and lifting coverage.
+- **oses**: 479 MBA expressions extracted from the OSES `synth.py` evaluation script (plus 1 header comment). Expressions span linear, nonlinear/product, and constant categories with 1-14 variables. The dataset is split into fast (472 expressions under 50K characters) and slow (7 mega-expressions over 50K characters). **Both subsets are currently disabled** — the fast subset OOMs on deeply nested expressions that exceed memory limits during recursive evaluation, and the slow subset requires minutes per expression. Numbers shown are from the last successful run on master.
+
+### ObfuscatorX Dataset
+
+| Dataset | Total Lines | Parsed | Simplified | Unsupported | Rate |
+|---------|:-----------:|:------:|:----------:|:-----------:|:----:|
+| `obfuscatorx.txt` | 8 | 7 | **7** | 0 | **100%** |
+
+- **obfuscatorx**: 7 expressions lifted from ObfuscatorX. All simplify via the standard pipeline.
 
 ---
 
@@ -116,11 +122,11 @@ Source: [oracle-synthesis-meets-equality-saturation](https://github.com/fvrmatte
 
 | Metric | Count |
 |--------|------:|
-| Total dataset lines | 73,126 |
-| Comment/header lines skipped | 3,067 |
-| **Parsed expressions** | **70,059** |
-| **Simplified** | **69,798** |
-| Unsupported (by design) | 261 |
+| Total dataset lines | 73,136 |
+| Comment/header lines skipped | 70 |
+| **Parsed expressions** | **73,066** |
+| **Simplified** | **72,883** |
+| Unsupported (by design) | 183 |
 | Errors / failures | **0** |
 
 | MBA Class | Expressions | Simplified | Rate |
