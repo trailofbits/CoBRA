@@ -66,17 +66,17 @@ namespace cobra {
         bool operator<(const MonomialKey &o) const { return exponents < o.exponents; }
     };
 
-    struct MonomialKeyHash
-    {
-        size_t operator()(const MonomialKey &k) const {
-            // FNV-1a over the 20-byte exponents array
-            size_t hash = 14695981039346656037ULL;
-            for (uint8_t b : k.exponents) {
-                hash ^= static_cast< size_t >(b);
-                hash *= 1099511628211ULL;
-            }
-            return hash;
-        }
-    };
-
 } // namespace cobra
+
+template<>
+struct std::hash< cobra::MonomialKey >
+{
+    size_t operator()(const cobra::MonomialKey &k) const {
+        size_t hash = 14695981039346656037ULL;
+        for (uint8_t b : k.exponents) {
+            hash ^= static_cast< size_t >(b);
+            hash *= 1099511628211ULL;
+        }
+        return hash;
+    }
+};

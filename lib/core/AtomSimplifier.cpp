@@ -18,6 +18,13 @@ namespace cobra {
 
         bool IsConst(const Expr &e) { return e.kind == Expr::Kind::kConstant; }
 
+        std::unique_ptr< Expr > NegateBitwiseChild(std::unique_ptr< Expr > child) {
+            if (child->kind == Expr::Kind::kNot && !child->children.empty()) {
+                return std::move(child->children[0]);
+            }
+            return Expr::BitwiseNot(std::move(child));
+        }
+
         std::unique_ptr< Expr > TryFoldBinary(
             Expr::Kind kind, std::unique_ptr< Expr > lhs, std::unique_ptr< Expr > rhs,
             uint32_t bitwidth
@@ -100,24 +107,19 @@ namespace cobra {
         // De Morgan: ~(~A & ~B) -> A | B
         if (atom->kind == Expr::Kind::kNot) {
             auto &inner = atom->children[0];
-            if (inner->kind == Expr::Kind::kAnd && inner->children.size() == 2
-                && inner->children[0]->kind == Expr::Kind::kNot
-                && inner->children[1]->kind == Expr::Kind::kNot)
+            if ((inner->kind == Expr::Kind::kAnd || inner->kind == Expr::Kind::kOr)
+                && inner->children.size() == 2
+                && (inner->children[0]->kind == Expr::Kind::kNot
+                    || inner->children[1]->kind == Expr::Kind::kNot))
             {
-                return Expr::BitwiseOr(
-                    std::move(inner->children[0]->children[0]),
-                    std::move(inner->children[1]->children[0])
-                );
-            }
-            // De Morgan: ~(~A | ~B) -> A & B
-            if (inner->kind == Expr::Kind::kOr && inner->children.size() == 2
-                && inner->children[0]->kind == Expr::Kind::kNot
-                && inner->children[1]->kind == Expr::Kind::kNot)
-            {
-                return Expr::BitwiseAnd(
-                    std::move(inner->children[0]->children[0]),
-                    std::move(inner->children[1]->children[0])
-                );
+                auto lhs = NegateBitwiseChild(std::move(inner->children[0]));
+                auto rhs = NegateBitwiseChild(std::move(inner->children[1]));
+                if (inner->kind == Expr::Kind::kAnd) {
+                    return SimplifyAtom(
+                        Expr::BitwiseOr(std::move(lhs), std::move(rhs)), bitwidth
+                    );
+                }
+                return SimplifyAtom(Expr::BitwiseAnd(std::move(lhs), std::move(rhs)), bitwidth);
             }
         }
 

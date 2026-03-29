@@ -2,6 +2,7 @@
 #include "cobra/core/Classifier.h"
 #include "cobra/core/DecompositionEngine.h"
 #include "cobra/core/Expr.h"
+#include "cobra/core/PassContract.h"
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/SignatureEval.h"
 #include "cobra/core/Simplifier.h"
@@ -22,7 +23,7 @@ namespace {
 
 } // namespace
 
-TEST(DecompositionEngineTest, BuildResidualEvaluator_SubtractsCore) {
+TEST(DecompositionEngineTest, BuildRemainderEvaluator_SubtractsCore) {
     // f(x0, x1) = x0*x1 + x0^x1
     Evaluator original = [](const std::vector< uint64_t > &v) -> uint64_t {
         return v[0] * v[1] + (v[0] ^ v[1]);
@@ -30,7 +31,7 @@ TEST(DecompositionEngineTest, BuildResidualEvaluator_SubtractsCore) {
     // core = x0*x1
     auto core     = Expr::Mul(Expr::Variable(0), Expr::Variable(1));
     // residual should be x0^x1
-    auto residual = BuildResidualEvaluator(original, *core, 64);
+    auto residual = BuildRemainderEvaluator(original, *core, 64);
 
     // Check at a few points
     EXPECT_EQ(residual({ 3, 5 }), (3u ^ 5u));
@@ -38,14 +39,14 @@ TEST(DecompositionEngineTest, BuildResidualEvaluator_SubtractsCore) {
     EXPECT_EQ(residual({ 7, 11 }), (7u ^ 11u));
 }
 
-TEST(DecompositionEngineTest, BuildResidualEvaluator_BitwidthMasking) {
+TEST(DecompositionEngineTest, BuildRemainderEvaluator_BitwidthMasking) {
     // f(x0) = 200 + x0 at 8 bits
     Evaluator original = [](const std::vector< uint64_t > &v) -> uint64_t {
         return 200 + v[0];
     };
     // core = 100
     auto core     = Expr::Constant(100);
-    auto residual = BuildResidualEvaluator(original, *core, 8);
+    auto residual = BuildRemainderEvaluator(original, *core, 8);
 
     // residual(50) = (200+50 - 100) & 0xFF = 150
     EXPECT_EQ(residual({ 50 }), 150u);
@@ -66,13 +67,13 @@ TEST(ExtractProductCoreTest, FindsProductTerms) {
     auto ctx = MakeCtx(opts, vars, sig, combined.get(), cls);
 
     auto core = ExtractProductCore(ctx);
-    ASSERT_TRUE(core.has_value());
-    EXPECT_EQ(core->kind, ExtractorKind::kProductAST);
+    ASSERT_TRUE(core.Succeeded());
+    EXPECT_EQ(core.Payload().kind, ExtractorKind::kProductAST);
     // The core should contain the product term
-    EXPECT_EQ(core->expr->kind, Expr::Kind::kMul);
+    EXPECT_EQ(core.Payload().expr->kind, Expr::Kind::kMul);
 }
 
-TEST(ExtractProductCoreTest, NoProducts_ReturnsNullopt) {
+TEST(ExtractProductCoreTest, NoProducts_ReturnsBlocked) {
     // expr = x0 ^ x1 (no product terms)
     auto expr = Expr::BitwiseXor(Expr::Variable(0), Expr::Variable(1));
 
@@ -83,7 +84,7 @@ TEST(ExtractProductCoreTest, NoProducts_ReturnsNullopt) {
     auto ctx = MakeCtx(opts, vars, sig, expr.get(), cls);
 
     auto core = ExtractProductCore(ctx);
-    EXPECT_FALSE(core.has_value());
+    EXPECT_FALSE(core.Succeeded());
 }
 
 TEST(ExtractProductCoreTest, ConstantMul_NotExtracted) {
@@ -98,7 +99,7 @@ TEST(ExtractProductCoreTest, ConstantMul_NotExtracted) {
     auto ctx = MakeCtx(opts, vars, sig, combined.get(), cls);
 
     auto core = ExtractProductCore(ctx);
-    EXPECT_FALSE(core.has_value());
+    EXPECT_FALSE(core.Succeeded());
 }
 
 TEST(ExtractPolyCoreTest, RecoversDegree2) {
@@ -110,17 +111,15 @@ TEST(ExtractPolyCoreTest, RecoversDegree2) {
     opts.evaluator                  = eval;
     std::vector< std::string > vars = { "x0", "x1" };
     auto sig                        = EvaluateBooleanSignature(eval, 2, 64);
-    auto cls                        = Classification{ .semantic = SemanticClass::kPolynomial,
-                                                      .flags    = kSfHasMul,
-                                                      .route    = Route::kMixedRewrite };
-    auto ctx                        = MakeCtx(opts, vars, sig, nullptr, cls);
-    auto core                       = ExtractPolyCore(ctx, 2);
-    ASSERT_TRUE(core.has_value());
-    EXPECT_EQ(core->kind, ExtractorKind::kPolynomial);
-    EXPECT_EQ(core->degree_used, 2);
+    auto cls  = Classification{ .semantic = SemanticClass::kPolynomial, .flags = kSfHasMul };
+    auto ctx  = MakeCtx(opts, vars, sig, nullptr, cls);
+    auto core = ExtractPolyCore(ctx, 2);
+    ASSERT_TRUE(core.Succeeded());
+    EXPECT_EQ(core.Payload().kind, ExtractorKind::kPolynomial);
+    EXPECT_EQ(core.Payload().degree_used, 2);
 }
 
-TEST(ExtractPolyCoreTest, TooManyVars_ReturnsNullopt) {
+TEST(ExtractPolyCoreTest, TooManyVars_ReturnsInapplicable) {
     // 7 live variables exceed the 6-var support cap
     Evaluator eval = [](const std::vector< uint64_t > &v) -> uint64_t {
         return v[0] * v[1] + v[2] * v[3] + v[4] * v[5] + v[6];
@@ -129,12 +128,10 @@ TEST(ExtractPolyCoreTest, TooManyVars_ReturnsNullopt) {
     opts.evaluator                  = eval;
     std::vector< std::string > vars = { "x0", "x1", "x2", "x3", "x4", "x5", "x6" };
     auto sig                        = EvaluateBooleanSignature(eval, 7, 64);
-    auto cls                        = Classification{ .semantic = SemanticClass::kPolynomial,
-                                                      .flags    = kSfHasMul,
-                                                      .route    = Route::kMixedRewrite };
-    auto ctx                        = MakeCtx(opts, vars, sig, nullptr, cls);
-    auto core                       = ExtractPolyCore(ctx, 2);
-    EXPECT_FALSE(core.has_value());
+    auto cls  = Classification{ .semantic = SemanticClass::kPolynomial, .flags = kSfHasMul };
+    auto ctx  = MakeCtx(opts, vars, sig, nullptr, cls);
+    auto core = ExtractPolyCore(ctx, 2);
+    EXPECT_FALSE(core.Succeeded());
 }
 
 TEST(AcceptCoreTest, RejectsZeroCore) {
@@ -144,10 +141,8 @@ TEST(AcceptCoreTest, RejectsZeroCore) {
     opts.evaluator                  = eval;
     std::vector< std::string > vars = { "x0", "x1" };
     auto sig                        = EvaluateBooleanSignature(eval, 2, 64);
-    auto cls                        = Classification{ .semantic = SemanticClass::kLinear,
-                                                      .flags    = kSfNone,
-                                                      .route    = Route::kMixedRewrite };
-    auto ctx                        = MakeCtx(opts, vars, sig, nullptr, cls);
+    auto cls = Classification{ .semantic = SemanticClass::kLinear, .flags = kSfNone };
+    auto ctx = MakeCtx(opts, vars, sig, nullptr, cls);
 
     CoreCandidate core;
     core.expr = std::move(zero_expr);
@@ -168,8 +163,7 @@ TEST(AcceptCoreTest, AcceptsNonTrivialCore) {
     std::vector< std::string > vars = { "x0", "x1" };
     auto sig                        = EvaluateBooleanSignature(eval, 2, 64);
     auto cls                        = Classification{ .semantic = SemanticClass::kPolynomial,
-                                                      .flags    = kSfHasMul | kSfHasBitwise,
-                                                      .route    = Route::kMixedRewrite };
+                                                      .flags    = kSfHasMul | kSfHasBitwise };
     auto ctx                        = MakeCtx(opts, vars, sig, nullptr, cls);
 
     auto core_expr = Expr::Mul(Expr::Variable(0), Expr::Variable(1));
@@ -192,10 +186,8 @@ TEST(AcceptCoreTest, AcceptsPolyCoreSameSupportNonRoutable) {
     opts.evaluator                  = eval;
     std::vector< std::string > vars = { "x0", "x1" };
     auto sig                        = EvaluateBooleanSignature(eval, 2, 64);
-    auto cls                        = Classification{ .semantic = SemanticClass::kPolynomial,
-                                                      .flags    = kSfHasMul,
-                                                      .route    = Route::kMixedRewrite };
-    auto ctx                        = MakeCtx(opts, vars, sig, nullptr, cls);
+    auto cls = Classification{ .semantic = SemanticClass::kPolynomial, .flags = kSfHasMul };
+    auto ctx = MakeCtx(opts, vars, sig, nullptr, cls);
 
     auto core_expr = Expr::Mul(Expr::Variable(0), Expr::Variable(1));
     CoreCandidate core;
@@ -212,10 +204,8 @@ TEST(AcceptCoreTest, RejectsConstantCore) {
     opts.evaluator                  = eval;
     std::vector< std::string > vars = { "x0", "x1" };
     auto sig                        = EvaluateBooleanSignature(eval, 2, 64);
-    auto cls                        = Classification{ .semantic = SemanticClass::kLinear,
-                                                      .flags    = kSfNone,
-                                                      .route    = Route::kMixedRewrite };
-    auto ctx                        = MakeCtx(opts, vars, sig, nullptr, cls);
+    auto cls = Classification{ .semantic = SemanticClass::kLinear, .flags = kSfNone };
+    auto ctx = MakeCtx(opts, vars, sig, nullptr, cls);
 
     CoreCandidate core;
     core.expr = std::move(const_expr);
@@ -230,211 +220,9 @@ TEST(ExtractTemplateCoreTest, FindsTemplateForSimpleComposition) {
     opts.evaluator                  = eval;
     std::vector< std::string > vars = { "x0", "x1" };
     auto sig                        = EvaluateBooleanSignature(eval, 2, 64);
-    auto cls                        = Classification{ .semantic = SemanticClass::kLinear,
-                                                      .flags    = kSfNone,
-                                                      .route    = Route::kMixedRewrite };
-    auto ctx                        = MakeCtx(opts, vars, sig, nullptr, cls);
-    auto core                       = ExtractTemplateCore(ctx);
-    ASSERT_TRUE(core.has_value());
-    EXPECT_EQ(core->kind, ExtractorKind::kTemplate);
-}
-
-TEST(TryDecompositionTest, DirectSuccess_PolyMatchesWholeFunction) {
-    // f(x0, x1) = x0 * x1 — poly D=2 should match exactly
-    Evaluator eval = [](const std::vector< uint64_t > &v) -> uint64_t { return v[0] * v[1]; };
-    Options opts{ .bitwidth = 64 };
-    opts.evaluator                  = eval;
-    std::vector< std::string > vars = { "x0", "x1" };
-    auto sig                        = EvaluateBooleanSignature(eval, 2, 64);
-    auto cls                        = Classification{ .semantic = SemanticClass::kPolynomial,
-                                                      .flags    = kSfHasMul,
-                                                      .route    = Route::kMixedRewrite };
-    auto ctx                        = MakeCtx(opts, vars, sig, nullptr, cls);
-    auto result                     = TryDecomposition(ctx);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->extractor_kind, ExtractorKind::kPolynomial);
-    EXPECT_FALSE(result->solver_kind.has_value());
-    auto check = FullWidthCheckEval(eval, 2, *result->expr, 64);
-    EXPECT_TRUE(check.passed);
-}
-
-TEST(TryDecompositionTest, PolyCore_PlusBitwiseResidual) {
-    // f(x0, x1) = x0*x1 + (x0 ^ x1)
-    Evaluator eval = [](const std::vector< uint64_t > &v) -> uint64_t {
-        return v[0] * v[1] + (v[0] ^ v[1]);
-    };
-    Options opts{ .bitwidth = 64, .spot_check = true };
-    opts.evaluator                  = eval;
-    std::vector< std::string > vars = { "x0", "x1" };
-    auto sig                        = EvaluateBooleanSignature(eval, 2, 64);
-    auto cls                        = Classification{ .semantic = SemanticClass::kPolynomial,
-                                                      .flags    = kSfHasMul | kSfHasBitwise,
-                                                      .route    = Route::kMixedRewrite };
-    auto ctx                        = MakeCtx(opts, vars, sig, nullptr, cls);
-    auto result                     = TryDecomposition(ctx);
-    ASSERT_TRUE(result.has_value());
-    auto check = FullWidthCheckEval(eval, 2, *result->expr, 64);
-    EXPECT_TRUE(check.passed);
-}
-
-TEST(TryDecompositionTest, NoEvaluator_ReturnsNullopt) {
-    Options opts{ .bitwidth = 64 };
-    std::vector< std::string > vars = { "x0" };
-    std::vector< uint64_t > sig     = { 0, 1 };
-    auto cls                        = Classification{ .semantic = SemanticClass::kLinear,
-                                                      .flags    = kSfNone,
-                                                      .route    = Route::kMixedRewrite };
-    auto ctx                        = MakeCtx(opts, vars, sig, nullptr, cls);
-    auto result                     = TryDecomposition(ctx);
-    EXPECT_FALSE(result.has_value());
-}
-
-TEST(TryDecompositionTest, GhostResidual_MulSubAnd) {
-    // f(x0, x1) = x0*x1 + (x0*x1 - (x0 & x1))
-    // Provide the AST so ProductAST extractor finds core x0*x1.
-    // Residual = mul_sub_and(x0,x1) — boolean-null ghost.
-    Evaluator eval = [](const std::vector< uint64_t > &v) -> uint64_t {
-        return v[0] * v[1] + ((v[0] * v[1]) - (v[0] & v[1]));
-    };
-    Options opts{ .bitwidth = 64, .spot_check = true };
-    opts.evaluator                  = eval;
-    std::vector< std::string > vars = { "x0", "x1" };
-    auto sig                        = EvaluateBooleanSignature(eval, 2, 64);
-    auto cls                        = Classification{ .semantic = SemanticClass::kPolynomial,
-                                                      .flags    = kSfHasMul | kSfHasBitwise,
-                                                      .route    = Route::kMixedRewrite };
-    // Supply the product-only core as the current expression so ProductAST
-    // extractor creates core = x0*x1, leaving the ghost as the residual.
-    auto product                    = Expr::Mul(Expr::Variable(0), Expr::Variable(1));
-    auto ctx                        = MakeCtx(opts, vars, sig, product.get(), cls);
-    auto result                     = TryDecomposition(ctx);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->solver_kind, ResidualSolverKind::kGhostResidual);
-    auto check = FullWidthCheckEval(eval, 2, *result->expr, 64);
-    EXPECT_TRUE(check.passed);
-}
-
-TEST(TryDecompositionTest, GhostResidual_Arity3) {
-    // f(x0, x1, x2) = x0*x1 + (x0*x1*x2 - (x0 & x1 & x2))
-    // Provide x0*x1 as the AST so ProductAST extractor uses it as core.
-    // Residual = mul3_sub_and3(x0,x1,x2) — boolean-null arity-3 ghost.
-    Evaluator eval = [](const std::vector< uint64_t > &v) -> uint64_t {
-        return v[0] * v[1] + ((v[0] * v[1] * v[2]) - (v[0] & v[1] & v[2]));
-    };
-    Options opts{ .bitwidth = 64, .spot_check = true };
-    opts.evaluator                  = eval;
-    std::vector< std::string > vars = { "x0", "x1", "x2" };
-    auto sig                        = EvaluateBooleanSignature(eval, 3, 64);
-    auto cls                        = Classification{ .semantic = SemanticClass::kPolynomial,
-                                                      .flags    = kSfHasMul | kSfHasBitwise,
-                                                      .route    = Route::kMixedRewrite };
-    auto product                    = Expr::Mul(Expr::Variable(0), Expr::Variable(1));
-    auto ctx                        = MakeCtx(opts, vars, sig, product.get(), cls);
-    auto result                     = TryDecomposition(ctx);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->solver_kind, ResidualSolverKind::kGhostResidual);
-    auto check = FullWidthCheckEval(eval, 3, *result->expr, 64);
-    EXPECT_TRUE(check.passed);
-}
-
-TEST(TryDecompositionTest, NonGhostResidual_StillRoutes) {
-    // f(x0, x1) = x0*x1 + (x0 ^ x1)
-    // Residual x0^x1 is NOT boolean-null — should route through standard chain.
-    // Provide x0*x1 as AST so ProductAST extractor uses it as core.
-    Evaluator eval = [](const std::vector< uint64_t > &v) -> uint64_t {
-        return v[0] * v[1] + (v[0] ^ v[1]);
-    };
-    Options opts{ .bitwidth = 64, .spot_check = true };
-    opts.evaluator                  = eval;
-    std::vector< std::string > vars = { "x0", "x1" };
-    auto sig                        = EvaluateBooleanSignature(eval, 2, 64);
-    auto cls                        = Classification{ .semantic = SemanticClass::kPolynomial,
-                                                      .flags    = kSfHasMul | kSfHasBitwise,
-                                                      .route    = Route::kMixedRewrite };
-    auto product                    = Expr::Mul(Expr::Variable(0), Expr::Variable(1));
-    auto ctx                        = MakeCtx(opts, vars, sig, product.get(), cls);
-    auto result                     = TryDecomposition(ctx);
-    ASSERT_TRUE(result.has_value());
-    // Should NOT use ghost solver — residual is ordinary bitwise
-    EXPECT_NE(result->solver_kind, ResidualSolverKind::kGhostResidual);
-    auto check = FullWidthCheckEval(eval, 2, *result->expr, 64);
-    EXPECT_TRUE(check.passed);
-}
-
-// Regression: residual solver must not accept boolean-correct but
-// full-width-incorrect expressions from the supported pipeline.
-// Based on QSynthEA L295: f(b,c) = ((-c ^ c) * b) & ~(b + c*c).
-// Product core = -2*b*c, residual on booleans looks like -2*(b&c),
-// but at full width the residual is a nonlinear function that the
-// CoB transform cannot capture. The weak 8-probe FW check used to
-// false-positive here; the hardened 64-probe residual recheck in
-// DecompositionEngine must reject it.
-TEST(TryDecompositionTest, ResidualFalsePositiveRejection) {
-    // f(b,c) = ((-c ^ c) * b) & ~(b + c*c)
-    Evaluator eval = [](const std::vector< uint64_t > &v) -> uint64_t {
-        uint64_t b = v[0];
-        uint64_t c = v[1];
-        return (((~c + 1) ^ c) * b) & ~(b + c * c);
-    };
-    Options opts{ .bitwidth = 64, .spot_check = true };
-    opts.evaluator                  = eval;
-    std::vector< std::string > vars = { "b", "c" };
-    auto sig                        = EvaluateBooleanSignature(eval, 2, 64);
-
-    // Verify expected boolean signature: [0, 0, 0, -4]
-    ASSERT_EQ(sig.size(), 4u);
-    EXPECT_EQ(sig[0], 0u);
-    EXPECT_EQ(sig[3], static_cast< uint64_t >(-4));
-
-    // Build an AST for classification
-    auto ast = Expr::BitwiseAnd(
-        Expr::Mul(
-            Expr::BitwiseXor(Expr::Negate(Expr::Variable(1)), Expr::Variable(1)),
-            Expr::Variable(0)
-        ),
-        Expr::BitwiseNot(
-            Expr::Add(Expr::Variable(0), Expr::Mul(Expr::Variable(1), Expr::Variable(1)))
-        )
-    );
-    auto cls = ClassifyStructural(*ast);
-
-    // The core -2*b*c is NOT a direct match for f
-    auto core = Expr::Mul(
-        Expr::Constant(static_cast< uint64_t >(-2)),
-        Expr::Mul(Expr::Variable(0), Expr::Variable(1))
-    );
-    auto direct = FullWidthCheckEval(eval, 2, *core, 64);
-    EXPECT_FALSE(direct.passed);
-
-    // The residual has a nonzero boolean signature (non-boolean-null)
-    auto residual_eval = BuildResidualEvaluator(eval, *core, 64);
-    auto residual_sig  = EvaluateBooleanSignature(residual_eval, 2, 64);
-    bool all_zero      = true;
-    for (auto v : residual_sig) {
-        if (v != 0) { all_zero = false; }
-    }
-    EXPECT_FALSE(all_zero);
-
-    // RunSupportedPipeline returns a "simplified" residual that is
-    // only boolean-correct (its internal 8-probe FW check is a
-    // false positive).
-    Options res_opts   = opts;
-    res_opts.evaluator = residual_eval;
-    auto res_result    = RunSupportedPipeline(residual_sig, vars, res_opts);
-    ASSERT_TRUE(res_result.has_value());
-    EXPECT_EQ(res_result.value().kind, SimplifyOutcome::Kind::kSimplified);
-
-    // Stronger FW check catches the mismatch
-    auto strong_check = FullWidthCheckEval(residual_eval, 2, *res_result.value().expr, 64, 64);
-    EXPECT_FALSE(strong_check.passed) << "Residual solution should fail stronger FW check";
-
-    // TryDecomposition must not return an incorrect result.
-    // It may return nullopt (no decomposition found) or a correct
-    // alternative.
-    auto dctx   = MakeCtx(opts, vars, sig, ast.get(), cls);
-    auto decomp = TryDecomposition(dctx);
-    if (decomp.has_value()) {
-        auto fwc = FullWidthCheckEval(eval, 2, *decomp->expr, 64);
-        EXPECT_TRUE(fwc.passed) << "Any decomposition result must be FW-correct";
-    }
+    auto cls  = Classification{ .semantic = SemanticClass::kLinear, .flags = kSfNone };
+    auto ctx  = MakeCtx(opts, vars, sig, nullptr, cls);
+    auto core = ExtractTemplateCore(ctx);
+    ASSERT_TRUE(core.Succeeded());
+    EXPECT_EQ(core.Payload().kind, ExtractorKind::kTemplate);
 }

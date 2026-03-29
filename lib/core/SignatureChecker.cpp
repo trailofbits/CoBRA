@@ -1,12 +1,12 @@
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/BitWidth.h"
 #include "cobra/core/Expr.h"
+#include "cobra/core/Profile.h"
 #include "cobra/core/SignatureEval.h"
 #include "cobra/core/Trace.h"
 
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <utility>
 #include <vector>
 
@@ -49,6 +49,39 @@ namespace cobra {
             return vals;
         }
 
+        template< typename ProbeFn >
+        bool ForEachFullWidthProbe(
+            uint32_t num_vars, uint32_t bitwidth, uint32_t num_samples,
+            std::vector< uint64_t > &inputs, ProbeFn &&probe_fn
+        ) {
+            const uint64_t kMask = Bitmask(bitwidth);
+            auto adv             = BuildAdversarialValues(bitwidth);
+            size_t probe_index   = 0;
+
+            for (const auto &val : adv) {
+                for (uint32_t v = 0; v < num_vars; ++v) { inputs[v] = val; }
+                if (!probe_fn(probe_index++)) { return false; }
+            }
+
+            for (uint32_t v = 0; v < num_vars; ++v) {
+                for (const auto &val : adv) {
+                    for (uint32_t u = 0; u < num_vars; ++u) { inputs[u] = (u == v) ? val : 0; }
+                    if (!probe_fn(probe_index++)) { return false; }
+                }
+            }
+
+            uint64_t rng_state = (static_cast< uint64_t >(bitwidth) * 2654435761ULL)
+                + (static_cast< uint64_t >(num_vars) * 40503ULL);
+            for (uint32_t s = 0; s < num_samples; ++s) {
+                for (uint32_t v = 0; v < num_vars; ++v) {
+                    inputs[v] = Splitmix64(rng_state) & kMask;
+                }
+                if (!probe_fn(probe_index++)) { return false; }
+            }
+
+            return true;
+        }
+
     } // namespace
 
     CheckResult FullWidthCheck(
@@ -59,21 +92,31 @@ namespace cobra {
             "Verifier", "FullWidthCheck: vars={} bitwidth={} samples={}", original_num_vars,
             bitwidth, num_samples
         );
-        const uint64_t kMask = Bitmask(bitwidth);
+        const uint64_t kMask       = Bitmask(bitwidth);
+        const auto original_eval   = CompileExpr(original, bitwidth);
+        const auto simplified_eval = CompileExpr(simplified, bitwidth);
 
         const uint32_t kSimpNumVars =
             var_map.empty() ? original_num_vars : static_cast< uint32_t >(var_map.size());
 
+        if (original_eval.arity > original_num_vars || simplified_eval.arity > kSimpNumVars) {
+            auto result = CheckResult{ .passed = false, .failing_input = {} };
+            COBRA_TRACE("Verifier", "FullWidthCheck: passed={}", result.passed);
+            return result;
+        }
+
         std::vector< uint64_t > orig_inputs(original_num_vars);
         std::vector< uint64_t > simp_inputs(kSimpNumVars);
+        std::vector< uint64_t > original_stack(original_eval.stack_size);
+        std::vector< uint64_t > simplified_stack(simplified_eval.stack_size);
 
         auto check_one = [&]() -> bool {
             for (uint32_t v = 0; v < kSimpNumVars; ++v) {
                 const uint32_t kOrigIdx = var_map.empty() ? v : var_map[v];
                 simp_inputs[v]          = orig_inputs[kOrigIdx];
             }
-            return EvalExpr(original, orig_inputs, bitwidth)
-                == EvalExpr(simplified, simp_inputs, bitwidth);
+            return EvalCompiledExpr(original_eval, orig_inputs, original_stack)
+                == EvalCompiledExpr(simplified_eval, simp_inputs, simplified_stack);
         };
 
         auto adv = BuildAdversarialValues(bitwidth);
@@ -126,61 +169,56 @@ namespace cobra {
     }
 
     CheckResult FullWidthCheckEval(
-        const std::function< uint64_t(const std::vector< uint64_t > &) > &eval_original,
-        uint32_t num_vars, const Expr &simplified, uint32_t bitwidth, uint32_t num_samples
+        const Evaluator &eval_original, uint32_t num_vars, const Expr &simplified,
+        uint32_t bitwidth, uint32_t num_samples
     ) {
+        COBRA_ZONE_N("FullWidthCheckEval");
         COBRA_TRACE(
             "Verifier", "FullWidthCheckEval: vars={} bitwidth={} samples={}", num_vars,
             bitwidth, num_samples
         );
-        const uint64_t kMask = Bitmask(bitwidth);
+        const uint64_t kMask       = Bitmask(bitwidth);
+        const auto simplified_eval = [&]() {
+            COBRA_ZONE_N("FullWidthCheckEval.compile");
+            return CompileExpr(simplified, bitwidth);
+        }();
+
+        if ((eval_original.HasCompiledExpr() && eval_original.InputArity() > num_vars)
+            || simplified_eval.arity > num_vars)
+        {
+            auto result = CheckResult{ .passed = false, .failing_input = {} };
+            COBRA_TRACE("Verifier", "FullWidthCheckEval: passed={}", result.passed);
+            return result;
+        }
 
         std::vector< uint64_t > inputs(num_vars);
+        std::vector< uint64_t > simplified_stack(simplified_eval.stack_size);
+        EvaluatorWorkspace original_workspace;
 
-        auto check_one = [&]() -> bool {
-            return (eval_original(inputs) & kMask) == EvalExpr(simplified, inputs, bitwidth);
-        };
-
-        auto adv = BuildAdversarialValues(bitwidth);
-
-        // Phase 1a: broadcast each adversarial value to all variables.
-        for (const auto &val : adv) {
-            for (uint32_t v = 0; v < num_vars; ++v) { inputs[v] = val; }
-            if (!check_one()) {
-                auto result =
-                    CheckResult{ .passed = false, .failing_input = std::move(inputs) };
-                COBRA_TRACE("Verifier", "FullWidthCheckEval: passed={}", result.passed);
-                return result;
-            }
-        }
-
-        // Phase 1b: per-variable probes — set one variable to an
-        // adversarial value while others stay 0.
-        for (uint32_t v = 0; v < num_vars; ++v) {
-            for (const auto &val : adv) {
-                for (uint32_t u = 0; u < num_vars; ++u) { inputs[u] = (u == v) ? val : 0; }
-                if (!check_one()) {
-                    auto result =
-                        CheckResult{ .passed = false, .failing_input = std::move(inputs) };
-                    COBRA_TRACE("Verifier", "FullWidthCheckEval: passed={}", result.passed);
-                    return result;
+        std::vector< uint64_t > failing_input;
+        const bool passed = [&]() {
+            return ForEachFullWidthProbe(
+                num_vars, bitwidth, num_samples, inputs, [&](size_t) -> bool {
+                    const uint64_t original_val = eval_original.HasCompiledExpr()
+                        ? (eval_original.EvaluateWithWorkspace(inputs, original_workspace)
+                           & kMask)
+                        : (eval_original(inputs) & kMask);
+                    const uint64_t simplified_val =
+                        EvalCompiledExpr(simplified_eval, inputs, simplified_stack);
+                    if (original_val != simplified_val) {
+                        failing_input = inputs;
+                        return false;
+                    }
+                    return true;
                 }
-            }
-        }
+            );
+        }();
 
-        // Phase 2: random full-width probes.
-        uint64_t rng_state = (static_cast< uint64_t >(bitwidth) * 2654435761ULL)
-            + (static_cast< uint64_t >(num_vars) * 40503ULL);
-        for (uint32_t s = 0; s < num_samples; ++s) {
-            for (uint32_t v = 0; v < num_vars; ++v) {
-                inputs[v] = Splitmix64(rng_state) & kMask;
-            }
-            if (!check_one()) {
-                auto result =
-                    CheckResult{ .passed = false, .failing_input = std::move(inputs) };
-                COBRA_TRACE("Verifier", "FullWidthCheckEval: passed={}", result.passed);
-                return result;
-            }
+        if (!passed) {
+            auto result =
+                CheckResult{ .passed = false, .failing_input = std::move(failing_input) };
+            COBRA_TRACE("Verifier", "FullWidthCheckEval: passed={}", result.passed);
+            return result;
         }
         auto result = CheckResult{ .passed = true, .failing_input = {} };
         COBRA_TRACE("Verifier", "FullWidthCheckEval: passed={}", result.passed);
@@ -233,6 +271,7 @@ namespace cobra {
         const std::vector< uint64_t > &original_sig, const Expr &simplified, uint32_t num_vars,
         uint32_t bitwidth
     ) {
+        COBRA_ZONE_N("SignatureCheck");
         COBRA_TRACE("Verifier", "SignatureCheck: vars={} bitwidth={}", num_vars, bitwidth);
         // Bottom-up evaluation: walk the tree once to get all outputs.
         auto computed        = EvaluateBooleanSignature(simplified, num_vars, bitwidth);

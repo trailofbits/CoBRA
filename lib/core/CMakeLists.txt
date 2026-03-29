@@ -2,6 +2,7 @@ add_library(cobra-core STATIC)
 set_target_properties(cobra-core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_sources(cobra-core PRIVATE
+    CompiledExpr.cpp
     Expr.cpp
     SignatureVector.cpp
     AuxVarEliminator.cpp
@@ -33,8 +34,6 @@ target_sources(cobra-core PRIVATE
     SignatureEval.cpp
     MixedProductRewriter.cpp
     ExprCost.cpp
-    OperandSimplifier.cpp
-    ProductIdentityRecoverer.cpp
     SignatureSimplifier.cpp
     BitwiseDecomposer.cpp
     HybridDecomposer.cpp
@@ -45,6 +44,17 @@ target_sources(cobra-core PRIVATE
     WeightedPolyFit.cpp
     SemilinearSignature.cpp
     StructureRecovery.cpp
+    PassContract.cpp
+    CompetitionGroup.cpp
+    JoinState.cpp
+    Orchestrator.cpp
+    OrchestratorPasses.cpp
+    DecompositionPassHelpers.cpp
+    DecompositionPasses.cpp
+    SemilinearPasses.cpp
+    SignaturePasses.cpp
+    VerifyCandidate.cpp
+    LiftingPasses.cpp
 )
 
 target_include_directories(cobra-core PUBLIC

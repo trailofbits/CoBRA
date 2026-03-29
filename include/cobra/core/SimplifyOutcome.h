@@ -2,8 +2,10 @@
 
 #include "cobra/core/Classification.h"
 #include "cobra/core/Expr.h"
+#include "cobra/core/PassContract.h"
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -11,14 +13,23 @@ namespace cobra {
 
     struct Diagnostic
     {
-        Classification classification      = { .semantic = SemanticClass::kLinear,
-                                               .flags    = kSfNone,
-                                               .route    = Route::kBitwiseOnly };
-        Route attempted_route              = Route::kBitwiseOnly;
-        uint32_t rewrite_rounds            = 0;
-        bool rewrite_produced_candidate    = false;
-        bool candidate_failed_verification = false;
+        Classification classification        = { .semantic = SemanticClass::kLinear,
+                                                 .flags    = kSfNone };
+        uint32_t structural_transform_rounds = 0;
+        bool transform_produced_candidate    = false;
+        bool candidate_failed_verification   = false;
         std::string reason;
+
+        std::optional< ReasonCode > reason_code;
+        std::vector< ReasonFrame > cause_chain;
+    };
+
+    struct SimplifyTelemetry
+    {
+        uint32_t total_expansions    = 0;
+        uint32_t max_depth_reached   = 0;
+        uint32_t candidates_verified = 0;
+        uint32_t queue_high_water    = 0;
     };
 
     struct SimplifyOutcome
@@ -31,6 +42,7 @@ namespace cobra {
         std::vector< std::string > real_vars;
         bool verified = false;
         Diagnostic diag;
+        SimplifyTelemetry telemetry;
     };
 
 } // namespace cobra

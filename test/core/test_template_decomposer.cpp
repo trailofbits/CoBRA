@@ -35,8 +35,8 @@ TEST(TemplateDecomposer, DirectAtomMatch) {
     auto opts = make_opts();
 
     auto r = TryTemplateDecomposition(ctx, opts, 1, nullptr);
-    ASSERT_TRUE(r.has_value());
-    EXPECT_TRUE(r->verified);
+    ASSERT_TRUE(r.Succeeded());
+    EXPECT_TRUE(r.Payload().verification == VerificationState::kVerified);
 }
 
 TEST(TemplateDecomposer, BinaryXor) {
@@ -46,8 +46,8 @@ TEST(TemplateDecomposer, BinaryXor) {
     auto opts = make_opts();
 
     auto r = TryTemplateDecomposition(ctx, opts, 2, nullptr);
-    ASSERT_TRUE(r.has_value());
-    EXPECT_TRUE(r->verified);
+    ASSERT_TRUE(r.Succeeded());
+    EXPECT_TRUE(r.Payload().verification == VerificationState::kVerified);
 }
 
 TEST(TemplateDecomposer, BinaryMul) {
@@ -57,8 +57,8 @@ TEST(TemplateDecomposer, BinaryMul) {
     auto opts = make_opts();
 
     auto r = TryTemplateDecomposition(ctx, opts, 2, nullptr);
-    ASSERT_TRUE(r.has_value());
-    EXPECT_TRUE(r->verified);
+    ASSERT_TRUE(r.Succeeded());
+    EXPECT_TRUE(r.Payload().verification == VerificationState::kVerified);
 }
 
 TEST(TemplateDecomposer, MulOrNested) {
@@ -71,11 +71,11 @@ TEST(TemplateDecomposer, MulOrNested) {
     auto opts = make_opts();
 
     auto r = TryTemplateDecomposition(ctx, opts, 2, nullptr);
-    ASSERT_TRUE(r.has_value());
-    EXPECT_TRUE(r->verified);
+    ASSERT_TRUE(r.Succeeded());
+    EXPECT_TRUE(r.Payload().verification == VerificationState::kVerified);
 
     // Verify the result computes the same function
-    auto check = FullWidthCheckEval(*ctx.eval, 2, *r->expr, 64);
+    auto check = FullWidthCheckEval(*ctx.eval, 2, *r.Payload().expr, 64);
     EXPECT_TRUE(check.passed);
 }
 
@@ -89,7 +89,7 @@ TEST(TemplateDecomposer, RespectsBaselineCost) {
     ExprCost baseline{ 0, 0, 0 };
     auto r = TryTemplateDecomposition(ctx, opts, 2, &baseline);
     // Should not return anything better than cost 0
-    EXPECT_FALSE(r.has_value());
+    EXPECT_FALSE(r.Succeeded());
 }
 
 TEST(TemplateDecomposer, NoEvaluator) {
@@ -98,7 +98,7 @@ TEST(TemplateDecomposer, NoEvaluator) {
     auto opts = make_opts();
 
     auto r = TryTemplateDecomposition(ctx, opts, 1, nullptr);
-    EXPECT_FALSE(r.has_value());
+    EXPECT_FALSE(r.Succeeded());
 }
 
 TEST(TemplateDecomposer, TooManyVars) {
@@ -108,7 +108,7 @@ TEST(TemplateDecomposer, TooManyVars) {
     auto opts = make_opts();
 
     auto r = TryTemplateDecomposition(ctx, opts, 7, nullptr);
-    EXPECT_FALSE(r.has_value());
+    EXPECT_FALSE(r.Succeeded());
 }
 
 TEST(TemplateDecomposer, NarrowBitwidth) {
@@ -120,6 +120,6 @@ TEST(TemplateDecomposer, NarrowBitwidth) {
     auto opts = make_opts(8);
 
     auto r = TryTemplateDecomposition(ctx, opts, 2, nullptr);
-    ASSERT_TRUE(r.has_value());
-    EXPECT_TRUE(r->verified);
+    ASSERT_TRUE(r.Succeeded());
+    EXPECT_TRUE(r.Payload().verification == VerificationState::kVerified);
 }

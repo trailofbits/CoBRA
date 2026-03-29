@@ -1,4 +1,5 @@
 #include "cobra/core/Expr.h"
+#include "cobra/core/ExprCost.h"
 #include "cobra/core/PatternMatcher.h"
 #include "cobra/core/SignatureChecker.h"
 #include <gtest/gtest.h>
@@ -455,6 +456,73 @@ TEST(PatternMatcherTest, ScalarFactoringNonFactorableNoMatch) {
     std::vector< uint64_t > sig = { 5, 6, 6, 7 };
     auto result                 = MatchPattern(sig, 2, 64);
     EXPECT_FALSE(result.has_value());
+}
+
+TEST(PatternMatcherTest, SimplifyPatternSubtreesCollapsesHiddenProjection) {
+    auto hidden_a = Expr::Add(
+        Expr::Add(
+            Expr::Add(
+                Expr::Negate(
+                    Expr::Mul(
+                        Expr::Constant(6),
+                        Expr::BitwiseAnd(Expr::Variable(0), Expr::Variable(1))
+                    )
+                ),
+                Expr::Mul(
+                    Expr::Constant(7),
+                    Expr::BitwiseNot(Expr::BitwiseXor(Expr::Variable(0), Expr::Variable(1)))
+                )
+            ),
+            Expr::Negate(
+                Expr::Mul(
+                    Expr::Constant(8),
+                    Expr::BitwiseNot(Expr::BitwiseOr(Expr::Variable(0), Expr::Variable(1)))
+                )
+            )
+        ),
+        Expr::BitwiseNot(Expr::Variable(1))
+    );
+    auto expr = Expr::Mul(CloneExpr(*hidden_a), Expr::Variable(2));
+
+    auto original   = CloneExpr(*expr);
+    auto simplified = SimplifyPatternSubtrees(std::move(expr), 64);
+
+    auto check = FullWidthCheck(*original, 3, *simplified, {}, 64);
+    EXPECT_TRUE(check.passed);
+    EXPECT_EQ(Render(*simplified, { "a", "b", "y" }), "a * y");
+}
+
+TEST(PatternMatcherTest, SimplifyPatternSubtreesPreservesRealMultiply) {
+    auto expr       = Expr::Mul(Expr::Variable(0), Expr::Variable(1));
+    auto simplified = SimplifyPatternSubtrees(std::move(expr), 64);
+
+    EXPECT_EQ(simplified->kind, Expr::Kind::kMul);
+    EXPECT_EQ(Render(*simplified, { "x", "y" }), "x * y");
+}
+
+TEST(PatternMatcherTest, SimplifyPatternSubtreesCollapsesTwoVarAffineCombo) {
+    auto expr = Expr::Add(
+        Expr::Constant(3),
+        Expr::Add(
+            Expr::Mul(Expr::Constant(3), Expr::Variable(0)),
+            Expr::Add(
+                Expr::Mul(Expr::Constant(2), Expr::Variable(1)),
+                Expr::Negate(
+                    Expr::Mul(
+                        Expr::Constant(4),
+                        Expr::BitwiseAnd(Expr::Variable(0), Expr::Variable(1))
+                    )
+                )
+            )
+        )
+    );
+    auto original   = CloneExpr(*expr);
+    auto simplified = SimplifyPatternSubtrees(std::move(expr), 64);
+
+    auto check = FullWidthCheck(*original, 2, *simplified, {}, 64);
+    EXPECT_TRUE(check.passed);
+    EXPECT_TRUE(IsBetter(ComputeCost(*simplified).cost, ComputeCost(*original).cost));
+    EXPECT_NE(Render(*simplified, { "b", "x" }).find("^"), std::string::npos);
 }
 
 // Exhaustive: verify all 256 3-var Boolean functions produce correct

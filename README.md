@@ -4,7 +4,7 @@
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)](https://en.cppreference.com/w/cpp/23)
-[![Tests](https://img.shields.io/badge/tests-1023-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-1193-brightgreen.svg)](#testing)
 
 CoBRA deobfuscates expressions that interleave arithmetic (`+`, `-`, `*`) with bitwise (`&`, `|`, `^`, `~`) and shift (`<<`, `>>`) operators — a technique commonly used in software obfuscation.
 
@@ -49,27 +49,58 @@ $ cobra-cli --mba '-357*(x&~y)*(x&y)+102*(x&~y)*(x&~y)+374*(x&~y)*~(x^y)
 
 ## How It Works
 
-CoBRA classifies each expression and routes it through the appropriate pipeline:
+CoBRA uses a worklist-based orchestrator to simplify expressions. Each input enters the worklist as a work item tagged with a state kind. A scheduler selects the next pass to run based on the item's state, prerequisite dependencies, and an attempt cache that prevents redundant work.
 
-| Pipeline | Input | Technique |
-|----------|-------|-----------|
-| **Linear** | Weighted sums of bitwise atoms | Signature vector → CoB butterfly transform → pattern matching / ANF cleanup |
-| **Semilinear** | Constant-masked atoms (`x & 0xFF`) | Constant lowering, structure recovery, term refinement, bit-partitioned reconstruction |
-| **Polynomial** | Variable products (`x*y`, `x^2`) | Coefficient splitting + singleton power recovery |
-| **Mixed** | Products of bitwise subexpressions | Multi-step rewriting, decomposition engine (extract-solve), ghost residual solving |
+36 discrete passes are organized into families: AST processing, signature-based techniques, semilinear techniques, decomposition, and lifting. Some passes fork local alternatives or child solves that are resolved by competition groups; outside those groups, the worklist returns the first fully verified top-level candidate. All results are verified by spot-checking random inputs (default) or Z3 equivalence proof (`--verify`).
 
-The core insight is the **Change of Basis (CoB) transform**: evaluate the expression on all 2^n Boolean inputs to produce a signature vector, then apply a butterfly recurrence to recover the coefficients of each AND-product basis term. Pattern matching recognizes all 2- and 3-variable Boolean functions, including scaled forms like `67*(a|b|c)`. For 4- and 5-variable Boolean expressions, **Shannon decomposition** recursively splits on a variable to reduce to smaller cases covered by the lookup tables. Complex Boolean results fall back to ANF (Algebraic Normal Form) with cleanup passes for absorption, common-cube factoring, and OR recognition.
+```
+Input Expression
+       |
+  [Worklist Scheduler]
+       |
+  Work items flow through state kinds:
+       |
+  kFoldedAst ──> AST processing passes
+       |         (classify, lower, rewrite)
+       |
+       +──> kSignatureState ──> Signature techniques
+       |    (pattern match, CoB, ANF, polynomial recovery)
+       |
+       +──> kSemilinearNormalizedIr ──> Semilinear techniques
+       |    (normalize, recover structure, refine, reconstruct)
+       |
+       +──> kCoreCandidate / kRemainderState ──> Decomposition
+       |    (extract core, classify residual, solve)
+       |
+       +──> kLiftedSkeleton ──> Lifting
+       |    (virtual variable substitution, outer solve)
+       |
+       +──> kCandidateExpr ──> Verification
+            (spot-check or Z3 proof)
+       |
+  Simplified Expression
+```
+
+**Signature-based techniques** evaluate the expression on all Boolean inputs to get a signature vector. A CoB butterfly transform recovers AND-product basis coefficients. Pattern matching, ANF, and polynomial recovery handle different complexity levels.
+
+**Semilinear techniques** handle expressions with constant masks (e.g., `x & 0xFF`). The expression is decomposed into weighted bitwise atoms, then structure recovery and term refinement simplify the intermediate representation, and bit-partitioned OR-assembly reconstructs the final result.
+
+**Decomposition** targets mixed expressions with products of bitwise subexpressions. A polynomial core is extracted, then residuals are classified and solved (polynomial, boolean-null/ghost, or template fallback).
+
+**Lifting** replaces complex subexpressions with virtual variables, solves the simplified outer skeleton, then substitutes back.
 
 ## Features
 
-- **Linear MBA simplification** — arbitrary combinations of `&`, `|`, `^`, `~` with `+`, `-`, constant multipliers
-- **Scaled pattern matching** — expressions like `k * f(vars) + c` where `f` is a bitwise function; Shannon decomposition extends coverage to 4- and 5-variable Boolean expressions
-- **Semilinear support** — constant-masked atoms like `x & 0xFF`, `y | 0xF0` with XOR/OR/NOT-AND constant lowering, structure recovery (XOR recovery, mask elimination), term refinement, coalescing, and bit-partitioned OR-assembly reconstruction
-- **Polynomial recovery** — multilinear terms (`x*y`) and singleton powers (`x^2`) via coefficient splitting
-- **Mixed product handling** — multi-step rewriting pipeline with operand simplification, product identity collapse, and XOR lowering
-- **Decomposition engine** — extract-solve architecture that splits mixed expressions into polynomial cores and residuals, with hardened full-width verification and ghost residual solving for boolean-null components
-- **Constant shifts** — `<<` desugars to multiplication, `>>` on bitwise subtrees simplifies via the semilinear pipeline
-- **ANF cleanup** — absorption, common-cube factoring, and OR recognition for compact Boolean output
+- **Linear MBA simplification** — weighted sums of bitwise atoms via signature vector and CoB transform
+- **Scaled pattern matching** — `k * f(vars) + c` with Shannon decomposition for 4-5 variable Boolean expressions
+- **Semilinear support** — constant-masked atoms with XOR/OR/NOT-AND constant lowering, structure recovery, term refinement, bit-partitioned reconstruction
+- **Polynomial recovery** — multilinear terms and singleton powers via coefficient splitting and finite differences
+- **Mixed product handling** — decomposition engine with core extraction, residual solving, and ghost residual classification
+- **Subexpression lifting** — replace complex subtrees with virtual variables to reduce problem dimension
+- **Worklist orchestrator** — DAG-aware pass scheduling with deduplication and bounded search
+- **Competition groups** — local alternative branches and child solves use cost-based winner selection with continuations
+- **Constant shifts** — `<<` desugars to multiplication, `>>` simplifies via semilinear techniques
+- **ANF cleanup** — absorption, common-cube factoring, and OR recognition
 - **Configurable bitwidth** — 1-bit to 64-bit modular arithmetic
 - **Auxiliary variable elimination** — reduces variable count when terms cancel
 - **Z3 verification** — optional equivalence checking of simplified output
@@ -129,16 +160,19 @@ cobra-cli --mba "(x&y)+(x|y)" --verbose
 | `--bitwidth <n>` | 64 | Modular arithmetic width (1-64) |
 | `--max-vars <n>` | 16 | Maximum variable count |
 | `--verify` | off | Z3 equivalence check |
-| `--strict` | off | Require Z3 for semilinear results |
 | `--verbose` | off | Print pipeline internals |
 
 ## Project Structure
 
 ```
-lib/core/                Core simplification pipeline (45 source files)
-  Simplifier               Top-level orchestration and route dispatch
-  Classifier               Route: Linear / Semilinear / Polynomial / Mixed
-  SignatureVector           Evaluate expression on {0,1}^n inputs
+lib/core/                Core simplification engine (~50 source files)
+  Orchestrator             Worklist scheduler, state machine, main simplification loop
+  OrchestratorPasses       39-pass registry with DAG-aware scheduling
+  CompetitionGroup         Multi-technique racing and winner selection
+  ContinuationTypes        Deferred recombination data for pass composition
+  JoinState                Multi-operand join tracking for structural rewrites
+  SignatureSimplifier      Signature-based techniques (CoB, pattern matching, ANF)
+  SignatureVector          Evaluate expression on {0,1}^n inputs
   AuxVarEliminator         Reduce variable count by detecting cancellations
   PatternMatcher           Recognize bitwise patterns (2-var/3-var tables, scaled)
   CoeffInterpolator        Butterfly interpolation for coefficient recovery
@@ -156,23 +190,24 @@ lib/core/                Core simplification pipeline (45 source files)
   MixedProductRewriter     Expand bitwise products into linear sums
   TemplateDecomposer       Bounded template matching for mixed expressions
   ProductIdentityRecoverer Recover product-of-sums identities
-  SemilinearNormalizer     Decompose into weighted bitwise atoms (XOR/OR/NOT-AND lowering)
-  SemilinearSignature      Per-bit signature evaluation and linear shortcut detection
+  SemilinearNormalizer     Decompose into weighted bitwise atoms
+  SemilinearSignature      Per-bit signature evaluation and linear shortcut
   StructureRecovery        XOR recovery, mask elimination, term coalescing
   TermRefiner              Dead-bit mask reduction, same-coefficient merge
   BitPartitioner           Group bit positions by semantic profile
   MaskedAtomReconstructor  Reassemble with OR-rewrite for disjoint masks
+  Evaluator                Compiled expression evaluator
 
 lib/llvm/                LLVM pass plugin (CobraPass, MBADetector, IRReconstructor)
 lib/verify/              Z3-based equivalence verification
 include/cobra/           Public headers
 tools/cobra-cli/         CLI frontend and expression parser
-test/                    1023 tests across 55 test files (unit + integration + dataset benchmarks)
+test/                    1193 tests across ~63 test files
 ```
 
 ## Testing
 
-CoBRA has 1023 tests covering unit, integration, and dataset benchmarks:
+CoBRA has 1193 tests covering unit, integration, and dataset benchmarks:
 
 ```bash
 # Run all tests
@@ -185,7 +220,7 @@ ctest --test-dir build -R test_simplifier --output-on-failure
 ctest --test-dir build -V
 ```
 
-Dataset benchmarks validate against real-world obfuscated expressions from multiple independent sources. See [DATASETS.md](DATASETS.md) for the full benchmark report — 69,758 expressions simplified across 33 dataset files from 7 independent sources.
+Dataset benchmarks validate against real-world obfuscated expressions from multiple independent sources. See [DATASETS.md](DATASETS.md) for the full benchmark report — 70,059 expressions across 33 dataset files from 7 independent sources.
 
 ## Known Limitations
 

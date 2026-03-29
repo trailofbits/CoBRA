@@ -21,11 +21,6 @@ namespace cobra {
         bool operator!=(const AtomKey &other) const { return !(*this == other); }
     };
 
-    struct AtomKeyHash
-    {
-        size_t operator()(const AtomKey &k) const;
-    };
-
     enum class OperatorFamily { kAnd, kOr, kXor, kNot, kMixed };
 
     struct AtomInfo
@@ -95,3 +90,9 @@ namespace cobra {
     void CompactAtomTable(SemilinearIR &ir);
 
 } // namespace cobra
+
+template<>
+struct std::hash< cobra::AtomKey >
+{
+    size_t operator()(const cobra::AtomKey &k) const;
+};

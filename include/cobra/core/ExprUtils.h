@@ -32,6 +32,11 @@ namespace cobra {
     /// Result is masked to Bitmask(bitwidth).
     uint64_t EvalConstantExpr(const Expr &expr, uint32_t bitwidth);
 
+    /// Cosmetic cleanup on the final simplified expression.
+    /// Chains: constant folding → negation refolding.
+    /// Semantics-preserving, no verification needed.
+    std::unique_ptr< Expr > CleanupFinalExpr(std::unique_ptr< Expr > expr, uint32_t bitwidth);
+
     /// Check if an Expr subtree depends on any variable.
     bool HasVarDep(const Expr &expr);
 

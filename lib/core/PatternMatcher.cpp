@@ -1,6 +1,11 @@
 #include "cobra/core/PatternMatcher.h"
 #include "cobra/core/BitWidth.h"
 #include "cobra/core/Expr.h"
+#include "cobra/core/ExprCost.h"
+#include "cobra/core/ExprUtils.h"
+#include "cobra/core/Profile.h"
+#include "cobra/core/SignatureChecker.h"
+#include "cobra/core/SignatureEval.h"
 #include "cobra/core/Trace.h"
 #include <algorithm>
 #include <cstddef>
@@ -13,6 +18,194 @@
 namespace cobra {
 
     namespace {
+
+        struct TwoVarBasisPattern
+        {
+            std::unique_ptr< Expr > expr;
+            std::vector< uint64_t > sig;
+        };
+
+        std::optional< std::unique_ptr< Expr > > Match2varBoolean(uint8_t key);
+
+        void CollectSupport(const Expr &expr, std::vector< uint32_t > &support) {
+            if (expr.kind == Expr::Kind::kVariable) {
+                if (std::find(support.begin(), support.end(), expr.var_index) == support.end())
+                {
+                    support.push_back(expr.var_index);
+                }
+                return;
+            }
+            for (const auto &child : expr.children) { CollectSupport(*child, support); }
+        }
+
+        void PushUniqueValue(std::vector< uint64_t > &values, uint64_t value) {
+            if (std::find(values.begin(), values.end(), value) == values.end()) {
+                values.push_back(value);
+            }
+        }
+
+        std::vector< uint64_t >
+        BuildCoefficientCandidates(const std::vector< uint64_t > &sig, uint32_t bitwidth) {
+            std::vector< uint64_t > coeffs;
+            coeffs.reserve(1 + sig.size() + sig.size() * sig.size());
+            coeffs.push_back(0);
+            for (uint64_t value : sig) { PushUniqueValue(coeffs, value); }
+            for (uint64_t lhs : sig) {
+                for (uint64_t rhs : sig) {
+                    PushUniqueValue(coeffs, ModSub(lhs, rhs, bitwidth));
+                }
+            }
+            return coeffs;
+        }
+
+        std::unique_ptr< Expr > BuildAffineBasisExpr(
+            uint64_t constant, std::unique_ptr< Expr > first, std::unique_ptr< Expr > second
+        ) {
+            std::unique_ptr< Expr > result;
+            if (constant != 0) { result = Expr::Constant(constant); }
+            if (first) {
+                result =
+                    result ? Expr::Add(std::move(result), std::move(first)) : std::move(first);
+            }
+            if (second) {
+                result = result ? Expr::Add(std::move(result), std::move(second))
+                                : std::move(second);
+            }
+            return result ? std::move(result) : Expr::Constant(0);
+        }
+
+        std::vector< TwoVarBasisPattern > BuildTwoVarBasisPatterns(uint32_t bitwidth) {
+            std::vector< TwoVarBasisPattern > patterns;
+            patterns.reserve(14);
+            for (uint8_t key = 1; key < 0xF; ++key) {
+                auto basis = Match2varBoolean(key);
+                if (!basis.has_value()) { continue; }
+                auto sig = EvaluateBooleanSignature(**basis, 2, bitwidth);
+                patterns.push_back(
+                    TwoVarBasisPattern{
+                        .expr = std::move(*basis),
+                        .sig  = std::move(sig),
+                    }
+                );
+            }
+            return patterns;
+        }
+
+        std::optional< std::unique_ptr< Expr > > TrySimplifyTwoVarPatternSum(
+            const Expr &expr, const std::vector< uint64_t > &sig, uint32_t bitwidth,
+            const ExprCost &baseline_cost
+        ) {
+            const auto coeff_candidates = BuildCoefficientCandidates(sig, bitwidth);
+            const auto basis_patterns   = BuildTwoVarBasisPatterns(bitwidth);
+
+            std::optional< std::unique_ptr< Expr > > best;
+            auto best_cost = baseline_cost;
+
+            for (size_t i = 0; i < basis_patterns.size(); ++i) {
+                for (size_t j = i + 1; j < basis_patterns.size(); ++j) {
+                    for (uint64_t first_coeff : coeff_candidates) {
+                        for (uint64_t second_coeff : coeff_candidates) {
+                            if (first_coeff == 0 || second_coeff == 0) { continue; }
+
+                            const uint64_t constant = ModSub(
+                                ModSub(
+                                    sig[0],
+                                    ModMul(first_coeff, basis_patterns[i].sig[0], bitwidth),
+                                    bitwidth
+                                ),
+                                ModMul(second_coeff, basis_patterns[j].sig[0], bitwidth),
+                                bitwidth
+                            );
+
+                            bool matches = true;
+                            for (size_t point = 1; point < sig.size(); ++point) {
+                                const uint64_t predicted = ModAdd(
+                                    constant,
+                                    ModAdd(
+                                        ModMul(
+                                            first_coeff, basis_patterns[i].sig[point], bitwidth
+                                        ),
+                                        ModMul(
+                                            second_coeff, basis_patterns[j].sig[point], bitwidth
+                                        ),
+                                        bitwidth
+                                    ),
+                                    bitwidth
+                                );
+                                if (predicted != sig[point]) {
+                                    matches = false;
+                                    break;
+                                }
+                            }
+                            if (!matches) { continue; }
+
+                            auto candidate = BuildAffineBasisExpr(
+                                constant,
+                                ApplyCoefficient(
+                                    CloneExpr(*basis_patterns[i].expr), first_coeff, bitwidth
+                                ),
+                                ApplyCoefficient(
+                                    CloneExpr(*basis_patterns[j].expr), second_coeff, bitwidth
+                                )
+                            );
+                            const auto candidate_cost = ComputeCost(*candidate).cost;
+                            if (!IsBetter(candidate_cost, best_cost)) { continue; }
+
+                            auto check = FullWidthCheck(expr, 2, *candidate, {}, bitwidth);
+                            if (!check.passed) { continue; }
+
+                            best      = std::move(candidate);
+                            best_cost = candidate_cost;
+                        }
+                    }
+                }
+            }
+
+            return best;
+        }
+
+        std::optional< std::unique_ptr< Expr > >
+        TrySimplifyPatternSubtree(const Expr &expr, uint32_t bitwidth) {
+            const auto baseline_cost = ComputeCost(expr).cost;
+            if (baseline_cost.weighted_size <= 1) { return std::nullopt; }
+
+            std::vector< uint32_t > support;
+            CollectSupport(expr, support);
+            std::sort(support.begin(), support.end());
+
+            const auto num_vars = static_cast< uint32_t >(support.size());
+            if (num_vars > 5) { return std::nullopt; }
+
+            auto dense_expr = CloneExpr(expr);
+            if (!support.empty()) {
+                const uint32_t max_idx = support.back();
+                std::vector< uint32_t > dense_map(max_idx + 1, 0);
+                for (uint32_t i = 0; i < support.size(); ++i) { dense_map[support[i]] = i; }
+                RemapVarIndices(*dense_expr, dense_map);
+            }
+
+            const auto sig = EvaluateBooleanSignature(*dense_expr, num_vars, bitwidth);
+            if (auto match = MatchPattern(sig, num_vars, bitwidth); match.has_value()) {
+                if (IsBetter(ComputeCost(**match).cost, baseline_cost)) {
+                    auto check = FullWidthCheck(*dense_expr, num_vars, **match, {}, bitwidth);
+                    if (check.passed) {
+                        if (!support.empty()) { RemapVarIndices(**match, support); }
+                        return match;
+                    }
+                }
+            }
+
+            if (num_vars == 2) {
+                auto combo =
+                    TrySimplifyTwoVarPatternSum(*dense_expr, sig, bitwidth, baseline_cost);
+                if (combo.has_value()) {
+                    if (!support.empty()) { RemapVarIndices(**combo, support); }
+                    return combo;
+                }
+            }
+
+            return std::nullopt;
+        }
 
         bool AllEqual(const std::vector< uint64_t > &sig) {
             return std::all_of(sig.begin(), sig.end(), [&](uint64_t v) { return v == sig[0]; });
@@ -1064,6 +1257,7 @@ namespace cobra {
 
     std::optional< std::unique_ptr< Expr > >
     MatchPattern(const std::vector< uint64_t > &sig, uint32_t num_vars, uint32_t bitwidth) {
+        COBRA_ZONE_N("MatchPattern");
         COBRA_TRACE("PatternMatcher", "MatchPattern: vars={} bitwidth={}", num_vars, bitwidth);
 
         // Constant: all entries equal (works for any variable count)
@@ -1095,6 +1289,17 @@ namespace cobra {
 
         COBRA_TRACE("PatternMatcher", "MatchPattern: {}", result ? "HIT" : "MISS");
         return result;
+    }
+
+    std::unique_ptr< Expr >
+    SimplifyPatternSubtrees(std::unique_ptr< Expr > expr, uint32_t bitwidth) {
+        for (auto &child : expr->children) {
+            child = SimplifyPatternSubtrees(std::move(child), bitwidth);
+        }
+
+        auto rewritten = TrySimplifyPatternSubtree(*expr, bitwidth);
+        if (!rewritten.has_value()) { return expr; }
+        return SimplifyPatternSubtrees(std::move(*rewritten), bitwidth);
     }
 
 } // namespace cobra

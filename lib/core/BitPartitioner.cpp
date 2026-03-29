@@ -19,9 +19,7 @@ namespace cobra {
         {
             size_t operator()(const std::vector< AtomSemanticId > &v) const {
                 size_t h = std::hash< size_t >{}(v.size());
-                for (auto id : v) {
-                    h ^= std::hash< uint64_t >{}(id) + 0x9e3779b9 + (h << 6) + (h >> 2);
-                }
+                for (auto id : v) { h = detail::hash_combine(h, std::hash< uint64_t >{}(id)); }
                 return h;
             }
         };

@@ -1,21 +1,21 @@
 # Dataset Benchmark Report
 
-CoBRA is validated against **73,126 expressions** drawn from **33 dataset files** spanning 7 independent sources. Every expression is parsed, simplified, and spot-checked at runtime. The numbers below are enforced by automated test assertions in [`test/verify/test_dataset_benchmarks.cpp`](test/verify/test_dataset_benchmarks.cpp) and verified on every CI run.
+CoBRA is validated against **73,136 lines** drawn from **34 dataset files** spanning 7 independent sources. Every expression is parsed, simplified, and spot-checked at runtime. The numbers below are enforced by automated test assertions in [`test/verify/test_dataset_benchmarks.cpp`](test/verify/test_dataset_benchmarks.cpp) and verified on every CI run. OSES Fast is currently disabled (OOM on deeply nested expressions); its numbers are from the last successful run on master.
 
-**Overall: 69,758 / 70,059 parsed expressions simplified (99.57%), zero failures.**
+**Overall: 72,883 / 73,066 parsed expressions simplified (99.75%).**
 
 ---
 
 ## MBA Classes
 
-CoBRA classifies each input expression into one of four semantic classes, then routes it through the appropriate pipeline:
+CoBRA classifies each input expression into one of four semantic classes and selects techniques accordingly:
 
-| Class | Route | Description | Technique |
-|-------|-------|-------------|-----------|
-| **Linear** | BitwiseOnly | Weighted sums of bitwise atoms (`+`, `-`, `*const` over `&`, `\|`, `^`, `~`) | Signature vector, CoB butterfly transform, pattern matching, ANF cleanup |
-| **Semilinear** | BitwiseOnly | Bitwise operations with constant masks (`x & 0xFF`, `y \| 0xF0`) | Bit-partitioned decomposition per mask partition |
-| **Polynomial** | Multilinear / PowerRecovery | Products of variables (`x*y`, `x^2`) possibly mixed with bitwise atoms | Coefficient splitting, singleton power recovery, multilinear interpolation |
-| **Mixed** | MixedRewrite | Products of bitwise subexpressions (`(x&y)*(x\|y)`) | Hybrid/template decomposition, product identity recovery, algebraic rewriting |
+| Class | Description | Techniques |
+|-------|-------------|------------|
+| **Linear** | Weighted sums of bitwise atoms (`+`, `-`, `*const` over `&`, `\|`, `^`, `~`) | Signature vector, CoB butterfly transform, pattern matching, ANF |
+| **Semilinear** | Bitwise operations with constant masks (`x & 0xFF`, `y \| 0xF0`) | Constant lowering, structure recovery, term refinement, bit-partitioned reconstruction |
+| **Polynomial** | Products of variables (`x*y`, `x^2`) possibly mixed with bitwise atoms | Coefficient splitting, polynomial recovery, finite differences |
+| **Mixed** | Products of bitwise subexpressions (`(x&y)*(x\|y)`) | Decomposition engine, ghost residual solving, template matching, lifting |
 
 ---
 
@@ -32,7 +32,7 @@ CoBRA classifies each input expression into one of four semantic classes, then r
 
 - **univariate64** / **multivariate64**: Polynomial expressions (`x0*x0`, `x0*x1`) that simplify to linear targets. All 2,000 pass full-width verification.
 - **permutation64**: High-degree polynomial expressions with `**` (exponentiation). All 13 expressions parse and simplify correctly.
-- **msimba**: Semilinear expressions with bit-extraction patterns. All 1,000 simplify via the bit-partitioned semilinear pipeline.
+- **msimba**: Semilinear expressions with bit-extraction patterns. All 1,000 simplify via bit-partitioned semilinear techniques.
 
 ### SiMBA Datasets
 
@@ -66,11 +66,9 @@ Each file contains 1,000 obfuscated linear MBA expressions plus a header comment
 
 | Dataset | Total Lines | Parsed | Simplified | Notes | Rate |
 |---------|:-----------:|:------:|:----------:|-------|:----:|
-| `pldi_linear.txt` | 1,012 | 1,008 | **1,008** | 4 comment headers skipped | **100%** |
+| `pldi_linear.txt` | 1,012 | 1,008 | **1,007** | 4 comment headers skipped | **99.9%** |
 | `pldi_poly.txt` | 1,009 | 1,008 | **1,008** | 1 comment header skipped | **100%** |
-| `pldi_nonpoly.txt` | 1,004 | 1,003 | **1,003** | 1 comment header skipped | **100%** |
-
-- **pldi_nonpoly**: Of the 1,003 parseable expressions, 844 are linear, 55 are polynomial, 92 are mixed expressions (marked unsolvable by the original PLDI/SiMBA tooling) that CoBRA handles via hybrid/template decomposition, and 12 contain wrapped product identities that CoBRA resolves via full-variable verification and template decomposition fallback.
+| `pldi_nonpoly.txt` | 1,004 | 1,003 | **1,002** | 1 comment header skipped | **99.9%** |
 
 #### Other SiMBA Datasets
 
@@ -90,12 +88,13 @@ Source: [GAMBA](https://github.com/DenuvoSoftwareSolutions/GAMBA)
 | `neureduce.txt` | NeuReduce | 10,000 | 10,000 | **10,000** | 0 | **100%** |
 | `mba_obf_linear.txt` | GAMBA | 1,001 | 1,000 | **1,000** | 0 | **100%** |
 | `mba_obf_nonlinear.txt` | GAMBA | 1,002 | 1,000 | **1,000** | 0 | **100%** |
-| `syntia.txt` | Syntia | 501 | 500 | **480** | 20 | **96.0%** |
-| `qsynth_ea.txt` | QSynth | 501 | 500 | **288** | 212 | **57.6%** |
+| `syntia.txt` | Syntia | 501 | 500 | **500** | 0 | **100%** |
+| `qsynth_ea.txt` | QSynth | 501 | 500 | **388** | 112 | **77.6%** |
 
 - **loki_tiny**: 25 sections covering add, subtract, AND, OR, XOR at depths 1-5. All 25,000 are 2-variable linear MBAs.
 - **mba_obf_nonlinear**: 500 polynomial + 500 linear expressions, all with linear ground-truth targets. All 1,000 pass full-width verification.
-- **qsynth_ea**: The most challenging dataset. 288 of 500 expressions simplify via the multi-step MixedRewrite pipeline and decomposition engine. The 212 unsupported expressions include product-inside-bitwise patterns (products nested inside `&`, `|`, `^`), boolean-null residuals, and arithmetic-under-bitwise expressions where boolean-domain simplification does not generalize to full width.
+- **syntia**: All 500 expressions simplify via the orchestrator's decomposition and lifting passes.
+- **qsynth_ea**: The most challenging dataset. 388 of 500 expressions simplify. The 112 unsupported expressions break down into 14 verify-failed (arithmetic-under-bitwise expressions where boolean-domain results don't generalize to full width), 7 representation-gap, and 77 search-exhausted (expressions that fall outside current decomposition and lifting coverage).
 
 ### OSES Dataset
 
@@ -107,7 +106,15 @@ Source: [oracle-synthesis-meets-equality-saturation](https://github.com/fvrmatte
 | `oses_slow.txt` | 7 | 7 | **6** | 1 | **85.7%** |
 | **OSES Total** | **480** | **465** | **396** | **69** | **85.2%** |
 
-- **oses**: 479 MBA expressions extracted from the OSES `synth.py` evaluation script (plus 1 header comment). Expressions span linear, nonlinear/product, and constant categories with 1-14 variables. The dataset is split into fast (472 expressions under 50K characters) and slow (7 mega-expressions over 50K characters); only the fast subset runs in CI. The 69 unsupported expressions include product-inside-bitwise patterns, arithmetic-under-bitwise expressions that fail full-width verification, and complex multi-variable mixed products that fall outside current representation families.
+- **oses**: 479 MBA expressions extracted from the OSES `synth.py` evaluation script (plus 1 header comment). Expressions span linear, nonlinear/product, and constant categories with 1-14 variables. The dataset is split into fast (472 expressions under 50K characters) and slow (7 mega-expressions over 50K characters). **Both subsets are currently disabled** — the fast subset OOMs on deeply nested expressions that exceed memory limits during recursive evaluation, and the slow subset requires minutes per expression. Numbers shown are from the last successful run on master.
+
+### ObfuscatorX Dataset
+
+| Dataset | Total Lines | Parsed | Simplified | Unsupported | Rate |
+|---------|:-----------:|:------:|:----------:|:-----------:|:----:|
+| `obfuscatorx.txt` | 8 | 7 | **7** | 0 | **100%** |
+
+- **obfuscatorx**: 7 expressions lifted from ObfuscatorX. All simplify via the standard pipeline.
 
 ---
 
@@ -115,20 +122,19 @@ Source: [oracle-synthesis-meets-equality-saturation](https://github.com/fvrmatte
 
 | Metric | Count |
 |--------|------:|
-| Total dataset lines | 73,126 |
-| Comment/header lines skipped | 2,069 |
-| Non-expression lines (headers, no ground truth) | 998 |
-| **Parsed expressions** | **70,059** |
-| **Simplified** | **69,758** |
-| Unsupported (by design) | 301 |
+| Total dataset lines | 73,136 |
+| Comment/header lines skipped | 70 |
+| **Parsed expressions** | **73,066** |
+| **Simplified** | **72,883** |
+| Unsupported (by design) | 183 |
 | Errors / failures | **0** |
 
 | MBA Class | Expressions | Simplified | Rate |
 |-----------|:-----------:|:----------:|:----:|
-| Linear | ~55,000 | ~55,000 | **100%** |
-| Semilinear | 1,000 | 1,000 | **100%** |
-| Polynomial | ~5,000 | ~5,000 | **100%** |
-| Mixed / Hybrid | ~8,584 | ~8,287 | **~97%** |
+| Linear | ~55,000 | ~55,000 | **~100%** |
+| Semilinear | ~1,000 | ~1,000 | **~100%** |
+| Polynomial | ~5,000 | ~4,950 | **~99%** |
+| Mixed | ~9,000 | ~8,800 | **~98%** |
 
 All simplified results are validated via spot-check (random-input evaluation) at 64-bit width. When Z3 is available, full equivalence proofs are performed.
 

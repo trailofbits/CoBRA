@@ -1,10 +1,10 @@
 #include "cobra/core/SignatureEval.h"
 #include "cobra/core/BitWidth.h"
 #include "cobra/core/Expr.h"
+#include "cobra/core/Profile.h"
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <vector>
 
 namespace cobra {
@@ -91,21 +91,23 @@ namespace cobra {
 
     std::vector< uint64_t >
     EvaluateBooleanSignature(const Expr &expr, uint32_t num_vars, uint32_t bitwidth) {
+        COBRA_ZONE_N("EvaluateBooleanSignature");
         const size_t kLen = size_t{ 1 } << num_vars;
         return EvalSigRecursive(expr, kLen, bitwidth);
     }
 
-    std::vector< uint64_t > EvaluateBooleanSignature(
-        const std::function< uint64_t(const std::vector< uint64_t > &) > &eval,
-        uint32_t num_vars, uint32_t bitwidth
-    ) {
+    std::vector< uint64_t >
+    EvaluateBooleanSignature(const Evaluator &eval, uint32_t num_vars, uint32_t bitwidth) {
         const size_t kLen    = size_t{ 1 } << num_vars;
         const uint64_t kMask = Bitmask(bitwidth);
         std::vector< uint64_t > sig(kLen);
         std::vector< uint64_t > point(num_vars);
+        EvaluatorWorkspace workspace;
         for (size_t i = 0; i < kLen; ++i) {
             for (uint32_t v = 0; v < num_vars; ++v) { point[v] = (i >> v) & 1; }
-            sig[i] = eval(point) & kMask;
+            sig[i] = (eval.HasCompiledExpr() ? eval.EvaluateWithWorkspace(point, workspace)
+                                             : eval(point))
+                & kMask;
         }
         return sig;
     }

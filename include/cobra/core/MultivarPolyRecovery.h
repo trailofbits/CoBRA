@@ -1,11 +1,11 @@
 #pragma once
 
 #include "cobra/core/Expr.h"
+#include "cobra/core/PassContract.h"
 #include "cobra/core/PolyIR.h"
 #include "cobra/core/Simplifier.h"
 #include <cstdint>
 #include <memory>
-#include <optional>
 #include <vector>
 
 namespace cobra {
@@ -17,13 +17,11 @@ namespace cobra {
     // as an ordinary polynomial (using +, -, *) over Z/2^w with
     // per-variable degree <= max_degree.
     //
-    // Returns nullopt if:
-    //   - preconditions violated (empty support, index out of range, etc.)
-    //   - any falling-factorial coefficient fails the divisibility gate
-    //     (function is not representable in the monomial polynomial class)
+    // Returns Inapplicable if preconditions violated (empty support, etc.)
+    // Returns Blocked if divisibility gate fails (proven non-polynomial)
     //
     // Non-support variables are fixed to 0 during evaluation.
-    std::optional< NormalizedPoly > RecoverMultivarPoly(
+    SolverResult< NormalizedPoly > RecoverMultivarPoly(
         const Evaluator &eval, const std::vector< uint32_t > &support_vars,
         uint32_t total_num_vars, uint32_t bitwidth, uint8_t max_degree = 2
     );
@@ -36,9 +34,10 @@ namespace cobra {
 
     // Degree-escalating polynomial recovery with evaluation verification.
     // Tries degrees min_degree..max_degree_cap, returning the first result whose
-    // built Expr passes FullWidthCheckEval. Returns nullopt if no degree
-    // produces a verified polynomial (or if max_degree_cap < min_degree).
-    std::optional< PolyRecoveryResult > RecoverAndVerifyPoly(
+    // built Expr passes FullWidthCheckEval.
+    // Returns Inapplicable if max_degree_cap < min_degree.
+    // Returns Blocked if no degree produces a verified polynomial.
+    SolverResult< PolyRecoveryResult > RecoverAndVerifyPoly(
         const Evaluator &eval, const std::vector< uint32_t > &support_vars,
         uint32_t total_num_vars, uint32_t bitwidth, uint8_t max_degree_cap = 4,
         uint8_t min_degree = 2

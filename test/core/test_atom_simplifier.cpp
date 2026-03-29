@@ -125,6 +125,24 @@ TEST(AtomSimplifierTest, DeMorganNested) {
     ASSERT_EQ(result->kind, Expr::Kind::kOr);
 }
 
+TEST(AtomSimplifierTest, DeMorganMixedAndLeftNotToOr) {
+    auto atom = Expr::BitwiseNot(
+        Expr::BitwiseAnd(Expr::BitwiseNot(Expr::Variable(0)), Expr::Variable(1))
+    );
+    auto result = SimplifyAtom(std::move(atom));
+    ASSERT_EQ(result->kind, Expr::Kind::kOr);
+    EXPECT_EQ(Render(*result, { "a", "y" }), "a | ~y");
+}
+
+TEST(AtomSimplifierTest, DeMorganMixedAndRightNotToOr) {
+    auto atom = Expr::BitwiseNot(
+        Expr::BitwiseAnd(Expr::Variable(0), Expr::BitwiseNot(Expr::Variable(1)))
+    );
+    auto result = SimplifyAtom(std::move(atom));
+    ASSERT_EQ(result->kind, Expr::Kind::kOr);
+    EXPECT_EQ(Render(*result, { "b", "x" }), "~b | x");
+}
+
 // --- Idempotency tests ---
 
 TEST(AtomSimplifierTest, IdempotentAnd) {

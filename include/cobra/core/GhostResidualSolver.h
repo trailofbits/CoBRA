@@ -1,10 +1,10 @@
 #pragma once
 
 #include "cobra/core/Expr.h"
+#include "cobra/core/PassContract.h"
 #include "cobra/core/Simplifier.h"
 #include <cstdint>
 #include <memory>
-#include <optional>
 #include <vector>
 
 namespace cobra {
@@ -29,7 +29,7 @@ namespace cobra {
     // Attempts to solve a boolean-null residual as a constant-coefficient
     // single ghost primitive. Returns expression in original variable space.
     // Requires support.size() <= 6.
-    std::optional< GhostSolveResult > SolveGhostResidual(
+    SolverResult< GhostSolveResult > SolveGhostResidual(
         const Evaluator &residual_eval, const std::vector< uint32_t > &support,
         uint32_t num_vars, uint32_t bitwidth
     );
@@ -39,7 +39,7 @@ namespace cobra {
     // Uses RecoverWeightedPoly with max_degree=0, grid_degree=2.
     // Enumerates ghost primitives in priority order (mul_sub_and first).
     // Requires support.size() <= 6.
-    std::optional< GhostSolveResult > SolveFactoredGhostResidual(
+    SolverResult< GhostSolveResult > SolveFactoredGhostResidual(
         const Evaluator &residual_eval, const std::vector< uint32_t > &support,
         uint32_t num_vars, uint32_t bitwidth, uint8_t max_degree = 0, uint8_t grid_degree = 2
     );

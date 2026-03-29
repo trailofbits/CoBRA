@@ -2,6 +2,8 @@
 #include "cobra/core/Classification.h"
 #include "cobra/core/Classifier.h"
 #include "cobra/core/Expr.h"
+#include "cobra/core/ExprCost.h"
+#include "cobra/core/ExprUtils.h"
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/SignatureEval.h"
 #include "cobra/core/Simplifier.h"
@@ -353,6 +355,41 @@ TEST(SimplifierTest, PolynomialTargetRecoveredViaSplit) {
     EXPECT_TRUE(fw.passed);
 }
 
+TEST(SimplifierTest, ProductIdentityCollapsesToPlainProduct) {
+    auto x = []() { return Expr::Variable(0); };
+    auto y = []() { return Expr::Variable(1); };
+
+    auto obf = Expr::Add(
+        Expr::Mul(Expr::BitwiseAnd(x(), y()), Expr::BitwiseOr(x(), y())),
+        Expr::Mul(
+            Expr::BitwiseAnd(x(), Expr::BitwiseNot(y())),
+            Expr::BitwiseAnd(Expr::BitwiseNot(x()), y())
+        )
+    );
+
+    auto original_cost = ComputeCost(*obf).cost;
+    auto evaluator = [](const std::vector< uint64_t > &v) -> uint64_t { return v[0] * v[1]; };
+
+    auto sig                        = EvaluateBooleanSignature(*obf, 2, 64);
+    std::vector< std::string > vars = { "x", "y" };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
+    opts.evaluator = evaluator;
+
+    auto result = Simplify(sig, vars, obf.get(), opts);
+    ASSERT_TRUE(result.has_value());
+    ASSERT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
+    EXPECT_TRUE(result.value().verified);
+
+    auto simplified_cost = ComputeCost(*result.value().expr).cost;
+    EXPECT_TRUE(IsBetter(simplified_cost, original_cost));
+
+    auto rendered = Render(*result.value().expr, result.value().real_vars);
+    EXPECT_TRUE(rendered == "x * y" || rendered == "y * x") << rendered;
+
+    auto fw = FullWidthCheckEval(evaluator, 2, *result.value().expr, 64);
+    EXPECT_TRUE(fw.passed);
+}
+
 TEST(SimplifierTest, PolynomialXSquaredRecovered) {
     // f(x) = x^2. sig = [0, 1]. CoB gives coefficient 1 for {x}.
     // Pattern matcher matches "x" but full-width check rejects it
@@ -533,7 +570,6 @@ TEST(SimplifierTest, MixedRewrite_BooleanConstantSignatureRemainsFullWidthLive) 
         EXPECT_NE(Render(*result.value().expr, result.value().real_vars), "0");
     } else {
         EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kUnchangedUnsupported);
-        EXPECT_EQ(result.value().diag.classification.route, Route::kMixedRewrite);
     }
 }
 
@@ -578,6 +614,9 @@ TEST(SimplifierTest, EarlyDecomposition_ProductCoreSurvivesPreconditioning) {
     auto result = Simplify(sig, vars, obf.get(), opts);
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
+    auto original_cost   = ComputeCost(*obf).cost;
+    auto simplified_cost = ComputeCost(*result.value().expr).cost;
+    EXPECT_TRUE(IsBetter(simplified_cost, original_cost));
 
     if (result.value().kind == SimplifyOutcome::Kind::kSimplified) {
         auto check = FullWidthCheckEval(evaluator, 3, *result.value().expr, 64);
@@ -763,7 +802,9 @@ TEST(SimplifierTest, BitwiseOverArith_NoMul_Unsupported) {
 
     auto result = Simplify(sig, vars, input.get(), opts);
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kUnchangedUnsupported);
+    // Technique-level DAG finds a valid simplification path
+    // that the old monolithic decomposition missed.
+    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
 }
 
 TEST(SimplifierTest, MultivarHighPower_PurePolynomial_Simplifies) {
@@ -874,6 +915,9 @@ TEST(SimplifierTest, MixedRewrite_TopLevelXorSucceeds) {
 }
 
 TEST(SimplifierTest, MixedRewrite_NoEvaluatorShortCircuit) {
+    // The orchestrator tries the supported pipeline for MixedRewrite
+    // expressions even without an evaluator.  The boolean signature
+    // is sufficient for the supported solve to succeed.
     std::vector< uint64_t > sig(8);
     for (uint32_t i = 0; i < 8; ++i) {
         uint64_t x = (i >> 0) & 1;
@@ -887,11 +931,10 @@ TEST(SimplifierTest, MixedRewrite_NoEvaluatorShortCircuit) {
         Expr::Mul(Expr::BitwiseXor(Expr::Variable(0), Expr::Variable(1)), Expr::Variable(2));
 
     Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
-    // No evaluator
 
     auto result = Simplify(sig, vars, input.get(), opts);
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kUnchangedUnsupported);
+    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
 }
 
 TEST(SimplifierTest, MixedRewrite_DiagnosticPayload) {
@@ -919,16 +962,13 @@ TEST(SimplifierTest, MixedRewrite_DiagnosticPayload) {
     auto result = Simplify(sig, vars, input.get(), opts);
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
-    EXPECT_EQ(result.value().diag.classification.route, Route::kMixedRewrite);
 }
 
 TEST(SimplifierTest, MixedRewrite_BugOrGap) {
-    // Test BugOrGap wrapping: supported route that hits
-    // VerificationFailed surfaces as Kind::kError.
-    // CoB is exact by construction, so spot-check only fails on
-    // internal bugs. We verify the structural contract: a wrong
-    // sig still produces a valid result (CoB matches the sig),
-    // and the diagnostic payload is populated.
+    // Deliberate sig/evaluator mismatch: sig=[0,0,0,99] but
+    // evaluator=x*y (gives 1 at (1,1), not 99). The sig-derived
+    // CoB candidate fails full-width check, but the residual solver
+    // table recovers x*y from the evaluator-based residual.
     std::vector< uint64_t > sig     = { 0, 0, 0, 99 };
     std::vector< std::string > vars = { "x", "y" };
 
@@ -940,16 +980,11 @@ TEST(SimplifierTest, MixedRewrite_BugOrGap) {
     opts.evaluator = evaluator;
 
     auto result = Simplify(sig, vars, input.get(), opts);
-    // Supported route always succeeds (CoB is exact). The result
-    // is sig-correct even though the sig doesn't match the evaluator.
-    // BugOrGap wrapping would trigger on actual internal failures.
     ASSERT_TRUE(result.has_value());
-    if (result.value().kind == SimplifyOutcome::Kind::kError) {
-        EXPECT_NE(result.value().diag.reason.find("BugOrGap"), std::string::npos);
-    } else {
-        EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
-        EXPECT_EQ(result.value().diag.classification.route, Route::kMultilinear);
-    }
+    // Shared residual solver table can now recover the correct
+    // expression from the evaluator-based residual, producing a
+    // verified result.
+    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
 }
 
 TEST(SimplifierTest, MixedRewrite_SupportedRouteStillSimplifies) {
@@ -1022,6 +1057,7 @@ TEST(SimplifierTest, AnfNotUsedForNonBoolean) {
 
 TEST(SimplifierTest, BitwiseOverPolyDOrCA) {
     // Ground truth: d | (c * a), vars: d=0, c=1, a=2
+    // Handle-counted bitwise fanout now resolves this.
     auto eval = [](const std::vector< uint64_t > &v) -> uint64_t {
         return v[0] | (v[1] * v[2]);
     };
@@ -1037,14 +1073,18 @@ TEST(SimplifierTest, BitwiseOverPolyDOrCA) {
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
-
-    // Verify full-width correctness
     auto fw = FullWidthCheckEval(eval, 3, *result.value().expr, 64);
     EXPECT_TRUE(fw.passed);
 }
 
 TEST(SimplifierTest, BitwiseOverPolyEEAndD) {
-    // Ground truth: (e*e) & d
+    // Ground truth: (e*e) & d — AND-gated polynomial. On {0,1},
+    // e*e == e&e so the boolean signature is degenerate. Bitwise
+    // decomposition finds AND(e, d) which is {0,1}-correct but
+    // diverges at full width. The arithmetic-atom lifter exposes
+    // this as outer (v0 & d) with v0 = e*e; the outer problem is
+    // pure bitwise and trivially solved; substitution produces the
+    // ground truth.
     auto eval = [](const std::vector< uint64_t > &v) -> uint64_t {
         return (v[0] * v[0]) & v[1];
     };
@@ -1056,17 +1096,19 @@ TEST(SimplifierTest, BitwiseOverPolyEEAndD) {
     std::vector< std::string > vars = { "e", "d" };
     Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
     opts.evaluator = eval;
+    auto input_expr =
+        Expr::BitwiseAnd(Expr::Mul(Expr::Variable(0), Expr::Variable(0)), Expr::Variable(1));
 
-    auto result = Simplify(sig, vars, nullptr, opts);
+    auto result = Simplify(sig, vars, input_expr.get(), opts);
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
-
     auto fw = FullWidthCheckEval(eval, 2, *result.value().expr, 64);
     EXPECT_TRUE(fw.passed);
 }
 
 TEST(SimplifierTest, BitwiseOverPolyDSquaredXorA) {
     // Ground truth: (d*d) ^ a
+    // Handle-counted bitwise fanout now resolves this.
     auto eval = [](const std::vector< uint64_t > &v) -> uint64_t {
         return (v[0] * v[0]) ^ v[1];
     };
@@ -1082,13 +1124,14 @@ TEST(SimplifierTest, BitwiseOverPolyDSquaredXorA) {
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
-
     auto fw = FullWidthCheckEval(eval, 2, *result.value().expr, 64);
     EXPECT_TRUE(fw.passed);
 }
 
 TEST(SimplifierTest, BitwiseDecompDisabledPreservesBaseline) {
-    // With flag off, the decomposition path is skipped
+    // d | (c*a): with expanded budget (256), the non-recursive
+    // technique DAG (SingletonPolyRecovery) recovers this even
+    // without bitwise fanout.
     auto eval = [](const std::vector< uint64_t > &v) -> uint64_t {
         return v[0] | (v[1] * v[2]);
     };
@@ -1106,9 +1149,9 @@ TEST(SimplifierTest, BitwiseDecompDisabledPreservesBaseline) {
 
     auto result = Simplify(sig, vars, nullptr, opts);
     ASSERT_TRUE(result.has_value());
-    // Even without decomposition, polynomial recovery (Step 4b)
-    // finds a correct expression verified at full width.
     EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
+    auto fw = FullWidthCheckEval(eval, 3, *result.value().expr, 64);
+    EXPECT_TRUE(fw.passed);
 }
 
 // --- Operand simplification integration ---
@@ -1135,6 +1178,205 @@ TEST(SimplifierTest, OperandSimplificationEnablesPipeline) {
     auto result = Simplify(sig, vars, e.get(), opts);
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
+}
+
+TEST(SimplifierTest, OperandSimplifyCollapsesObfuscatedProjectionFactor) {
+    auto hidden_a = Expr::Add(
+        Expr::Add(
+            Expr::Add(
+                Expr::Negate(
+                    Expr::Mul(
+                        Expr::Constant(6),
+                        Expr::BitwiseAnd(Expr::Variable(0), Expr::Variable(1))
+                    )
+                ),
+                Expr::Mul(
+                    Expr::Constant(7),
+                    Expr::BitwiseNot(Expr::BitwiseXor(Expr::Variable(0), Expr::Variable(1)))
+                )
+            ),
+            Expr::Negate(
+                Expr::Mul(
+                    Expr::Constant(8),
+                    Expr::BitwiseNot(Expr::BitwiseOr(Expr::Variable(0), Expr::Variable(1)))
+                )
+            )
+        ),
+        Expr::BitwiseNot(Expr::Variable(1))
+    );
+    auto input    = Expr::Mul(std::move(hidden_a), Expr::Variable(2));
+    auto original = CloneExpr(*input);
+
+    auto sig                        = EvaluateBooleanSignature(*input, 3, 64);
+    std::vector< std::string > vars = { "a", "b", "y" };
+    auto eval = [&](const std::vector< uint64_t > &v) { return EvalExpr(*original, v, 64); };
+
+    Options opts;
+    opts.bitwidth  = 64;
+    opts.evaluator = eval;
+
+    auto result = Simplify(sig, vars, input.get(), opts);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
+    EXPECT_EQ(Render(*result.value().expr, result.value().real_vars), "a * y");
+
+    auto remapped = CloneExpr(*result.value().expr);
+    auto support  = BuildVarSupport(vars, result.value().real_vars);
+    RemapVarIndices(*remapped, support);
+
+    auto fw = FullWidthCheckEval(eval, 3, *remapped, 64);
+    EXPECT_TRUE(fw.passed);
+}
+
+TEST(SimplifierTest, SemilinearCanonicalizesMaskedComplementSum) {
+    auto input = Expr::Add(
+        Expr::Constant(1),
+        Expr::BitwiseAnd(Expr::BitwiseNot(Expr::Variable(0)), Expr::Variable(1))
+    );
+    auto original = CloneExpr(*input);
+
+    auto sig                        = EvaluateBooleanSignature(*input, 2, 64);
+    std::vector< std::string > vars = { "a", "y" };
+
+    Options opts;
+    opts.bitwidth  = 64;
+    opts.evaluator = [&](const std::vector< uint64_t > &v) {
+        return EvalExpr(*original, v, 64);
+    };
+
+    auto result = Simplify(sig, vars, input.get(), opts);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
+    EXPECT_EQ(Render(*result.value().expr, result.value().real_vars), "(~a & y) + 1");
+
+    auto remapped = CloneExpr(*result.value().expr);
+    auto support  = BuildVarSupport(vars, result.value().real_vars);
+    RemapVarIndices(*remapped, support);
+
+    auto fw = FullWidthCheckEval(opts.evaluator, 2, *remapped, 64);
+    EXPECT_TRUE(fw.passed);
+}
+
+TEST(SimplifierTest, SemilinearCanonicalizesScaledComplement) {
+    constexpr uint64_t kNegThree = UINT64_MAX - 2;
+
+    auto input = Expr::Add(
+        Expr::Constant(kNegThree),
+        Expr::Mul(
+            Expr::Constant(kNegThree),
+            Expr::BitwiseOr(
+                Expr::Variable(0), Expr::BitwiseOr(Expr::Variable(1), Expr::Variable(2))
+            )
+        )
+    );
+    auto original = CloneExpr(*input);
+
+    auto sig                        = EvaluateBooleanSignature(*input, 3, 64);
+    std::vector< std::string > vars = { "a", "y", "z" };
+
+    Options opts;
+    opts.bitwidth  = 64;
+    opts.evaluator = [&](const std::vector< uint64_t > &v) {
+        return EvalExpr(*original, v, 64);
+    };
+
+    auto result = Simplify(sig, vars, input.get(), opts);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
+    EXPECT_EQ(Render(*result.value().expr, result.value().real_vars), "3 * ~(a | y | z)");
+
+    auto remapped = CloneExpr(*result.value().expr);
+    auto support  = BuildVarSupport(vars, result.value().real_vars);
+    RemapVarIndices(*remapped, support);
+
+    auto fw = FullWidthCheckEval(opts.evaluator, 3, *remapped, 64);
+    EXPECT_TRUE(fw.passed);
+}
+
+TEST(SimplifierTest, SemilinearCanonicalizesTwoVarXorAffineCombo) {
+    auto input = Expr::Add(
+        Expr::Constant(3),
+        Expr::Add(
+            Expr::Mul(Expr::Constant(3), Expr::Variable(0)),
+            Expr::Add(
+                Expr::Mul(Expr::Constant(2), Expr::Variable(1)),
+                Expr::Negate(
+                    Expr::Mul(
+                        Expr::Constant(4),
+                        Expr::BitwiseAnd(Expr::Variable(0), Expr::Variable(1))
+                    )
+                )
+            )
+        )
+    );
+    auto original = CloneExpr(*input);
+
+    auto sig                        = EvaluateBooleanSignature(*input, 2, 64);
+    std::vector< std::string > vars = { "b", "x" };
+
+    Options opts;
+    opts.bitwidth  = 64;
+    opts.evaluator = [&](const std::vector< uint64_t > &v) {
+        return EvalExpr(*original, v, 64);
+    };
+
+    auto result = Simplify(sig, vars, input.get(), opts);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
+
+    auto rendered = Render(*result.value().expr, result.value().real_vars);
+    EXPECT_NE(rendered.find("^"), std::string::npos);
+    EXPECT_TRUE(IsBetter(ComputeCost(*result.value().expr).cost, ComputeCost(*original).cost));
+
+    auto remapped = CloneExpr(*result.value().expr);
+    auto support  = BuildVarSupport(vars, result.value().real_vars);
+    RemapVarIndices(*remapped, support);
+
+    auto fw = FullWidthCheckEval(opts.evaluator, 2, *remapped, 64);
+    EXPECT_TRUE(fw.passed);
+}
+
+TEST(SimplifierTest, SemilinearCanonicalizesTwoVarOrNotAffineCombo) {
+    auto input = Expr::Add(
+        Expr::Constant(2),
+        Expr::Add(
+            Expr::Negate(Expr::Variable(0)),
+            Expr::Add(
+                Expr::Mul(Expr::Constant(2), Expr::Variable(1)),
+                Expr::Negate(
+                    Expr::Mul(
+                        Expr::Constant(2),
+                        Expr::BitwiseAnd(Expr::Variable(0), Expr::Variable(1))
+                    )
+                )
+            )
+        )
+    );
+    auto original = CloneExpr(*input);
+
+    auto sig                        = EvaluateBooleanSignature(*input, 2, 64);
+    std::vector< std::string > vars = { "a", "y" };
+
+    Options opts;
+    opts.bitwidth  = 64;
+    opts.evaluator = [&](const std::vector< uint64_t > &v) {
+        return EvalExpr(*original, v, 64);
+    };
+
+    auto result = Simplify(sig, vars, input.get(), opts);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
+
+    auto rendered = Render(*result.value().expr, result.value().real_vars);
+    EXPECT_NE(rendered.find("a | ~y"), std::string::npos);
+    EXPECT_TRUE(IsBetter(ComputeCost(*result.value().expr).cost, ComputeCost(*original).cost));
+
+    auto remapped = CloneExpr(*result.value().expr);
+    auto support  = BuildVarSupport(vars, result.value().real_vars);
+    RemapVarIndices(*remapped, support);
+
+    auto fw = FullWidthCheckEval(opts.evaluator, 2, *remapped, 64);
+    EXPECT_TRUE(fw.passed);
 }
 
 TEST(SimplifierTest, NoOpOperandSimplFallsToXorLowering) {
@@ -1246,10 +1488,6 @@ TEST(SimplifierTest, NotOverSquareRouteImproved) {
     auto result = Simplify(sig, vars, e.get(), opts);
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
-
-    // Key assertion: NOT lowering should cause reclassification
-    // so the classification route is NOT MixedRewrite.
-    EXPECT_NE(result.value().diag.classification.route, Route::kMixedRewrite);
 }
 
 // PLDIPoly L188: product identity + large-coefficient linear residual.

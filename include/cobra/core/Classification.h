@@ -54,40 +54,29 @@ namespace cobra {
         return (static_cast< uint32_t >(flags) & static_cast< uint32_t >(f)) != 0;
     }
 
-    enum class Route {
-        kBitwiseOnly,
-        kMultilinear,
-        kPowerRecovery,
-        kMixedRewrite,
-        kUnsupported,
-    };
-
     struct Classification
     {
         SemanticClass semantic;
         StructuralFlag flags;
-        Route route;
     };
 
-    // Route derivation from flags (used by classifier and rewrite loop)
-    inline Route DeriveRoute(StructuralFlag flags) {
-        if (HasFlag(flags, kSfHasUnknownShape)) { return Route::kUnsupported; }
+    // Returns true if the expression has unrecovered mixed structure
+    // that XOR lowering or other structural transforms could not reduce.
+    inline bool NeedsStructuralRecovery(StructuralFlag flags) {
+        if (HasFlag(flags, kSfHasUnknownShape)) { return true; }
+        if (HasFlag(flags, kSfHasMixedProduct)) { return true; }
         if (HasFlag(flags, kSfHasBitwiseOverArith) && HasFlag(flags, kSfHasMul)) {
-            return Route::kMixedRewrite;
+            return true;
         }
-        if (HasFlag(flags, kSfHasMixedProduct)) { return Route::kMixedRewrite; }
-        if (HasFlag(flags, kSfHasArithOverBitwise) && HasFlag(flags, kSfHasMul)) {
-            return Route::kMixedRewrite;
-        }
-        // kSfHasMultivarHighPower is an informational flag, not an
-        // automatic Unsupported. Pure polynomial multivar high power
-        // (no hybrid blockers) is handled by the supported pipeline
-        // via PowerRecovery.
-        if (HasFlag(flags, kSfHasSingletonPower) || HasFlag(flags, kSfHasMultivarHighPower)) {
-            return Route::kPowerRecovery;
-        }
-        if (HasFlag(flags, kSfHasMultilinearProduct)) { return Route::kMultilinear; }
-        return Route::kBitwiseOnly;
+        return false;
+    }
+
+    // Returns true if the expression is a candidate for folded-AST
+    // exploration passes (mixed-product or bitwise-over-arith structure
+    // without unknown shape).
+    inline bool IsFoldedAstExplorationCandidate(StructuralFlag flags) {
+        if (HasFlag(flags, kSfHasUnknownShape)) { return false; }
+        return HasFlag(flags, kSfHasMixedProduct) || HasFlag(flags, kSfHasBitwiseOverArith);
     }
 
 } // namespace cobra

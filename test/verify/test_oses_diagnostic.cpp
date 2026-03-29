@@ -40,23 +40,6 @@ namespace {
         return s.substr(start, end - start + 1);
     }
 
-    std::string route_str(Route r) {
-        switch (r) {
-            case Route::kBitwiseOnly:
-                return "BitwiseOnly";
-            case Route::kMultilinear:
-                return "Multilinear";
-            case Route::kPowerRecovery:
-                return "PowerRecovery";
-            case Route::kMixedRewrite:
-                return "MixedRewrite";
-            case Route::kUnsupported:
-                return "Unsupported";
-            default:
-                return "Unknown";
-        }
-    }
-
     std::string semantic_str(SemanticClass s) {
         switch (s) {
             case SemanticClass::kLinear:
@@ -320,7 +303,6 @@ TEST(OSESDiagnostic, UnsupportedFamilySnapshot) {
     ASSERT_FALSE(entries.empty());
 
     std::map< std::string, int > by_family;
-    std::map< std::string, std::map< std::string, int > > family_routes;
     std::map< std::string, std::map< std::string, int > > family_semantics;
     std::map< std::string, std::map< std::string, int > > family_reasons;
     std::map< std::string, std::map< std::string, int > > family_vars;
@@ -330,7 +312,6 @@ TEST(OSESDiagnostic, UnsupportedFamilySnapshot) {
         const std::string family = family_str(entry.family);
         unsupported_lines.insert(entry.line_num);
         by_family[family]++;
-        family_routes[family][route_str(entry.cls.route)]++;
         family_semantics[family][semantic_str(entry.cls.semantic)]++;
         family_reasons[family][entry.reason]++;
         family_vars[family][std::to_string(entry.num_vars) + "v"]++;
@@ -341,7 +322,6 @@ TEST(OSESDiagnostic, UnsupportedFamilySnapshot) {
     for (const auto family : family_order()) {
         const std::string name = family_str(family);
         std::cerr << "  " << name << ": " << by_family[name] << "\n";
-        std::cerr << "    routes:    " << join_counts(family_routes[name]) << "\n";
         std::cerr << "    semantics: " << join_counts(family_semantics[name]) << "\n";
         std::cerr << "    vars:      " << join_counts(family_vars[name]) << "\n";
         std::cerr << "    reasons:   " << join_counts(family_reasons[name]) << "\n";
@@ -390,8 +370,7 @@ TEST(OSESDiagnostic, UnsupportedFamilySnapshot) {
     for (const auto &entry : entries) {
         if (entry.family != OSESFamily::kUncategorized) { continue; }
         any_uncategorized = true;
-        std::cerr << "  L" << entry.line_num << " route=" << route_str(entry.cls.route)
-                  << " semantic=" << semantic_str(entry.cls.semantic)
+        std::cerr << "  L" << entry.line_num << " semantic=" << semantic_str(entry.cls.semantic)
                   << " flags=" << flag_str(entry.cls.flags) << " vars=" << entry.num_vars
                   << " reason=\"" << entry.reason << "\""
                   << " gt=\"" << entry.ground_truth.substr(0, 120) << "\"\n";

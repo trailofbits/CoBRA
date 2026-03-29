@@ -9,18 +9,15 @@
 #include <utility>
 #include <vector>
 
-namespace cobra {
+size_t std::hash< cobra::AtomKey >::operator()(const cobra::AtomKey &k) const {
+    using cobra::detail::hash_combine;
+    size_t h = std::hash< size_t >{}(k.support.size());
+    for (auto v : k.support) { h = hash_combine(h, std::hash< uint32_t >{}(v)); }
+    for (auto t : k.truth_table) { h = hash_combine(h, std::hash< uint64_t >{}(t)); }
+    return h;
+}
 
-    size_t AtomKeyHash::operator()(const AtomKey &k) const {
-        size_t h = std::hash< size_t >{}(k.support.size());
-        for (auto v : k.support) {
-            h ^= std::hash< uint32_t >{}(v) + 0x9e3779b9 + (h << 6) + (h >> 2);
-        }
-        for (auto t : k.truth_table) {
-            h ^= std::hash< uint64_t >{}(t) + 0x9e3779b9 + (h << 6) + (h >> 2);
-        }
-        return h;
-    }
+namespace cobra {
 
     namespace {
 

@@ -8,7 +8,7 @@ namespace cobra {
 
     using Coeff = uint64_t;
 
-    using CoeffMap = std::unordered_map< MonomialKey, Coeff, MonomialKeyHash >;
+    using CoeffMap = std::unordered_map< MonomialKey, Coeff >;
 
     struct PolyIR
     {

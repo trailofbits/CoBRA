@@ -184,7 +184,6 @@ TEST(StructuralClassifierTest, PureArithmetic) {
     auto e = Expr::Add(Expr::Variable(0), Expr::Variable(1));
     auto c = ClassifyStructural(*e);
     EXPECT_EQ(c.flags, kSfHasArithmetic);
-    EXPECT_EQ(c.route, Route::kBitwiseOnly);
 }
 
 TEST(StructuralClassifierTest, PureBitwise) {
@@ -192,7 +191,6 @@ TEST(StructuralClassifierTest, PureBitwise) {
     auto e = Expr::BitwiseAnd(Expr::Variable(0), Expr::Variable(1));
     auto c = ClassifyStructural(*e);
     EXPECT_EQ(c.flags, kSfHasBitwise);
-    EXPECT_EQ(c.route, Route::kBitwiseOnly);
 }
 
 TEST(StructuralClassifierTest, MultilinearProduct) {
@@ -200,7 +198,6 @@ TEST(StructuralClassifierTest, MultilinearProduct) {
     auto e = Expr::Mul(Expr::Variable(0), Expr::Variable(1));
     auto c = ClassifyStructural(*e);
     EXPECT_EQ(c.flags, kSfHasArithmetic | kSfHasMul | kSfHasMultilinearProduct);
-    EXPECT_EQ(c.route, Route::kMultilinear);
 }
 
 TEST(StructuralClassifierTest, SingletonPower) {
@@ -208,7 +205,6 @@ TEST(StructuralClassifierTest, SingletonPower) {
     auto e = Expr::Mul(Expr::Variable(0), Expr::Variable(0));
     auto c = ClassifyStructural(*e);
     EXPECT_EQ(c.flags, kSfHasArithmetic | kSfHasMul | kSfHasSingletonPower);
-    EXPECT_EQ(c.route, Route::kPowerRecovery);
 }
 
 TEST(StructuralClassifierTest, SingletonPowerGt2) {
@@ -218,7 +214,6 @@ TEST(StructuralClassifierTest, SingletonPowerGt2) {
     EXPECT_EQ(
         c.flags, kSfHasArithmetic | kSfHasMul | kSfHasSingletonPower | kSfHasSingletonPowerGt2
     );
-    EXPECT_EQ(c.route, Route::kPowerRecovery);
 }
 
 TEST(StructuralClassifierTest, MixedProductAndTimes) {
@@ -231,7 +226,6 @@ TEST(StructuralClassifierTest, MixedProductAndTimes) {
         kSfHasArithmetic | kSfHasBitwise | kSfHasMul | kSfHasMultilinearProduct
             | kSfHasMixedProduct | kSfHasArithOverBitwise
     );
-    EXPECT_EQ(c.route, Route::kMixedRewrite);
 }
 
 TEST(StructuralClassifierTest, MixedProductXorTimes) {
@@ -244,7 +238,6 @@ TEST(StructuralClassifierTest, MixedProductXorTimes) {
         kSfHasArithmetic | kSfHasBitwise | kSfHasMul | kSfHasMultilinearProduct
             | kSfHasMixedProduct | kSfHasArithOverBitwise
     );
-    EXPECT_EQ(c.route, Route::kMixedRewrite);
 }
 
 TEST(StructuralClassifierTest, BitwiseOverArith) {
@@ -253,7 +246,6 @@ TEST(StructuralClassifierTest, BitwiseOverArith) {
         Expr::BitwiseAnd(Expr::Add(Expr::Variable(0), Expr::Variable(1)), Expr::Variable(2));
     auto c = ClassifyStructural(*e);
     EXPECT_EQ(c.flags, kSfHasArithmetic | kSfHasBitwise | kSfHasBitwiseOverArith);
-    EXPECT_EQ(c.route, Route::kBitwiseOnly);
 }
 
 TEST(StructuralClassifierTest, BitwiseOverArithXor) {
@@ -266,7 +258,6 @@ TEST(StructuralClassifierTest, BitwiseOverArithXor) {
         kSfHasArithmetic | kSfHasBitwise | kSfHasMul | kSfHasMultilinearProduct
             | kSfHasBitwiseOverArith
     );
-    EXPECT_EQ(c.route, Route::kMixedRewrite);
 }
 
 TEST(StructuralClassifierTest, ArithOverBitwiseOnly) {
@@ -275,7 +266,6 @@ TEST(StructuralClassifierTest, ArithOverBitwiseOnly) {
         Expr::Mul(Expr::Constant(3), Expr::BitwiseAnd(Expr::Variable(0), Expr::Variable(1)));
     auto c = ClassifyStructural(*e);
     EXPECT_EQ(c.flags, kSfHasArithmetic | kSfHasBitwise | kSfHasArithOverBitwise);
-    EXPECT_EQ(c.route, Route::kBitwiseOnly);
 }
 
 TEST(StructuralClassifierTest, MultivarHighPowerPure) {
@@ -284,7 +274,6 @@ TEST(StructuralClassifierTest, MultivarHighPowerPure) {
     auto e = Expr::Mul(Expr::Mul(Expr::Variable(0), Expr::Variable(0)), Expr::Variable(1));
     auto c = ClassifyStructural(*e);
     EXPECT_EQ(c.flags, kSfHasArithmetic | kSfHasMul | kSfHasMultivarHighPower);
-    EXPECT_EQ(c.route, Route::kPowerRecovery);
 }
 
 TEST(StructuralClassifierTest, MultivarHighPowerPureCubic) {
@@ -294,7 +283,6 @@ TEST(StructuralClassifierTest, MultivarHighPowerPureCubic) {
     auto e   = Expr::Add(std::move(x2y), std::move(x3));
     auto c   = ClassifyStructural(*e);
     EXPECT_TRUE(HasFlag(c.flags, kSfHasMultivarHighPower));
-    EXPECT_EQ(c.route, Route::kPowerRecovery);
 }
 
 TEST(StructuralClassifierTest, MultivarHighPowerWithBitwiseAnd) {
@@ -304,7 +292,6 @@ TEST(StructuralClassifierTest, MultivarHighPowerWithBitwiseAnd) {
     auto c   = ClassifyStructural(*e);
     EXPECT_TRUE(HasFlag(c.flags, kSfHasMultivarHighPower));
     EXPECT_TRUE(HasFlag(c.flags, kSfHasBitwiseOverArith));
-    EXPECT_EQ(c.route, Route::kMixedRewrite);
 }
 
 TEST(StructuralClassifierTest, MultivarHighPowerWithMixedProduct) {
@@ -316,7 +303,6 @@ TEST(StructuralClassifierTest, MultivarHighPowerWithMixedProduct) {
     auto c   = ClassifyStructural(*e);
     EXPECT_TRUE(HasFlag(c.flags, kSfHasMultivarHighPower));
     EXPECT_TRUE(HasFlag(c.flags, kSfHasMixedProduct));
-    EXPECT_EQ(c.route, Route::kMixedRewrite);
 }
 
 TEST(StructuralClassifierTest, TopLevelXor) {
@@ -324,7 +310,6 @@ TEST(StructuralClassifierTest, TopLevelXor) {
     auto e = Expr::BitwiseXor(Expr::Variable(0), Expr::Variable(1));
     auto c = ClassifyStructural(*e);
     EXPECT_EQ(c.flags, kSfHasBitwise);
-    EXPECT_EQ(c.route, Route::kBitwiseOnly);
 }
 
 TEST(StructuralClassifierTest, LinearMBABitwiseOnly) {
@@ -335,7 +320,6 @@ TEST(StructuralClassifierTest, LinearMBABitwiseOnly) {
     );
     auto c = ClassifyStructural(*e);
     EXPECT_EQ(c.flags, kSfHasArithmetic | kSfHasBitwise | kSfHasArithOverBitwise);
-    EXPECT_EQ(c.route, Route::kBitwiseOnly);
 }
 
 TEST(StructuralClassifierTest, NegMixedProduct) {
@@ -349,7 +333,6 @@ TEST(StructuralClassifierTest, NegMixedProduct) {
         kSfHasArithmetic | kSfHasBitwise | kSfHasMul | kSfHasMultilinearProduct
             | kSfHasMixedProduct | kSfHasArithOverBitwise
     );
-    EXPECT_EQ(c.route, Route::kMixedRewrite);
 }
 
 TEST(StructuralClassifierTest, NotOverArith) {
@@ -357,7 +340,6 @@ TEST(StructuralClassifierTest, NotOverArith) {
     auto e = Expr::BitwiseNot(Expr::Add(Expr::Variable(0), Expr::Variable(1)));
     auto c = ClassifyStructural(*e);
     EXPECT_EQ(c.flags, kSfHasArithmetic | kSfHasBitwise | kSfHasBitwiseOverArith);
-    EXPECT_EQ(c.route, Route::kBitwiseOnly);
 }
 
 TEST(StructuralClassifierTest, BitwiseOverArithWithMul) {
@@ -366,7 +348,6 @@ TEST(StructuralClassifierTest, BitwiseOverArithWithMul) {
     auto c = ClassifyStructural(*e);
     EXPECT_TRUE(HasFlag(c.flags, kSfHasBitwiseOverArith));
     EXPECT_TRUE(HasFlag(c.flags, kSfHasMul));
-    EXPECT_EQ(c.route, Route::kMixedRewrite);
 }
 
 TEST(StructuralClassifierTest, FallbackDominatesSupported) {
@@ -376,7 +357,6 @@ TEST(StructuralClassifierTest, FallbackDominatesSupported) {
         Expr::Mul(Expr::BitwiseAnd(Expr::Variable(0), Expr::Variable(1)), Expr::Variable(2));
     auto e = Expr::Add(std::move(cube), std::move(mixed));
     auto c = ClassifyStructural(*e);
-    EXPECT_EQ(c.route, Route::kMixedRewrite);
 }
 
 TEST(StructuralClassifierTest, CubePlusMultilinearIsPowerRecovery) {
@@ -385,7 +365,6 @@ TEST(StructuralClassifierTest, CubePlusMultilinearIsPowerRecovery) {
     auto xy   = Expr::Mul(Expr::Variable(0), Expr::Variable(1));
     auto e    = Expr::Add(std::move(cube), std::move(xy));
     auto c    = ClassifyStructural(*e);
-    EXPECT_EQ(c.route, Route::kPowerRecovery);
 }
 
 // Semantic class tests

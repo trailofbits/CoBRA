@@ -1,8 +1,8 @@
 #pragma once
 
+#include "cobra/core/Evaluator.h"
 #include "cobra/core/Expr.h"
 #include <cstdint>
-#include <functional>
 #include <vector>
 
 namespace cobra {
@@ -36,11 +36,12 @@ namespace cobra {
     );
 
     // Verify that the simplified Expr produces the same output as an evaluator
-    // function at random full-width inputs. Like full_width_check but takes an
-    // evaluator callback instead of an original Expr.
+    // at random full-width inputs. When the evaluator is Expr-backed, the
+    // original side runs through its compiled program; otherwise this falls
+    // back to the evaluator callback.
     CheckResult FullWidthCheckEval(
-        const std::function< uint64_t(const std::vector< uint64_t > &) > &eval_original,
-        uint32_t num_vars, const Expr &simplified, uint32_t bitwidth, uint32_t num_samples = 8
+        const Evaluator &eval_original, uint32_t num_vars, const Expr &simplified,
+        uint32_t bitwidth, uint32_t num_samples = 8
     );
 
     // Evaluate an Expr tree at given variable values.

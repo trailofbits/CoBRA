@@ -552,9 +552,7 @@ $RECYCLE.BIN/
 # End of https://www.toptal.com/developers/gitignore/api/clion+all,linux,macos,windows,vs,c++
 
 ### CoBRA project-specific ###
-build/
-build-deps/
-build_check/
+build*/
 .cache/
 .serena/
 .worktrees/
@@ -562,4 +560,4 @@ docs/gaps/
 Testing/
 compile_commands.json
 CMakeFiles/
-.worktrees/
+docs/specs/

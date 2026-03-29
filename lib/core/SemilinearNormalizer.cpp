@@ -177,7 +177,7 @@ namespace cobra {
         {
             uint32_t bitwidth{};
             uint64_t mask{};
-            std::unordered_map< AtomKey, AtomId, AtomKeyHash > atom_map;
+            std::unordered_map< AtomKey, AtomId > atom_map;
             std::vector< AtomInfo > atom_table;
             std::unordered_map< uint64_t, AtomId > hash_cache;
             bool encountered_nonlinear = false;

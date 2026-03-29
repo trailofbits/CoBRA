@@ -2,8 +2,26 @@
 #include "cobra/core/Expr.h"
 #include "cobra/core/SignatureChecker.h"
 #include <gtest/gtest.h>
+#include <utility>
 
 using namespace cobra;
+
+namespace {
+
+    void DestroyExprIteratively(std::unique_ptr< Expr > expr) {
+        std::vector< std::unique_ptr< Expr > > stack;
+        if (expr) { stack.push_back(std::move(expr)); }
+
+        while (!stack.empty()) {
+            std::unique_ptr< Expr > node = std::move(stack.back());
+            stack.pop_back();
+            for (auto &child : node->children) {
+                if (child) { stack.push_back(std::move(child)); }
+            }
+        }
+    }
+
+} // namespace
 
 TEST(SignatureCheckerTest, EquivalentExpressions) {
     std::vector< uint64_t > original_sig = { 0, 1, 1, 2 };
@@ -205,5 +223,50 @@ TEST(FullWidthCheckTest, AlgebraicIdentityNegX) {
     // But original still has 2 vars
     std::vector< uint32_t > var_map = { 0 };
     auto result                     = FullWidthCheck(*original, 2, *simplified, var_map, 64);
+    EXPECT_TRUE(result.passed);
+}
+
+TEST(FullWidthCheckEvalTest, HandlesDeepUnaryChain) {
+    constexpr uint32_t kDepth = 50000;
+
+    auto expr = Expr::Variable(0);
+    for (uint32_t i = 0; i < kDepth; ++i) { expr = Expr::Negate(std::move(expr)); }
+
+    auto result = FullWidthCheckEval(
+        [](const std::vector< uint64_t > &v) -> uint64_t { return v[0]; }, 1, *expr, 64
+    );
+    EXPECT_TRUE(result.passed);
+    DestroyExprIteratively(std::move(expr));
+}
+
+TEST(FullWidthCheckEvalTest, UsesCompiledEvaluatorDirectly) {
+    auto original   = Expr::Add(Expr::Variable(0), Expr::Variable(1));
+    auto simplified = Expr::Add(Expr::Variable(0), Expr::Variable(1));
+    auto eval       = Evaluator::FromExpr(*original, 64);
+
+    auto result = FullWidthCheckEval(eval, 2, *simplified, 64);
+    EXPECT_TRUE(result.passed);
+}
+
+TEST(FullWidthCheckEvalTest, UsesCompiledEvaluatorWithRemap) {
+    auto original   = Expr::Add(Expr::Variable(0), Expr::Variable(2));
+    auto simplified = Expr::Add(Expr::Variable(0), Expr::Variable(1));
+    auto eval       = Evaluator::FromExpr(*original, 64)
+                          .Remap({ 0, 2 }, 3, EvaluatorTraceKind::kMappedGlobal);
+
+    auto result = FullWidthCheckEval(eval, 2, *simplified, 64);
+    EXPECT_TRUE(result.passed);
+}
+
+TEST(FullWidthCheckEvalTest, UsesCompiledEvaluatorWithSparseRemapSpan) {
+    auto original   = Expr::Variable(0);
+    auto simplified = Expr::Variable(0);
+    auto eval       = Evaluator::FromExpr(*original, 64)
+                          .Remap({ 0, 3 }, 4, EvaluatorTraceKind::kMappedGlobal);
+
+    EvaluatorWorkspace workspace;
+    EXPECT_EQ(eval.EvaluateWithWorkspace({ 7, 11 }, workspace), 7u);
+
+    auto result = FullWidthCheckEval(eval, 2, *simplified, 64);
     EXPECT_TRUE(result.passed);
 }

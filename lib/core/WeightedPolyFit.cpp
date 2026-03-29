@@ -7,9 +7,23 @@
 #include <bit>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <vector>
 
 namespace cobra {
+
+    namespace weighted_poly_fit {
+        enum Subcode : uint16_t {
+            kNoPivot       = 1,
+            kInconsistent  = 2,
+            kZeroPivot     = 3,
+            kNonInteger    = 4,
+            kFitFailed     = 5,
+            kTooManyVars   = 10,
+            kBitwidthRange = 11,
+            kNoSupportVars = 12,
+        };
+    } // namespace weighted_poly_fit
 
     namespace {
 
@@ -210,21 +224,60 @@ namespace cobra {
 
     } // namespace
 
-    std::optional< WeightedFitResult > RecoverWeightedPoly(
+    SolverResult< WeightedFitResult > RecoverWeightedPoly(
         const Evaluator &target, const WeightFn &weight,
         const std::vector< uint32_t > &support_vars, uint32_t total_num_vars, uint32_t bitwidth,
         uint8_t max_degree, uint8_t grid_degree
     ) {
-        if (support_vars.empty()) { return std::nullopt; }
-        if (total_num_vars > kMaxPolyVars) { return std::nullopt; }
-        if (bitwidth < 2 || bitwidth > 64) { return std::nullopt; }
+        if (support_vars.empty()) {
+            ReasonDetail reason{
+                .top = { .code = { ReasonCategory::kGuardFailed, ReasonDomain::kWeightedPolyFit,
+                                   weighted_poly_fit::kNoSupportVars },
+                        .message = "empty support variable set" }
+            };
+            return SolverResult< WeightedFitResult >::Inapplicable(std::move(reason));
+        }
+        if (total_num_vars > kMaxPolyVars) {
+            ReasonDetail reason{
+                .top = { .code = { ReasonCategory::kGuardFailed, ReasonDomain::kWeightedPolyFit,
+                                   weighted_poly_fit::kTooManyVars },
+                        .message = "total_num_vars exceeds kMaxPolyVars" }
+            };
+            return SolverResult< WeightedFitResult >::Inapplicable(std::move(reason));
+        }
+        if (bitwidth < 2 || bitwidth > 64) {
+            ReasonDetail reason{
+                .top = { .code = { ReasonCategory::kGuardFailed, ReasonDomain::kWeightedPolyFit,
+                                   weighted_poly_fit::kBitwidthRange },
+                        .message = "bitwidth out of range [2, 64]" }
+            };
+            return SolverResult< WeightedFitResult >::Inapplicable(std::move(reason));
+        }
         for (auto idx : support_vars) {
-            if (idx >= total_num_vars) { return std::nullopt; }
+            if (idx >= total_num_vars) {
+                ReasonDetail reason{
+                    .top = { .code    = { ReasonCategory::kGuardFailed,
+                                          ReasonDomain::kWeightedPolyFit,
+                                          weighted_poly_fit::kNoSupportVars },
+                            .message = "support index exceeds total_num_vars" }
+                };
+                return SolverResult< WeightedFitResult >::Inapplicable(std::move(reason));
+            }
         }
 
-        return TrySolve(
+        auto fit = TrySolve(
             target, weight, support_vars, total_num_vars, bitwidth, max_degree, grid_degree
         );
+        if (!fit.has_value()) {
+            ReasonDetail reason{
+                .top = { .code    = { ReasonCategory::kSearchExhausted,
+                                      ReasonDomain::kWeightedPolyFit,
+                                      weighted_poly_fit::kFitFailed },
+                        .message = "2-adic solve failed" }
+            };
+            return SolverResult< WeightedFitResult >::Blocked(std::move(reason));
+        }
+        return SolverResult< WeightedFitResult >::Success(std::move(*fit));
     }
 
 } // namespace cobra

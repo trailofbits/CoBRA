@@ -1,8 +1,8 @@
 #pragma once
 
+#include "cobra/core/Evaluator.h"
 #include "cobra/core/Expr.h"
 #include <cstdint>
-#include <functional>
 #include <vector>
 
 namespace cobra {
@@ -14,9 +14,7 @@ namespace cobra {
 
     // Evaluate an evaluator function at all 2^n Boolean input combinations.
     // Equivalent to the Expr overload but takes a callback instead of an AST.
-    std::vector< uint64_t > EvaluateBooleanSignature(
-        const std::function< uint64_t(const std::vector< uint64_t > &) > &eval,
-        uint32_t num_vars, uint32_t bitwidth
-    );
+    std::vector< uint64_t >
+    EvaluateBooleanSignature(const Evaluator &eval, uint32_t num_vars, uint32_t bitwidth);
 
 } // namespace cobra

@@ -1,7 +1,7 @@
 #pragma once
 
+#include "cobra/core/Evaluator.h"
 #include <cstdint>
-#include <functional>
 #include <string>
 #include <vector>
 
@@ -27,8 +27,7 @@ namespace cobra {
     // The evaluator must operate in the original variable space.
     EliminationResult EliminateAuxVars(
         const std::vector< uint64_t > &sig, const std::vector< std::string > &vars,
-        const std::function< uint64_t(const std::vector< uint64_t > &) > &eval,
-        uint32_t bitwidth
+        const Evaluator &eval, uint32_t bitwidth
     );
 
 } // namespace cobra

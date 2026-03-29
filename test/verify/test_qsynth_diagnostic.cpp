@@ -9,13 +9,12 @@
 #include "cobra/core/GhostResidualSolver.h"
 #include "cobra/core/MathUtils.h"
 #include "cobra/core/MultivarPolyRecovery.h"
-#include "cobra/core/OperandSimplifier.h"
 #include "cobra/core/PolyExprBuilder.h"
-#include "cobra/core/ProductIdentityRecoverer.h"
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/SignatureEval.h"
 #include "cobra/core/SignatureSimplifier.h"
 #include "cobra/core/Simplifier.h"
+#include "cobra/core/SimplifyOutcome.h"
 #include "cobra/core/TemplateDecomposer.h"
 #include "cobra/core/WeightedPolyFit.h"
 #include <algorithm>
@@ -158,7 +157,7 @@ TEST(QSynthDiagnostic, AnalyzeUnsolved) {
         );
 
         auto cls = ClassifyStructural(**folded_ptr);
-        if (cls.route != Route::kMixedRewrite) { continue; }
+        if (!NeedsStructuralRecovery(cls.flags)) { continue; }
 
         const auto &sig  = parse_result.value().sig;
         const auto &vars = parse_result.value().vars;
@@ -295,12 +294,24 @@ TEST(QSynthDiagnostic, DecompEngineTelemetry) {
 
         std::string label = "L" + std::to_string(line_num);
 
-        // Probe each extractor
-        auto prod = ExtractProductCore(dctx);
-        auto p2   = ExtractPolyCore(dctx, 2);
-        auto tmpl = ExtractTemplateCore(dctx);
-        auto p3   = ExtractPolyCore(dctx, 3);
-        auto p4   = ExtractPolyCore(dctx, 4);
+        // Probe each extractor — unwrap SolverResult into optional
+        // for diagnostic probe compatibility
+        auto prod_r = ExtractProductCore(dctx);
+        auto p2_r   = ExtractPolyCore(dctx, 2);
+        auto tmpl_r = ExtractTemplateCore(dctx);
+        auto p3_r   = ExtractPolyCore(dctx, 3);
+        auto p4_r   = ExtractPolyCore(dctx, 4);
+
+        std::optional< CoreCandidate > prod =
+            prod_r.Succeeded() ? std::optional(prod_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > p2 =
+            p2_r.Succeeded() ? std::optional(p2_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > tmpl =
+            tmpl_r.Succeeded() ? std::optional(tmpl_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > p3 =
+            p3_r.Succeeded() ? std::optional(p3_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > p4 =
+            p4_r.Succeeded() ? std::optional(p4_r.TakePayload()) : std::nullopt;
 
         bool any_core = false;
         if (prod.has_value()) {
@@ -360,7 +371,7 @@ TEST(QSynthDiagnostic, DecompEngineTelemetry) {
                 return std::nullopt;
             }
 
-            auto residual_eval = BuildResidualEvaluator(opts.evaluator, *core.expr, kBw);
+            auto residual_eval = BuildRemainderEvaluator(opts.evaluator, *core.expr, kBw);
             auto residual_sig  = EvaluateBooleanSignature(residual_eval, kNv, kBw);
 
             Options res_opts   = opts;
@@ -373,16 +384,14 @@ TEST(QSynthDiagnostic, DecompEngineTelemetry) {
             bool sup_solved    = false;
             bool sup_recombine = false;
             bool sup_verified  = false;
-            auto sup           = RunSupportedPipeline(residual_sig, vars, res_opts);
-            if (sup.has_value() && sup.value().kind == SimplifyOutcome::Kind::kSimplified) {
+            auto sup           = Simplify(residual_sig, vars, nullptr, res_opts);
+            if (sup.has_value() && sup->kind == SimplifyOutcome::Kind::kSimplified) {
                 sup_solved       = true;
-                sup_verified     = sup.value().verified;
-                auto solved_expr = CloneExpr(*sup.value().expr);
-                if (!sup.value().real_vars.empty()
-                    && sup.value().real_vars.size() < vars.size())
-                {
+                sup_verified     = sup->verified;
+                auto solved_expr = CloneExpr(*sup->expr);
+                if (!sup->real_vars.empty() && sup->real_vars.size() < vars.size()) {
                     std::vector< uint32_t > idx_map;
-                    for (const auto &rv : sup.value().real_vars) {
+                    for (const auto &rv : sup->real_vars) {
                         for (uint32_t j = 0; j < kNv; ++j) {
                             if (vars[j] == rv) {
                                 idx_map.push_back(j);
@@ -408,9 +417,9 @@ TEST(QSynthDiagnostic, DecompEngineTelemetry) {
                     std::cerr << "    DEBUG " << name << ": nv=" << kNv
                               << " core_kind=" << static_cast< int >(core.expr->kind)
                               << " sup_real_vars=[";
-                    for (size_t ri = 0; ri < sup.value().real_vars.size(); ++ri) {
+                    for (size_t ri = 0; ri < sup->real_vars.size(); ++ri) {
                         if (ri > 0) { std::cerr << ","; }
-                        std::cerr << sup.value().real_vars[ri];
+                        std::cerr << sup->real_vars[ri];
                     }
                     std::cerr << "] vars=[";
                     for (size_t ri = 0; ri < vars.size(); ++ri) {
@@ -454,9 +463,10 @@ TEST(QSynthDiagnostic, DecompEngineTelemetry) {
             if (res_count <= 6) {
                 auto rpoly =
                     RecoverAndVerifyPoly(residual_eval, res_sup, kNv, kBw, 4, deg_floor);
-                if (rpoly.has_value()) {
-                    poly_solved    = true;
-                    auto combined  = Expr::Add(CloneExpr(*core.expr), std::move(rpoly->expr));
+                if (rpoly.Succeeded()) {
+                    poly_solved = true;
+                    auto combined =
+                        Expr::Add(CloneExpr(*core.expr), std::move(rpoly.TakePayload().expr));
                     auto fwc       = FullWidthCheckEval(opts.evaluator, kNv, *combined, kBw);
                     poly_recombine = fwc.passed;
                 }
@@ -471,9 +481,11 @@ TEST(QSynthDiagnostic, DecompEngineTelemetry) {
             bool ghost_recombine = false;
             if (res_count <= 6) {
                 auto ghost = SolveGhostResidual(residual_eval, res_sup, kNv, kBw);
-                if (ghost.has_value()) {
-                    ghost_solved    = true;
-                    auto combined   = Expr::Add(CloneExpr(*core.expr), std::move(ghost->expr));
+                if (ghost.Succeeded()) {
+                    ghost_solved       = true;
+                    auto ghost_payload = ghost.TakePayload();
+                    auto combined =
+                        Expr::Add(CloneExpr(*core.expr), std::move(ghost_payload.expr));
                     auto fwc        = FullWidthCheckEval(opts.evaluator, kNv, *combined, kBw);
                     ghost_recombine = fwc.passed;
                 }
@@ -486,20 +498,24 @@ TEST(QSynthDiagnostic, DecompEngineTelemetry) {
             bool fd2_verified  = false;
             if (bn && res_count <= 6) {
                 auto fd0 = SolveFactoredGhostResidual(residual_eval, res_sup, kNv, kBw);
-                if (fd0.has_value()) {
-                    fd0_candidate = true;
-                    auto combined = Expr::Add(CloneExpr(*core.expr), std::move(fd0->expr));
-                    auto fwc      = FullWidthCheckEval(opts.evaluator, kNv, *combined, kBw);
-                    fd0_verified  = fwc.passed;
+                if (fd0.Succeeded()) {
+                    fd0_candidate    = true;
+                    auto fd0_payload = fd0.TakePayload();
+                    auto combined =
+                        Expr::Add(CloneExpr(*core.expr), std::move(fd0_payload.expr));
+                    auto fwc     = FullWidthCheckEval(opts.evaluator, kNv, *combined, kBw);
+                    fd0_verified = fwc.passed;
                 }
                 uint8_t grid = (res_count <= 2) ? 3 : 2;
                 auto fd2 =
                     SolveFactoredGhostResidual(residual_eval, res_sup, kNv, kBw, 2, grid);
-                if (fd2.has_value()) {
-                    fd2_candidate = true;
-                    auto combined = Expr::Add(CloneExpr(*core.expr), std::move(fd2->expr));
-                    auto fwc      = FullWidthCheckEval(opts.evaluator, kNv, *combined, kBw);
-                    fd2_verified  = fwc.passed;
+                if (fd2.Succeeded()) {
+                    fd2_candidate    = true;
+                    auto fd2_payload = fd2.TakePayload();
+                    auto combined =
+                        Expr::Add(CloneExpr(*core.expr), std::move(fd2_payload.expr));
+                    auto fwc     = FullWidthCheckEval(opts.evaluator, kNv, *combined, kBw);
+                    fd2_verified = fwc.passed;
                 }
             }
 
@@ -525,9 +541,9 @@ TEST(QSynthDiagnostic, DecompEngineTelemetry) {
                 }
 
                 auto td = TryTemplateDecomposition(res_sig_ctx, res_opts, res_count, nullptr);
-                if (td.has_value()) {
+                if (td.Succeeded()) {
                     tmpl_solved      = true;
-                    auto solved_expr = std::move(td->expr);
+                    auto solved_expr = std::move(td.TakePayload().expr);
                     if (res_elim.real_vars.size() < vars.size()) {
                         std::function< void(Expr &, const std::vector< uint32_t > &) > remap =
                             [&remap](Expr &e, const std::vector< uint32_t > &m) {
@@ -629,7 +645,7 @@ TEST(QSynthDiagnostic, DecompEngineTelemetry) {
                     if (core.expr->kind == Expr::Kind::kConstant) { return "constant_core"; }
 
                     auto residual_eval =
-                        BuildResidualEvaluator(opts.evaluator, *core.expr, kBw);
+                        BuildRemainderEvaluator(opts.evaluator, *core.expr, kBw);
                     const uint64_t kMask = Bitmask(kBw);
 
                     std::mt19937_64 rng(0xDECAF);
@@ -749,7 +765,9 @@ TEST(QSynthDiagnostic, DirectSuccessProductCoreInvestigation) {
                                         .sig          = sig,
                                         .current_expr = folded.get(),
                                         .cls          = orig_cls };
-        auto orig_prod     = ExtractProductCore(orig_dctx);
+        auto orig_prod_r = ExtractProductCore(orig_dctx);
+        std::optional< CoreCandidate > orig_prod =
+            orig_prod_r.Succeeded() ? std::optional(orig_prod_r.TakePayload()) : std::nullopt;
         bool orig_has_core = orig_prod.has_value();
         bool orig_direct   = false;
         if (orig_has_core) {
@@ -757,18 +775,12 @@ TEST(QSynthDiagnostic, DirectSuccessProductCoreInvestigation) {
             orig_direct = check.passed;
         }
 
-        // --- Phase B: apply preconditioning (Step 2 + 2.5) ---
+        // --- Phase B: preconditioning removed (now internal to orchestrator) ---
         auto current_expr = CloneExpr(*folded);
-        auto op_result    = SimplifyMixedOperands(std::move(current_expr), vars, opts);
-        current_expr      = std::move(op_result.expr);
-        auto pi_result    = CollapseProductIdentities(std::move(current_expr), vars, opts);
-        current_expr      = std::move(pi_result.expr);
 
         // --- Phase C: product core on post-preconditioning expr ---
         auto post_cls = ClassifyStructural(*current_expr);
-        auto post_sig = (op_result.changed || pi_result.changed)
-            ? EvaluateBooleanSignature(*current_expr, kNv, 64)
-            : sig;
+        auto post_sig = sig;
         DecompositionContext post_dctx{
             .opts         = opts,
             .vars         = vars,
@@ -776,7 +788,9 @@ TEST(QSynthDiagnostic, DirectSuccessProductCoreInvestigation) {
             .current_expr = current_expr.get(),
             .cls          = post_cls,
         };
-        auto post_prod     = ExtractProductCore(post_dctx);
+        auto post_prod_r = ExtractProductCore(post_dctx);
+        std::optional< CoreCandidate > post_prod =
+            post_prod_r.Succeeded() ? std::optional(post_prod_r.TakePayload()) : std::nullopt;
         bool post_has_core = post_prod.has_value();
         bool post_direct   = false;
         if (post_has_core) {
@@ -784,22 +798,16 @@ TEST(QSynthDiagnostic, DirectSuccessProductCoreInvestigation) {
             post_direct = check.passed;
         }
 
-        // --- Phase D: does TryDecomposition succeed? ---
-        auto orig_decomp = TryDecomposition(orig_dctx);
-        auto post_decomp = TryDecomposition(post_dctx);
+        // TryDecomposition removed — use orchestrator pipeline
 
         std::cerr << "  " << label << " orig_core=" << orig_has_core
-                  << " orig_direct=" << orig_direct
-                  << " orig_decomp=" << orig_decomp.has_value()
-                  << " step2=" << op_result.changed << " step2.5=" << pi_result.changed
-                  << " post_core=" << post_has_core << " post_direct=" << post_direct
-                  << " post_decomp=" << post_decomp.has_value();
+                  << " orig_direct=" << orig_direct << " post_core=" << post_has_core
+                  << " post_direct=" << post_direct;
         if (orig_has_core) { std::cerr << " orig_expr=" << Render(*orig_prod->expr, vars, 64); }
         if (post_has_core) { std::cerr << " post_expr=" << Render(*post_prod->expr, vars, 64); }
         std::cerr << "\n";
 
         if (orig_direct && !post_has_core) { precond_destroy++; }
-        if (orig_decomp.has_value() && !post_decomp.has_value()) { confirmed_miss++; }
     }
 
     std::cerr << "\n=== Direct-Success Product Core Investigation ===\n";
@@ -879,11 +887,21 @@ TEST(QSynthDiagnostic, FactoredGhostTelemetry) {
                                    .cls          = cls };
 
         // Core extraction cascade (same order as DecompEngineTelemetry)
-        auto prod = ExtractProductCore(dctx);
-        auto p2   = ExtractPolyCore(dctx, 2);
-        auto tmpl = ExtractTemplateCore(dctx);
-        auto p3   = ExtractPolyCore(dctx, 3);
-        auto p4   = ExtractPolyCore(dctx, 4);
+        auto prod_r = ExtractProductCore(dctx);
+        auto p2_r   = ExtractPolyCore(dctx, 2);
+        auto tmpl_r = ExtractTemplateCore(dctx);
+        auto p3_r   = ExtractPolyCore(dctx, 3);
+        auto p4_r   = ExtractPolyCore(dctx, 4);
+        std::optional< CoreCandidate > prod =
+            prod_r.Succeeded() ? std::optional(prod_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > p2 =
+            p2_r.Succeeded() ? std::optional(p2_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > tmpl =
+            tmpl_r.Succeeded() ? std::optional(tmpl_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > p3 =
+            p3_r.Succeeded() ? std::optional(p3_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > p4 =
+            p4_r.Succeeded() ? std::optional(p4_r.TakePayload()) : std::nullopt;
 
         // try_core: accept first core that doesn't solve directly
         auto try_core = [&](std::optional< CoreCandidate > &core,
@@ -904,7 +922,7 @@ TEST(QSynthDiagnostic, FactoredGhostTelemetry) {
         if (!chosen) { continue; }
 
         // Build residual
-        auto residual_eval = BuildResidualEvaluator(opts.evaluator, *chosen->expr, kBw);
+        auto residual_eval = BuildRemainderEvaluator(opts.evaluator, *chosen->expr, kBw);
         auto residual_sig  = EvaluateBooleanSignature(residual_eval, kNv, kBw);
 
         // Compute residual support
@@ -985,7 +1003,7 @@ TEST(QSynthDiagnostic, FactoredGhostTelemetry) {
                 for (uint8_t deg = 0; deg <= 2; ++deg) {
                     auto fit =
                         RecoverWeightedPoly(residual_eval, weight, res_sup, kNv, kBw, deg, 2);
-                    if (!fit.has_value()) { continue; }
+                    if (!fit.Succeeded()) { continue; }
 
                     int d = static_cast< int >(deg);
 
@@ -1128,24 +1146,13 @@ TEST(QSynthDiagnostic, BooleanNullResidualCharacterization) {
         std::cerr << "  Orig top-op: " << kind_str(folded->kind) << " ops: {"
                   << op_signature(*folded) << "}\n";
 
-        // Preconditioning (Step 2 + 2.5)
+        // Preconditioning removed (now internal to orchestrator)
         auto current = CloneExpr(*folded);
-        auto op_res  = SimplifyMixedOperands(std::move(current), vars, opts);
-        current      = std::move(op_res.expr);
-        auto pi_res  = CollapseProductIdentities(std::move(current), vars, opts);
-        current      = std::move(pi_res.expr);
-        bool changed = op_res.changed || pi_res.changed;
-
-        if (changed) {
-            std::cerr << "  Post top-op: " << kind_str(current->kind) << " ops: {"
-                      << op_signature(*current) << "}\n";
-        } else {
-            std::cerr << "  Post: unchanged\n";
-        }
+        std::cerr << "  Post: unchanged (preconditioning removed)\n";
 
         // Extract Poly2 core
         auto post_cls = ClassifyStructural(*current);
-        auto post_sig = changed ? EvaluateBooleanSignature(*current, kNv, 64) : sig;
+        auto post_sig = sig;
         DecompositionContext dctx{
             .opts         = opts,
             .vars         = vars,
@@ -1153,14 +1160,16 @@ TEST(QSynthDiagnostic, BooleanNullResidualCharacterization) {
             .current_expr = current.get(),
             .cls          = post_cls,
         };
-        auto p2 = ExtractPolyCore(dctx, 2);
+        auto p2_r = ExtractPolyCore(dctx, 2);
+        std::optional< CoreCandidate > p2 =
+            p2_r.Succeeded() ? std::optional(p2_r.TakePayload()) : std::nullopt;
         if (!p2.has_value()) {
             std::cerr << "  Poly2 core: NONE\n";
             continue;
         }
 
         // Residual analysis
-        auto residual_eval = BuildResidualEvaluator(opts.evaluator, *p2->expr, 64);
+        auto residual_eval = BuildRemainderEvaluator(opts.evaluator, *p2->expr, 64);
         auto residual_sig  = EvaluateBooleanSignature(residual_eval, kNv, 64);
         auto res_elim      = EliminateAuxVars(residual_sig, vars, residual_eval, 64);
         auto res_count     = static_cast< uint32_t >(res_elim.real_vars.size());
@@ -1309,17 +1318,11 @@ TEST(QSynthDiagnostic, NullFactorTelemetry) {
         if (!result.has_value()) { continue; }
         if (result.value().kind != SimplifyOutcome::Kind::kUnchangedUnsupported) { continue; }
 
-        // Preconditioning (Step 2 + 2.5)
+        // Preconditioning removed (now internal to orchestrator)
         auto current = CloneExpr(**folded_ptr);
-        auto op_res  = SimplifyMixedOperands(std::move(current), vars, opts);
-        current      = std::move(op_res.expr);
-        auto pi_res  = CollapseProductIdentities(std::move(current), vars, opts);
-        current      = std::move(pi_res.expr);
 
         auto post_cls = ClassifyStructural(*current);
-        auto post_sig = (op_res.changed || pi_res.changed)
-            ? EvaluateBooleanSignature(*current, kNv, kBw)
-            : sig;
+        auto post_sig = sig;
 
         DecompositionContext dctx{
             .opts         = opts,
@@ -1336,12 +1339,14 @@ TEST(QSynthDiagnostic, NullFactorTelemetry) {
         std::vector< uint32_t > support;
         std::string target_type;
 
-        auto p2 = ExtractPolyCore(dctx, 2);
+        auto p2_r = ExtractPolyCore(dctx, 2);
+        std::optional< CoreCandidate > p2 =
+            p2_r.Succeeded() ? std::optional(p2_r.TakePayload()) : std::nullopt;
         if (p2.has_value() && AcceptCore(dctx, *p2)) {
             auto direct = FullWidthCheckEval(opts.evaluator, kNv, *p2->expr, kBw);
             if (direct.passed) { continue; }
 
-            auto residual_eval = BuildResidualEvaluator(opts.evaluator, *p2->expr, kBw);
+            auto residual_eval = BuildRemainderEvaluator(opts.evaluator, *p2->expr, kBw);
             auto residual_sig  = EvaluateBooleanSignature(residual_eval, kNv, kBw);
             auto res_elim      = EliminateAuxVars(residual_sig, vars, residual_eval, kBw);
 
@@ -1398,7 +1403,7 @@ TEST(QSynthDiagnostic, NullFactorTelemetry) {
                 auto g = static_cast< uint8_t >(std::max(4, d + 4));
 
                 auto fit = RecoverWeightedPoly(target_eval, wfn, support, kNv, kBw, d, g);
-                if (!fit.has_value()) { continue; }
+                if (!fit.Succeeded()) { continue; }
 
                 // Track: fit found (even if FW fails)
                 if (family == "unary") {
@@ -1407,7 +1412,7 @@ TEST(QSynthDiagnostic, NullFactorTelemetry) {
                     case_gfit[d] = true;
                 }
 
-                auto q_expr = BuildPolyExpr(fit->poly);
+                auto q_expr = BuildPolyExpr(fit.Payload().poly);
                 if (!q_expr.has_value()) { continue; }
 
                 auto w_expr   = build();
@@ -1615,17 +1620,11 @@ TEST(QSynthDiagnostic, MultiWeightNullBasisTelemetry) {
         if (!result.has_value()) { continue; }
         if (result.value().kind != SimplifyOutcome::Kind::kUnchangedUnsupported) { continue; }
 
-        // Preconditioning
+        // Preconditioning removed (now internal to orchestrator)
         auto current = CloneExpr(**folded_ptr);
-        auto op_res  = SimplifyMixedOperands(std::move(current), vars, opts);
-        current      = std::move(op_res.expr);
-        auto pi_res  = CollapseProductIdentities(std::move(current), vars, opts);
-        current      = std::move(pi_res.expr);
 
         auto post_cls = ClassifyStructural(*current);
-        auto post_sig = (op_res.changed || pi_res.changed)
-            ? EvaluateBooleanSignature(*current, kNv, kBw)
-            : sig;
+        auto post_sig = sig;
 
         DecompositionContext dctx{
             .opts         = opts,
@@ -1639,12 +1638,14 @@ TEST(QSynthDiagnostic, MultiWeightNullBasisTelemetry) {
         std::vector< uint32_t > support;
         std::string target_type;
 
-        auto p2 = ExtractPolyCore(dctx, 2);
+        auto p2_r = ExtractPolyCore(dctx, 2);
+        std::optional< CoreCandidate > p2 =
+            p2_r.Succeeded() ? std::optional(p2_r.TakePayload()) : std::nullopt;
         if (p2.has_value() && AcceptCore(dctx, *p2)) {
             auto direct = FullWidthCheckEval(opts.evaluator, kNv, *p2->expr, kBw);
             if (direct.passed) { continue; }
 
-            auto residual_eval = BuildResidualEvaluator(opts.evaluator, *p2->expr, kBw);
+            auto residual_eval = BuildRemainderEvaluator(opts.evaluator, *p2->expr, kBw);
             auto residual_sig  = EvaluateBooleanSignature(residual_eval, kNv, kBw);
             auto res_elim      = EliminateAuxVars(residual_sig, vars, residual_eval, kBw);
 
@@ -1864,10 +1865,9 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
     int core_bn      = 0;
 
     // Sub-counters for routing_miss
-    int rm_orig_direct = 0; // RunSupportedPipeline succeeds on original AST
+    int rm_orig_direct = 0; // Simplify succeeds on original AST
     int rm_post_direct = 0; // succeeds after preconditioning
-    int rm_orig_decomp = 0; // TryDecomposition succeeds on original AST
-    int rm_post_decomp = 0; // TryDecomposition succeeds after preconditioning
+    // TryDecomposition counters removed — use orchestrator pipeline
 
     // Sub-counters for core_non_bn
     int nb_sup_verified_0 = 0; // sup_solved=1, verified=0
@@ -1943,7 +1943,7 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
         total++;
 
         // --- Probe 1: routing/orchestration miss ---
-        // Can RunSupportedPipeline or TryDecomposition succeed on original AST?
+        // TryDecomposition removed — use orchestrator pipeline
         auto orig_cls = ClassifyStructural(**folded_ptr);
         DecompositionContext orig_dctx{ .opts         = opts,
                                         .vars         = vars,
@@ -1951,56 +1951,50 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
                                         .current_expr = folded_ptr->get(),
                                         .cls          = orig_cls };
 
-        auto orig_sup = RunSupportedPipeline(sig, vars, opts);
+        auto orig_sup = Simplify(sig, vars, nullptr, opts);
         bool orig_sup_ok =
             orig_sup.has_value() && orig_sup->kind == SimplifyOutcome::Kind::kSimplified;
-        auto orig_decomp = TryDecomposition(orig_dctx);
+        (void) orig_sup_ok;
 
-        // Post-preconditioning (Step 2 + 2.5)
+        // Preconditioning removed (now internal to orchestrator)
         auto precond_expr = CloneExpr(**folded_ptr);
-        auto op_result    = SimplifyMixedOperands(std::move(precond_expr), vars, opts);
-        precond_expr      = std::move(op_result.expr);
-        auto pi_result    = CollapseProductIdentities(std::move(precond_expr), vars, opts);
-        precond_expr      = std::move(pi_result.expr);
 
         auto post_cls = ClassifyStructural(*precond_expr);
-        auto post_sig = (op_result.changed || pi_result.changed)
-            ? EvaluateBooleanSignature(*precond_expr, kNv, 64)
-            : sig;
+        auto post_sig = sig;
         DecompositionContext post_dctx{ .opts         = opts,
                                         .vars         = vars,
                                         .sig          = post_sig,
                                         .current_expr = precond_expr.get(),
                                         .cls          = post_cls };
 
-        auto post_decomp = TryDecomposition(post_dctx);
-
-        // Note: orig_sup_ok means the supported pipeline already returns
-        // kSimplified — that's what the main Simplifier tries first. If that
-        // works, the case wouldn't be unsupported. So this should always be
-        // false. But TryDecomposition on original vs post may differ.
-        if (orig_decomp.has_value() || post_decomp.has_value()) {
-            routing_miss++;
-            if (orig_decomp.has_value()) { rm_orig_decomp++; }
-            if (post_decomp.has_value()) { rm_post_decomp++; }
-            std::cerr << "  L" << line_num << " ROUTING_MISS"
-                      << " orig_decomp=" << orig_decomp.has_value()
-                      << " post_decomp=" << post_decomp.has_value() << "\n";
-            continue;
-        }
-
         // --- Probe 2: core extraction on BOTH ASTs ---
-        // Try all extractors on original AST
-        auto o_prod = ExtractProductCore(orig_dctx);
-        auto o_p2   = ExtractPolyCore(orig_dctx, 2);
-        auto o_tmpl = ExtractTemplateCore(orig_dctx);
-        auto o_p3   = ExtractPolyCore(orig_dctx, 3);
+        // Try all extractors on original AST — unwrap SolverResult
+        auto o_prod_r = ExtractProductCore(orig_dctx);
+        auto o_p2_r   = ExtractPolyCore(orig_dctx, 2);
+        auto o_tmpl_r = ExtractTemplateCore(orig_dctx);
+        auto o_p3_r   = ExtractPolyCore(orig_dctx, 3);
+        std::optional< CoreCandidate > o_prod =
+            o_prod_r.Succeeded() ? std::optional(o_prod_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > o_p2 =
+            o_p2_r.Succeeded() ? std::optional(o_p2_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > o_tmpl =
+            o_tmpl_r.Succeeded() ? std::optional(o_tmpl_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > o_p3 =
+            o_p3_r.Succeeded() ? std::optional(o_p3_r.TakePayload()) : std::nullopt;
 
         // Try all extractors on post-preconditioned AST
-        auto p_prod = ExtractProductCore(post_dctx);
-        auto p_p2   = ExtractPolyCore(post_dctx, 2);
-        auto p_tmpl = ExtractTemplateCore(post_dctx);
-        auto p_p3   = ExtractPolyCore(post_dctx, 3);
+        auto p_prod_r = ExtractProductCore(post_dctx);
+        auto p_p2_r   = ExtractPolyCore(post_dctx, 2);
+        auto p_tmpl_r = ExtractTemplateCore(post_dctx);
+        auto p_p3_r   = ExtractPolyCore(post_dctx, 3);
+        std::optional< CoreCandidate > p_prod =
+            p_prod_r.Succeeded() ? std::optional(p_prod_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > p_p2 =
+            p_p2_r.Succeeded() ? std::optional(p_p2_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > p_tmpl =
+            p_tmpl_r.Succeeded() ? std::optional(p_tmpl_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > p_p3 =
+            p_p3_r.Succeeded() ? std::optional(p_p3_r.TakePayload()) : std::nullopt;
 
         // Pick best core: prefer post-preconditioned, use engine order
         struct CoreChoice
@@ -2057,7 +2051,7 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
 
         // --- We have a core. Build residual and classify. ---
         auto *core         = chosen->core;
-        auto residual_eval = BuildResidualEvaluator(opts.evaluator, *core->expr, 64);
+        auto residual_eval = BuildRemainderEvaluator(opts.evaluator, *core->expr, 64);
         auto residual_sig  = EvaluateBooleanSignature(residual_eval, kNv, 64);
 
         // Residual support
@@ -2107,7 +2101,7 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
         bool sup_solved    = false;
         bool sup_verified  = false;
         bool sup_recombine = false;
-        auto sup           = RunSupportedPipeline(residual_sig, vars, res_opts);
+        auto sup           = Simplify(residual_sig, vars, nullptr, res_opts);
         if (sup.has_value() && sup->kind == SimplifyOutcome::Kind::kSimplified) {
             sup_solved   = true;
             sup_verified = sup->verified;
@@ -2265,9 +2259,10 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
         bool poly_recombine = false;
         if (res_count <= 6) {
             auto rpoly = RecoverAndVerifyPoly(residual_eval, res_sup, kNv, 64, 4, deg_floor);
-            if (rpoly.has_value()) {
-                poly_solved    = true;
-                auto combined  = Expr::Add(CloneExpr(*core->expr), std::move(rpoly->expr));
+            if (rpoly.Succeeded()) {
+                poly_solved = true;
+                auto combined =
+                    Expr::Add(CloneExpr(*core->expr), std::move(rpoly.TakePayload().expr));
                 auto fwc       = FullWidthCheckEval(opts.evaluator, kNv, *combined, 64);
                 poly_recombine = fwc.passed;
             }
@@ -2295,9 +2290,9 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
             }
 
             auto td = TryTemplateDecomposition(res_sig_ctx, res_opts, res_count, nullptr);
-            if (td.has_value()) {
+            if (td.Succeeded()) {
                 tmpl_solved      = true;
-                auto solved_expr = std::move(td->expr);
+                auto solved_expr = std::move(td.TakePayload().expr);
                 if (res_elim.real_vars.size() < vars.size()) {
                     std::function< void(Expr &, const std::vector< uint32_t > &) > remap =
                         [&remap](Expr &e, const std::vector< uint32_t > &m) {
@@ -2363,8 +2358,6 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
     // === Summary ===
     std::cerr << "\n=== Unsupported Set Taxonomy (" << total << " cases) ===\n";
     std::cerr << "  1. routing_miss:  " << routing_miss << "\n";
-    std::cerr << "     orig_decomp:   " << rm_orig_decomp << "\n";
-    std::cerr << "     post_decomp:   " << rm_post_decomp << "\n";
     std::cerr << "  2. core_non_bn:   " << core_non_bn << "\n";
     std::cerr << "     sup_verified=0: " << nb_sup_verified_0 << "\n";
     std::cerr << "     sup_verified=1: " << nb_sup_verified_1 << "\n";
@@ -2470,24 +2463,20 @@ TEST(QSynthDiagnostic, NonBnResidualCharacterization) {
             return EvalExpr(**folded_ptr, v, 64);
         };
 
-        // Precondition + extract product core (as in taxonomy)
+        // Preconditioning removed (now internal to orchestrator)
         auto precond_expr = CloneExpr(*folded);
-        auto op_result    = SimplifyMixedOperands(std::move(precond_expr), vars, opts);
-        precond_expr      = std::move(op_result.expr);
-        auto pi_result    = CollapseProductIdentities(std::move(precond_expr), vars, opts);
-        precond_expr      = std::move(pi_result.expr);
 
         auto post_cls = ClassifyStructural(*precond_expr);
-        auto post_sig = (op_result.changed || pi_result.changed)
-            ? EvaluateBooleanSignature(*precond_expr, kNv, 64)
-            : sig;
+        auto post_sig = sig;
         DecompositionContext post_dctx{ .opts         = opts,
                                         .vars         = vars,
                                         .sig          = post_sig,
                                         .current_expr = precond_expr.get(),
                                         .cls          = post_cls };
 
-        auto prod = ExtractProductCore(post_dctx);
+        auto prod_r = ExtractProductCore(post_dctx);
+        std::optional< CoreCandidate > prod =
+            prod_r.Succeeded() ? std::optional(prod_r.TakePayload()) : std::nullopt;
         if (!prod.has_value()) {
             std::cerr << "  L" << line_num << " SKIP: no product core\n";
             continue;
@@ -2501,7 +2490,7 @@ TEST(QSynthDiagnostic, NonBnResidualCharacterization) {
 
         total++;
 
-        auto residual_eval = BuildResidualEvaluator(opts.evaluator, *prod->expr, 64);
+        auto residual_eval = BuildRemainderEvaluator(opts.evaluator, *prod->expr, 64);
         auto residual_sig  = EvaluateBooleanSignature(residual_eval, kNv, 64);
 
         // Residual support (evaluator-aware)
@@ -2563,10 +2552,10 @@ TEST(QSynthDiagnostic, NonBnResidualCharacterization) {
         for (uint8_t deg : { 2, 3, 4 }) {
             if (res_nv > 6) { continue; }
             auto poly      = RecoverMultivarPoly(residual_eval, res_sup, kNv, 64, deg);
-            bool recovered = poly.has_value();
+            bool recovered = poly.Succeeded();
             bool fw_ok     = false;
             if (recovered) {
-                auto expr = BuildPolyExpr(*poly);
+                auto expr = BuildPolyExpr(poly.Payload());
                 if (expr.has_value()) {
                     auto check = FullWidthCheckEval(residual_eval, kNv, **expr, 64, 64);
                     fw_ok      = check.passed;
@@ -2590,7 +2579,7 @@ TEST(QSynthDiagnostic, NonBnResidualCharacterization) {
         if (res_nv <= 6) {
             auto rpoly = RecoverAndVerifyPoly(residual_eval, res_sup, kNv, 64, 4, 2);
             std::cerr << "    recover_and_verify(d=2..4): "
-                      << (rpoly.has_value() ? "OK" : "FAIL") << "\n";
+                      << (rpoly.Succeeded() ? "OK" : "FAIL") << "\n";
         }
 
         // --- Structural residual probe ---
@@ -2681,8 +2670,8 @@ TEST(QSynthDiagnostic, NonBnResidualCharacterization) {
 }
 
 // Deep characterization of the 44 no_core cases.
-// For each: boolean signature, route classification, polynomial
-// recovery, and whether RunSupportedPipeline succeeds on
+// For each: boolean signature, structural classification, polynomial
+// recovery, and whether Simplify succeeds on
 // preconditioned AST.
 TEST(QSynthDiagnostic, NoCoreCharacterization) {
     std::ifstream file(DATASET_DIR "/gamba/qsynth_ea.txt");
@@ -2699,24 +2688,22 @@ TEST(QSynthDiagnostic, NoCoreCharacterization) {
     int total    = 0;
 
     // Aggregate counters
-    std::map< Route, int > by_route;
+    std::map< std::string, int > by_semantic;
     int poly_d2_ok = 0, poly_d3_ok = 0, poly_d4_ok = 0;
     int sup_on_precond  = 0;
     int has_any_mul     = 0;
     int all_bool_valued = 0;
 
-    auto route_name = [](Route r) -> const char * {
-        switch (r) {
-            case Route::kBitwiseOnly:
-                return "Bitwise";
-            case Route::kMultilinear:
-                return "Multilinear";
-            case Route::kPowerRecovery:
-                return "PowerRecov";
-            case Route::kMixedRewrite:
-                return "Mixed";
-            case Route::kUnsupported:
-                return "Unsupported";
+    auto semantic_str = [](SemanticClass s) -> const char * {
+        switch (s) {
+            case SemanticClass::kLinear:
+                return "Linear";
+            case SemanticClass::kSemilinear:
+                return "Semilinear";
+            case SemanticClass::kPolynomial:
+                return "Polynomial";
+            case SemanticClass::kNonPolynomial:
+                return "NonPoly";
         }
         return "?";
     };
@@ -2726,7 +2713,8 @@ TEST(QSynthDiagnostic, NoCoreCharacterization) {
     {
         int line;
         uint32_t num_vars;
-        Route route;
+        StructuralFlag flags;
+        std::string semantic_name;
         bool bool_valued;
         bool has_mul;
         bool sup_precond;
@@ -2770,12 +2758,8 @@ TEST(QSynthDiagnostic, NoCoreCharacterization) {
 
         total++;
 
-        // 1. Route classification
+        // 1. Structural classification
         auto precond_expr = CloneExpr(**folded_shared);
-        auto op_result    = SimplifyMixedOperands(std::move(precond_expr), vars, opts);
-        precond_expr      = std::move(op_result.expr);
-        auto pi_result    = CollapseProductIdentities(std::move(precond_expr), vars, opts);
-        precond_expr      = std::move(pi_result.expr);
         auto cls          = ClassifyStructural(*precond_expr);
 
         // 2. Boolean signature string
@@ -2802,11 +2786,9 @@ TEST(QSynthDiagnostic, NoCoreCharacterization) {
         };
         bool hm = has_mul_fn(*precond_expr);
 
-        // 5. RunSupportedPipeline on preconditioned AST sig
-        auto post_sig   = (op_result.changed || pi_result.changed)
-            ? EvaluateBooleanSignature(*precond_expr, kNv, 64)
-            : sig;
-        auto sup_result = RunSupportedPipeline(post_sig, vars, opts);
+        // 5. Simplify on preconditioned AST sig
+        auto post_sig   = sig;
+        auto sup_result = Simplify(post_sig, vars, nullptr, opts);
         bool sp =
             sup_result.has_value() && sup_result->kind == SimplifyOutcome::Kind::kSimplified;
         if (sp) {
@@ -2829,8 +2811,8 @@ TEST(QSynthDiagnostic, NoCoreCharacterization) {
         bool p2fw = false, p3fw = false, p4fw = false;
         for (uint8_t deg : { 2, 3, 4 }) {
             auto poly = RecoverMultivarPoly(opts.evaluator, support, kNv, 64, deg);
-            if (!poly.has_value()) { continue; }
-            auto pexpr = BuildPolyExpr(*poly);
+            if (!poly.Succeeded()) { continue; }
+            auto pexpr = BuildPolyExpr(poly.Payload());
             if (!pexpr.has_value()) { continue; }
             auto check = FullWidthCheckEval(opts.evaluator, kNv, *pexpr.value(), 64, 64);
             if (check.passed) {
@@ -2840,7 +2822,7 @@ TEST(QSynthDiagnostic, NoCoreCharacterization) {
             }
         }
 
-        by_route[cls.route]++;
+        by_semantic[semantic_str(cls.semantic)]++;
         if (sp) { sup_on_precond++; }
         if (hm) { has_any_mul++; }
         if (bv) { all_bool_valued++; }
@@ -2850,25 +2832,26 @@ TEST(QSynthDiagnostic, NoCoreCharacterization) {
 
         details.push_back(
             {
-                .line         = line_num,
-                .num_vars     = kNv,
-                .route        = cls.route,
-                .bool_valued  = bv,
-                .has_mul      = hm,
-                .sup_precond  = sp,
-                .poly2_fw     = p2fw,
-                .poly3_fw     = p3fw,
-                .poly4_fw     = p4fw,
-                .sig_str      = sig_ss.str(),
-                .ground_truth = truth,
+                .line          = line_num,
+                .num_vars      = kNv,
+                .flags         = cls.flags,
+                .semantic_name = semantic_str(cls.semantic),
+                .bool_valued   = bv,
+                .has_mul       = hm,
+                .sup_precond   = sp,
+                .poly2_fw      = p2fw,
+                .poly3_fw      = p3fw,
+                .poly4_fw      = p4fw,
+                .sig_str       = sig_ss.str(),
+                .ground_truth  = truth,
             }
         );
     }
 
     // --- Summary ---
     std::cerr << "\n=== No-Core Characterization (" << total << " cases) ===\n";
-    std::cerr << "  By route:";
-    for (auto &[r, c] : by_route) { std::cerr << " " << route_name(r) << "=" << c; }
+    std::cerr << "  By semantic:";
+    for (auto &[s, c] : by_semantic) { std::cerr << " " << s << "=" << c; }
     std::cerr << "\n";
     std::cerr << "  Bool-valued sig: " << all_bool_valued << "\n";
     std::cerr << "  Has Mul in AST:  " << has_any_mul << "\n";
@@ -2884,7 +2867,7 @@ TEST(QSynthDiagnostic, NoCoreCharacterization) {
 
     std::cerr << "\n--- Per-case details ---\n";
     for (const auto &d : details) {
-        std::cerr << "  L" << d.line << " vars=" << d.num_vars << " r=" << route_name(d.route)
+        std::cerr << "  L" << d.line << " vars=" << d.num_vars << " s=" << d.semantic_name
                   << " bv=" << d.bool_valued << " mul=" << d.has_mul << " sup=" << d.sup_precond
                   << " p2=" << d.poly2_fw << " p3=" << d.poly3_fw << " p4=" << d.poly4_fw
                   << " sig=" << d.sig_str << "\n    truth: " << d.ground_truth;
@@ -2993,50 +2976,34 @@ TEST(QSynthDiagnostic, RecoverableCaseTrace) {
         std::cerr << "truth: " << truth << "\n";
         std::cerr << "obf folded: " << Render(**folded_shared, vars, 64) << "\n";
 
-        // Step 2: OperandSimplifier
+        // Preconditioning removed (now internal to orchestrator)
         auto precond = CloneExpr(**folded_shared);
-        auto op      = SimplifyMixedOperands(std::move(precond), vars, opts);
-        std::cerr << "after OperandSimp (changed=" << op.changed
-                  << "): " << Render(*op.expr, vars, 64) << "\n";
-
-        // Step 2.5: ProductIdentityCollapse
-        auto pi = CollapseProductIdentities(std::move(op.expr), vars, opts);
-        std::cerr << "after ProdIdentity (changed=" << pi.changed
-                  << "): " << Render(*pi.expr, vars, 64) << "\n";
+        std::cerr << "preconditioning removed (now internal to orchestrator)\n";
 
         // Classification
-        auto cls = ClassifyStructural(*pi.expr);
-        std::cerr << "route: " << static_cast< int >(cls.route) << "\n";
+        auto cls = ClassifyStructural(*precond);
+        std::cerr << "semantic: " << static_cast< int >(cls.semantic) << " flags=0x" << std::hex
+                  << cls.flags << std::dec << "\n";
 
-        // Early decomp on original
-        auto orig_cls = ClassifyStructural(**folded_shared);
-        DecompositionContext orig_dctx{
-            .opts         = opts,
-            .vars         = vars,
-            .sig          = sig,
-            .current_expr = folded_shared->get(),
-            .cls          = orig_cls,
-        };
-        auto orig_decomp = TryDecomposition(orig_dctx);
-        std::cerr << "early decomp (original): " << orig_decomp.has_value() << "\n";
-
-        // Phase 2 decomp on preconditioned
-        auto post_sig =
-            (op.changed || pi.changed) ? EvaluateBooleanSignature(*pi.expr, kNv, 64) : sig;
+        auto post_sig = sig;
         DecompositionContext post_dctx{
             .opts         = opts,
             .vars         = vars,
             .sig          = post_sig,
-            .current_expr = pi.expr.get(),
+            .current_expr = precond.get(),
             .cls          = cls,
         };
-        auto post_decomp = TryDecomposition(post_dctx);
-        std::cerr << "phase2 decomp (precond): " << post_decomp.has_value() << "\n";
 
         // What extractors see on preconditioned AST
-        auto p_prod = ExtractProductCore(post_dctx);
-        auto p_p2   = ExtractPolyCore(post_dctx, 2);
-        auto p_p3   = ExtractPolyCore(post_dctx, 3);
+        auto p_prod_r = ExtractProductCore(post_dctx);
+        auto p_p2_r   = ExtractPolyCore(post_dctx, 2);
+        auto p_p3_r   = ExtractPolyCore(post_dctx, 3);
+        std::optional< CoreCandidate > p_prod =
+            p_prod_r.Succeeded() ? std::optional(p_prod_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > p_p2 =
+            p_p2_r.Succeeded() ? std::optional(p_p2_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > p_p3 =
+            p_p3_r.Succeeded() ? std::optional(p_p3_r.TakePayload()) : std::nullopt;
         std::cerr << "extractors: prod=" << p_prod.has_value() << " poly2=" << p_p2.has_value()
                   << " poly3=" << p_p3.has_value() << "\n";
         if (p_prod.has_value()) {
@@ -3066,7 +3033,8 @@ TEST(QSynthDiagnostic, RecoverableCaseTrace) {
         };
 
         auto t_cls = ClassifyStructural(**t_shared);
-        std::cerr << "truth route: " << static_cast< int >(t_cls.route) << "\n";
+        std::cerr << "truth semantic: " << static_cast< int >(t_cls.semantic) << " flags=0x"
+                  << std::hex << t_cls.flags << std::dec << "\n";
 
         DecompositionContext t_dctx{
             .opts         = t_opts,
@@ -3075,8 +3043,12 @@ TEST(QSynthDiagnostic, RecoverableCaseTrace) {
             .current_expr = t_shared->get(),
             .cls          = t_cls,
         };
-        auto t_prod = ExtractProductCore(t_dctx);
-        auto t_p2   = ExtractPolyCore(t_dctx, 2);
+        auto t_prod_r = ExtractProductCore(t_dctx);
+        auto t_p2_r   = ExtractPolyCore(t_dctx, 2);
+        std::optional< CoreCandidate > t_prod =
+            t_prod_r.Succeeded() ? std::optional(t_prod_r.TakePayload()) : std::nullopt;
+        std::optional< CoreCandidate > t_p2 =
+            t_p2_r.Succeeded() ? std::optional(t_p2_r.TakePayload()) : std::nullopt;
         std::cerr << "truth extractors: prod=" << t_prod.has_value()
                   << " poly2=" << t_p2.has_value() << "\n";
         if (t_prod.has_value()) {
@@ -3086,11 +3058,7 @@ TEST(QSynthDiagnostic, RecoverableCaseTrace) {
             std::cerr << "  truth poly2 core: " << Render(*t_p2->expr, vars, 64) << "\n";
         }
 
-        auto t_decomp = TryDecomposition(t_dctx);
-        std::cerr << "truth decomp: " << t_decomp.has_value() << "\n";
-        if (t_decomp.has_value()) {
-            std::cerr << "truth result: " << Render(*t_decomp->expr, t_parse->vars, 64) << "\n";
-        }
+        // TryDecomposition removed — use orchestrator pipeline
     }
 }
 
@@ -3401,15 +3369,13 @@ TEST(QSynthDiagnostic, AtomLiftingTelemetry) {
         // No evaluator — we'll do FW check manually after substitution
         // against the original evaluator.
 
-        auto sup_result = RunSupportedPipeline(lifted_sig, ext_vars, lift_opts);
-        if (sup_result.has_value()
-            && sup_result.value().kind == SimplifyOutcome::Kind::kSimplified)
-        {
+        auto sup_result = Simplify(lifted_sig, ext_vars, nullptr, lift_opts);
+        if (sup_result.has_value() && sup_result->kind == SimplifyOutcome::Kind::kSimplified) {
             detail.skeleton_ok = true;
             skeleton_solved++;
 
             // Step 4: Substitute atoms back
-            auto reconstructed = SubstituteBack(*sup_result.value().expr, idx_to_atom, kNv);
+            auto reconstructed = SubstituteBack(*sup_result->expr, idx_to_atom, kNv);
 
             // Step 5: Full-width verify against original evaluator
             auto check = FullWidthCheckEval(orig_eval, kNv, *reconstructed, kBw, 64);
