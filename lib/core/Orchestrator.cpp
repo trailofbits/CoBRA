@@ -1004,6 +1004,16 @@ namespace cobra {
             if (pr.decision == PassDecision::kAdvance
                 || pr.decision == PassDecision::kSolvedCandidate)
             {
+                // When lifting produces a skeleton, grant extra budget
+                // so the compact outer problem gets a fair exploration
+                // window instead of starving on the parent's depleted
+                // expansion counter.
+                if ((*pass_id == PassId::kLiftRepeatedSubexpressions
+                     || *pass_id == PassId::kLiftArithmeticAtoms)
+                    && !pr.next.empty())
+                {
+                    policy.max_expansions += policy.max_expansions / 2;
+                }
                 for (auto &next : pr.next) {
                     next.depth = item.depth + 1;
                     next.history.push_back(*pass_id);

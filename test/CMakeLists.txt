@@ -167,6 +167,51 @@ target_include_directories(test_oses_diagnostic PRIVATE
 target_compile_definitions(test_oses_diagnostic PRIVATE
     DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
 
+# Verify-failed forensic (manual, not auto-discovered)
+add_executable(test_verify_failed_forensic verify/test_verify_failed_forensic.cpp
+               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(test_verify_failed_forensic PRIVATE cobra-core GTest::gtest_main)
+target_include_directories(test_verify_failed_forensic PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+target_compile_definitions(test_verify_failed_forensic PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
+# Forensic audit (manual, not auto-discovered)
+add_executable(test_forensic_audit verify/test_forensic_audit.cpp
+               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(test_forensic_audit PRIVATE cobra-core GTest::gtest_main)
+target_include_directories(test_forensic_audit PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+target_compile_definitions(test_forensic_audit PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
+# Masked-arithmetic site audit (manual, not auto-discovered)
+add_executable(test_masked_arith_audit verify/test_masked_arith_audit.cpp
+               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(test_masked_arith_audit PRIVATE cobra-core GTest::gtest_main)
+target_include_directories(test_masked_arith_audit PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+target_compile_definitions(test_masked_arith_audit PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
+# Lifting diagnostic (manual, not auto-discovered)
+add_executable(test_lifting_diagnostic verify/test_lifting_diagnostic.cpp
+               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(test_lifting_diagnostic PRIVATE cobra-core GTest::gtest_main)
+target_include_directories(test_lifting_diagnostic PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+target_compile_definitions(test_lifting_diagnostic PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
+# Search-exhausted structural audit (manual, not auto-discovered)
+add_executable(test_search_exhausted_audit verify/test_search_exhausted_audit.cpp
+               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(test_search_exhausted_audit PRIVATE cobra-core GTest::gtest_main)
+target_include_directories(test_search_exhausted_audit PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+target_compile_definitions(test_search_exhausted_audit PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
 # MSiMBA ground truth diagnostic (manual, not auto-discovered)
 add_executable(test_msimba_groundtruth verify/test_msimba_groundtruth.cpp
                ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)

@@ -466,16 +466,28 @@ namespace cobra {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
 
-        // Sort: higher count first, larger size second, earlier first.
+        // Sort by impact: benefit = (count - 1) * size, descending.
+        // Tie-break by larger size, then deeper (higher preorder), then
+        // higher count.
         std::sort(viable.begin(), viable.end(), [](const auto *a, const auto *b) {
-            if (a->count != b->count) { return a->count > b->count; }
+            auto benefit_a = static_cast< uint64_t >(a->count - 1) * a->size;
+            auto benefit_b = static_cast< uint64_t >(b->count - 1) * b->size;
+            if (benefit_a != benefit_b) { return benefit_a > benefit_b; }
             if (a->size != b->size) { return a->size > b->size; }
-            return a->first_preorder < b->first_preorder;
+            if (a->first_preorder != b->first_preorder) {
+                return a->first_preorder > b->first_preorder;
+            }
+            return a->count > b->count;
         });
 
-        // Greedy maximal non-overlapping selection.
+        // Greedy non-overlapping selection, bounded by variable budget.
+        auto var_budget = ctx.opts.max_vars > original_var_count
+            ? ctx.opts.max_vars - original_var_count
+            : 0U;
+
         std::vector< const RepeatEntry * > selected;
         for (const auto *cand : viable) {
+            if (selected.size() >= var_budget) { break; }
             bool overlaps = false;
             for (const auto *sel : selected) {
                 if (IsAncestorOf(sel->first_occurrence, cand->first_occurrence)
@@ -490,30 +502,6 @@ namespace cobra {
 
         if (selected.empty()) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
-        }
-
-        // Check max_vars limit.
-        auto total_vars = original_var_count + static_cast< uint32_t >(selected.size());
-        if (total_vars > ctx.opts.max_vars) {
-            return Ok(
-                PassResult{
-                    .decision    = PassDecision::kBlocked,
-                    .disposition = ItemDisposition::kRetainCurrent,
-                    .reason =
-                        ReasonDetail{
-                            .top = {
-                                .code = {
-                                    ReasonCategory::kResourceLimit,
-                                    ReasonDomain::kOrchestrator,
-                                },
-                                .message =
-                                    "Lifting would exceed max_vars ("
-                                    + std::to_string(total_vars) + " > "
-                                    + std::to_string(ctx.opts.max_vars) + ")",
-                            },
-                        },
-                }
-            );
         }
 
         // Build DeduplicatedAtom vector for replacement.

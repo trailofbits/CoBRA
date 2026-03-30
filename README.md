@@ -224,9 +224,8 @@ Dataset benchmarks validate against real-world obfuscated expressions from multi
 
 ## Known Limitations
 
-- **Product-inside-bitwise expressions unsupported** — expressions where products are nested inside bitwise operators (e.g., `(a*b) & c`, `(a*b) ^ (c*d)`) fall outside CoBRA's current representation families
-- **Arithmetic-under-bitwise expressions** — patterns like `(x+y) & z` where arithmetic operations appear inside bitwise operators. Boolean-domain simplification produces results (e.g., `(x^y) & z`) that are correct on `{0,1}` inputs but incorrect at full width. These are correctly reported as unsupported
-- **Some mixed products unsupported** — complex combinations of bitwise-product subexpressions may not simplify when the decomposition engine cannot extract a valid polynomial core or the residual falls outside supported families
+- **Deeply interleaved mixed-polynomial MBAs** — the remaining unsupported expressions are predominantly large, heavily duplicated ASTs with interleaved arithmetic and bitwise operators. Impact-ranked subexpression lifting recovers many of these, but expressions that exhaust the worklist budget after lifting remain unsupported
+- **Boolean-domain reconstruction divergence** — a small number of expressions produce CoB candidates that are correct on `{0,1}` inputs but incorrect at full width (AND-product basis vs. arithmetic multiplication). These are detected and correctly reported as verify-failed
 - **No general logic minimization** — CoBRA uses greedy algebraic rewrites, not Quine-McCluskey/Espresso/BDD
 
 ## Acknowledgments
