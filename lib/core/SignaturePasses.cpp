@@ -481,7 +481,6 @@ namespace cobra {
                 };
                 return pr;
             }
-
             auto cost_info = ComputeCost(*substituted);
 
             WorkItem cand_item;

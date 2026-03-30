@@ -2,7 +2,7 @@
 
 CoBRA is validated against **73,136 lines** drawn from **34 dataset files** spanning 7 independent sources. Every expression is parsed, simplified, and spot-checked at runtime. The numbers below are enforced by automated test assertions in [`test/verify/test_dataset_benchmarks.cpp`](test/verify/test_dataset_benchmarks.cpp) and verified on every CI run. OSES Fast is currently disabled (OOM on deeply nested expressions); its numbers are from the last successful run on master.
 
-**Overall: 72,909 / 73,066 parsed expressions simplified (99.79%).**
+**Overall: 72,928 / 73,066 parsed expressions simplified (99.81%).**
 
 ---
 
@@ -66,7 +66,7 @@ Each file contains 1,000 obfuscated linear MBA expressions plus a header comment
 
 | Dataset | Total Lines | Parsed | Simplified | Notes | Rate |
 |---------|:-----------:|:------:|:----------:|-------|:----:|
-| `pldi_linear.txt` | 1,012 | 1,008 | **1,007** | 4 comment headers skipped | **99.9%** |
+| `pldi_linear.txt` | 1,012 | 1,008 | **1,008** | 4 comment headers skipped | **100%** |
 | `pldi_poly.txt` | 1,009 | 1,008 | **1,008** | 1 comment header skipped | **100%** |
 | `pldi_nonpoly.txt` | 1,004 | 1,003 | **1,003** | 1 comment header skipped | **100%** |
 
@@ -89,12 +89,12 @@ Source: [GAMBA](https://github.com/DenuvoSoftwareSolutions/GAMBA)
 | `mba_obf_linear.txt` | GAMBA | 1,001 | 1,000 | **1,000** | 0 | **100%** |
 | `mba_obf_nonlinear.txt` | GAMBA | 1,002 | 1,000 | **1,000** | 0 | **100%** |
 | `syntia.txt` | Syntia | 501 | 500 | **500** | 0 | **100%** |
-| `qsynth_ea.txt` | QSynth | 501 | 500 | **413** | 87 | **82.6%** |
+| `qsynth_ea.txt` | QSynth | 501 | 500 | **431** | 69 | **86.2%** |
 
 - **loki_tiny**: 25 sections covering add, subtract, AND, OR, XOR at depths 1-5. All 25,000 are 2-variable linear MBAs.
 - **mba_obf_nonlinear**: 500 polynomial + 500 linear expressions, all with linear ground-truth targets. All 1,000 pass full-width verification.
 - **syntia**: All 500 expressions simplify via the orchestrator's decomposition and lifting passes.
-- **qsynth_ea**: The most challenging dataset. 413 of 500 expressions simplify. The 87 unsupported expressions break down into 8 verify-failed, 3 representation-gap, and 69 search-exhausted. Impact-ranked lifting with budget supplementation recovers many expressions that were previously blocked by structural redundancy exhausting the worklist budget.
+- **qsynth_ea**: The most challenging dataset. 431 of 500 expressions simplify. The 69 unsupported expressions break down into 9 verify-failed, 2 representation-gap, 14 guard-failed, and 44 search-exhausted. Impact-ranked lifting with budget supplementation and correct competition group handle accounting recovers many expressions that were previously blocked by structural redundancy or handle leaks preventing lifted outer solutions from propagating back.
 
 ### OSES Dataset
 
@@ -125,8 +125,8 @@ Source: [oracle-synthesis-meets-equality-saturation](https://github.com/fvrmatte
 | Total dataset lines | 73,136 |
 | Comment/header lines skipped | 70 |
 | **Parsed expressions** | **73,066** |
-| **Simplified** | **72,909** |
-| Unsupported (by design) | 157 |
+| **Simplified** | **72,928** |
+| Unsupported (by design) | 138 |
 | Errors / failures | **0** |
 
 | MBA Class | Expressions | Simplified | Rate |

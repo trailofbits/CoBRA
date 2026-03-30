@@ -57,8 +57,9 @@ namespace cobra {
         CandidateRecord record
     );
 
-    // Increments a group's open_handles.
-    void
+    // Increments a group's open_handles.  Returns false if the
+    // group has already been resolved and erased.
+    bool
     AcquireHandle(std::unordered_map< GroupId, CompetitionGroup > &groups, GroupId group_id);
 
 } // namespace cobra

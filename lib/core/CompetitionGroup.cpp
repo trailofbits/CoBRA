@@ -44,11 +44,12 @@ namespace cobra {
         return false;
     }
 
-    void
+    bool
     AcquireHandle(std::unordered_map< GroupId, CompetitionGroup > &groups, GroupId group_id) {
         auto it = groups.find(group_id);
-        assert(it != groups.end());
+        if (it == groups.end()) { return false; }
         ++it->second.open_handles;
+        return true;
     }
 
     std::optional< WorkItem >

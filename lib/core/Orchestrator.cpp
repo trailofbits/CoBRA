@@ -1075,9 +1075,17 @@ namespace cobra {
                     item.metadata.reason_code = pr.reason.top.code;
                 }
                 refresh_best_unsupported();
-                // Requeue if retained (SelectNextPass will find next eligible)
-                if (pr.disposition == ItemDisposition::kRetainCurrent) {
+                // Requeue if retained OR not-applicable (pass said "skip
+                // me" — the item should survive for subsequent passes).
+                if (pr.disposition == ItemDisposition::kRetainCurrent
+                    || pr.decision == PassDecision::kNotApplicable)
+                {
                     worklist.Push(std::move(item));
+                } else if (item.group_id.has_value()) {
+                    // Item consumed — release its group handle so the
+                    // competition group can eventually resolve.
+                    auto resolved = ReleaseHandle(context.competition_groups, *item.group_id);
+                    if (resolved.has_value()) { worklist.Push(std::move(*resolved)); }
                 }
             }
         }

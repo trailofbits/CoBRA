@@ -212,6 +212,24 @@ target_include_directories(test_search_exhausted_audit PRIVATE
 target_compile_definitions(test_search_exhausted_audit PRIVATE
     DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
 
+# L244 pipeline trace (manual, not auto-discovered)
+add_executable(test_l244_trace verify/test_l244_trace.cpp
+               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(test_l244_trace PRIVATE cobra-core GTest::gtest_main)
+target_include_directories(test_l244_trace PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+target_compile_definitions(test_l244_trace PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
+# Linear search-exhausted audit (manual, not auto-discovered)
+add_executable(test_linear_exhausted_audit verify/test_linear_exhausted_audit.cpp
+               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(test_linear_exhausted_audit PRIVATE cobra-core GTest::gtest_main)
+target_include_directories(test_linear_exhausted_audit PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+target_compile_definitions(test_linear_exhausted_audit PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
 # MSiMBA ground truth diagnostic (manual, not auto-discovered)
 add_executable(test_msimba_groundtruth verify/test_msimba_groundtruth.cpp
                ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)

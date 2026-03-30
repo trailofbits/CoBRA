@@ -284,8 +284,8 @@ TEST(SiMBADataset, PLDILinear) {
     EXPECT_EQ(stats.total, 1012);
     EXPECT_EQ(stats.skipped_parse, 4);
     EXPECT_EQ(stats.parsed, 1008);
-    EXPECT_EQ(stats.simplified, 1007);
-    EXPECT_EQ(stats.unsupported, 1);
+    EXPECT_EQ(stats.simplified, 1008);
+    EXPECT_EQ(stats.unsupported, 0);
     EXPECT_EQ(stats.failed_simplify, 0);
 }
 
@@ -387,15 +387,15 @@ TEST(GAMBADataset, QSynthEA) {
     EXPECT_EQ(stats.total, 501);
     EXPECT_EQ(stats.skipped_parse, 1); // header only
     EXPECT_EQ(stats.parsed, 500);
-    EXPECT_EQ(stats.simplified, 413);
-    EXPECT_EQ(stats.unsupported, 87);
+    EXPECT_EQ(stats.simplified, 431);
+    EXPECT_EQ(stats.unsupported, 69);
     EXPECT_EQ(stats.failed_simplify, 0);
 
     // Every unsupported result carries a structured reason code.
     EXPECT_EQ(stats.has_structured_reason, stats.unsupported);
-    EXPECT_EQ(stats.by_category[ReasonCategory::kVerifyFailed], 8);
-    EXPECT_EQ(stats.by_category[ReasonCategory::kRepresentationGap], 3);
-    EXPECT_EQ(stats.by_category[ReasonCategory::kSearchExhausted], 69);
+    EXPECT_EQ(stats.by_category[ReasonCategory::kVerifyFailed], 9);
+    EXPECT_EQ(stats.by_category[ReasonCategory::kRepresentationGap], 2);
+    EXPECT_EQ(stats.by_category[ReasonCategory::kSearchExhausted], 44);
 
     // Decomposition cause frames propagated into cause_chain.
     // MixedRewrite unsupported outcomes should carry delegated
