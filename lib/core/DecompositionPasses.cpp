@@ -122,8 +122,15 @@ namespace cobra {
 
             auto decomp_sig = ComputeDecompositionSignature(item, ctx, item.rewrite_gen);
 
+            // Build a local Options with the active evaluator so that
+            // downstream full-width elimination uses the evaluator
+            // matching the current variable space (not the global one,
+            // which may reference a pre-transform expression).
+            auto active_opts      = ctx.opts;
+            active_opts.evaluator = *active_eval;
+
             DecompositionContext dctx{
-                .opts         = ctx.opts,
+                .opts         = active_opts,
                 .vars         = active_vars,
                 .sig          = decomp_sig,
                 .current_expr = ast.expr.get(),
