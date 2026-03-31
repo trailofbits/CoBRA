@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <fstream>
 #include <gtest/gtest.h>
+#include <iomanip>
 #include <string>
 #include <vector>
 
