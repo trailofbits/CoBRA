@@ -2,7 +2,7 @@
 
 CoBRA is validated against **73,136 lines** drawn from **34 dataset files** spanning 7 independent sources. Every expression is parsed, simplified, and spot-checked at runtime. The numbers below are enforced by automated test assertions in [`test/verify/test_dataset_benchmarks.cpp`](test/verify/test_dataset_benchmarks.cpp) and verified on every CI run. OSES Fast is currently disabled (OOM on deeply nested expressions); its numbers are from the last successful run on master.
 
-**Overall: 72,944 / 73,066 parsed expressions simplified (99.83%).**
+**Overall: 72,960 / 73,066 parsed expressions simplified (99.86%).**
 
 ---
 
@@ -89,12 +89,12 @@ Source: [GAMBA](https://github.com/DenuvoSoftwareSolutions/GAMBA)
 | `mba_obf_linear.txt` | GAMBA | 1,001 | 1,000 | **1,000** | 0 | **100%** |
 | `mba_obf_nonlinear.txt` | GAMBA | 1,002 | 1,000 | **1,000** | 0 | **100%** |
 | `syntia.txt` | Syntia | 501 | 500 | **500** | 0 | **100%** |
-| `qsynth_ea.txt` | QSynth | 501 | 500 | **447** | 53 | **89.4%** |
+| `qsynth_ea.txt` | QSynth | 501 | 500 | **463** | 37 | **92.6%** |
 
 - **loki_tiny**: 25 sections covering add, subtract, AND, OR, XOR at depths 1-5. All 25,000 are 2-variable linear MBAs.
 - **mba_obf_nonlinear**: 500 polynomial + 500 linear expressions, all with linear ground-truth targets. All 1,000 pass full-width verification.
 - **syntia**: All 500 expressions simplify via the orchestrator's decomposition and lifting passes.
-- **qsynth_ea**: The most challenging dataset. 447 of 500 expressions simplify. The 53 unsupported expressions break down into 6 verify-failed, 13 guard-failed, and 34 search-exhausted. All remaining unsupported are mixed bitwise-arithmetic expressions where CoB is boolean-correct but diverges at full width, and polynomial recovery (d=1..4) also fails — a genuine representation gap requiring a new mixed-domain recovery technique.
+- **qsynth_ea**: The most challenging dataset. 463 of 500 expressions simplify. The 37 unsupported expressions break down into 8 guard-failed and 29 search-exhausted. All remaining unsupported are mixed bitwise-arithmetic expressions where CoB is boolean-correct but diverges at full width, and polynomial recovery (d=1..4) also fails — a genuine representation gap in carry-sensitive boolean-null residuals.
 
 ### OSES Dataset
 
@@ -125,8 +125,8 @@ Source: [oracle-synthesis-meets-equality-saturation](https://github.com/fvrmatte
 | Total dataset lines | 73,136 |
 | Comment/header lines skipped | 70 |
 | **Parsed expressions** | **73,066** |
-| **Simplified** | **72,944** |
-| Unsupported (by design) | 122 |
+| **Simplified** | **72,960** |
+| Unsupported | 106 |
 | Errors / failures | **0** |
 
 | MBA Class | Expressions | Simplified | Rate |
