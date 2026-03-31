@@ -959,19 +959,41 @@ namespace cobra {
             if (fw.passed) {
                 vs = VerificationState::kVerified;
             } else {
-                return Ok(
-                    PassResult{
-                        .decision    = PassDecision::kNoProgress,
-                        .disposition = ItemDisposition::kRetainCurrent,
-                        .reason =
-                            ReasonDetail{
-                                         .top = { .code    = { ReasonCategory::kVerifyFailed,
-                                                      ReasonDomain::kSignature },
-                                         .message = "CoB candidate failed full-width "
-                                                    "check" },
-                                         },
-                }
-                );
+                // CoB is boolean-correct but full-width-wrong.
+                // Emit CoB as a core candidate so the residual (f - CoB)
+                // can be solved by overlap/ghost residual solvers.
+                WorkItem core_item;
+                core_item.payload = CoreCandidatePayload{
+                    .core_expr      = CloneExpr(*expr),
+                    .extractor_kind = ExtractorKind::kBooleanNullDirect,
+                    .degree_used    = 0,
+                    .source_sig     = sub_ctx.elimination.reduced_sig,
+                    .target =
+                        RemainderTargetContext{
+                                               .eval = *mapped_eval,
+                                               .vars = sub_ctx.real_vars,
+                                               },
+                };
+                core_item.features = item.features;
+                core_item.metadata = item.metadata;
+                core_item.depth    = item.depth;
+                core_item.group_id = item.group_id;
+                core_item.history  = item.history;
+
+                PassResult core_result;
+                core_result.decision    = PassDecision::kAdvance;
+                core_result.disposition = ItemDisposition::kRetainCurrent;
+                core_result.next.push_back(std::move(core_item));
+                core_result.reason = ReasonDetail{
+                    .top = {
+                        .code    = { ReasonCategory::kVerifyFailed,
+                                     ReasonDomain::kSignature },
+                        .message = "CoB candidate failed full-width "
+                                   "check; emitting as core for "
+                                   "residual recovery",
+                    },
+                };
+                return Ok(std::move(core_result));
             }
         }
 
