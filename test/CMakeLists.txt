@@ -212,6 +212,78 @@ target_include_directories(test_search_exhausted_audit PRIVATE
 target_compile_definitions(test_search_exhausted_audit PRIVATE
     DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
 
+# Residual characterization (manual, not auto-discovered)
+add_executable(test_residual_characterize verify/test_residual_characterize.cpp
+               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(test_residual_characterize PRIVATE cobra-core GTest::gtest_main)
+target_include_directories(test_residual_characterize PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+target_compile_definitions(test_residual_characterize PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
+# AND-zero structural extraction (manual, not auto-discovered)
+add_executable(test_and_zero_structural verify/test_and_zero_structural.cpp
+               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(test_and_zero_structural PRIVATE cobra-core GTest::gtest_main)
+target_include_directories(test_and_zero_structural PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+target_compile_definitions(test_and_zero_structural PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
+# Overlap semantic extractor (manual, not auto-discovered)
+add_executable(test_overlap_semantic_extractor verify/test_overlap_semantic_extractor.cpp
+               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(test_overlap_semantic_extractor PRIVATE cobra-core GTest::gtest_main)
+target_include_directories(test_overlap_semantic_extractor PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+target_compile_definitions(test_overlap_semantic_extractor PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
+# Ghost weighted poly probe (manual, not auto-discovered)
+add_executable(test_ghost_weighted_poly verify/test_ghost_weighted_poly.cpp
+               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(test_ghost_weighted_poly PRIVATE cobra-core GTest::gtest_main)
+target_include_directories(test_ghost_weighted_poly PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+target_compile_definitions(test_ghost_weighted_poly PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
+# Ghost basis expansion audit (manual, not auto-discovered)
+add_executable(test_ghost_basis_expansion verify/test_ghost_basis_expansion.cpp
+               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(test_ghost_basis_expansion PRIVATE cobra-core GTest::gtest_main)
+target_include_directories(test_ghost_basis_expansion PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+target_compile_definitions(test_ghost_basis_expansion PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
+# Ghost residual cluster (manual, not auto-discovered)
+add_executable(test_ghost_residual_cluster verify/test_ghost_residual_cluster.cpp
+               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(test_ghost_residual_cluster PRIVATE cobra-core GTest::gtest_main)
+target_include_directories(test_ghost_residual_cluster PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+target_compile_definitions(test_ghost_residual_cluster PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
+# Guard-failed forensic (manual, not auto-discovered)
+add_executable(test_guard_failed_forensic verify/test_guard_failed_forensic.cpp
+               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(test_guard_failed_forensic PRIVATE cobra-core GTest::gtest_main)
+target_include_directories(test_guard_failed_forensic PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+target_compile_definitions(test_guard_failed_forensic PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
+# Re-baseline audit (manual, not auto-discovered)
+add_executable(test_rebaseline_audit verify/test_rebaseline_audit.cpp
+               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(test_rebaseline_audit PRIVATE cobra-core GTest::gtest_main)
+target_include_directories(test_rebaseline_audit PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+target_compile_definitions(test_rebaseline_audit PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
 # L244 pipeline trace (manual, not auto-discovered)
 add_executable(test_l244_trace verify/test_l244_trace.cpp
                ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
@@ -237,6 +309,29 @@ target_link_libraries(test_msimba_groundtruth PRIVATE cobra-core GTest::gtest_ma
 target_include_directories(test_msimba_groundtruth PRIVATE
     ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
 target_compile_definitions(test_msimba_groundtruth PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
+# Extended-semantics probe suite (manual, not auto-discovered)
+add_executable(test_extended_semantics_tier1
+    verify/test_extended_semantics_tier1.cpp
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(test_extended_semantics_tier1 PRIVATE
+    cobra-core GTest::gtest_main)
+target_include_directories(test_extended_semantics_tier1 PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli
+    ${PROJECT_SOURCE_DIR}/test/verify)
+target_compile_definitions(test_extended_semantics_tier1 PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
+add_executable(test_extended_semantics_tier2
+    verify/test_extended_semantics_tier2.cpp
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(test_extended_semantics_tier2 PRIVATE
+    cobra-core GTest::gtest_main)
+target_include_directories(test_extended_semantics_tier2 PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli
+    ${PROJECT_SOURCE_DIR}/test/verify)
+target_compile_definitions(test_extended_semantics_tier2 PRIVATE
     DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
 
 # LLVM pass FileCheck tests (only when pass is built)
