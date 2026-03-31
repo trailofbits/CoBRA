@@ -635,6 +635,7 @@ namespace cobra {
         ) {
             const auto &inner     = inner_cache.comps;
             const auto &inner_idx = inner_cache.index;
+            std::optional< SignaturePayload > best;
 
             auto make_inner = [&](const InnerComp &ic) {
                 return GateExpr(
@@ -642,6 +643,7 @@ namespace cobra {
                 );
             };
 
+            // --- Phase 1: invertible G1, invertible G2 (existing) ---
             for (auto g1 : kAllGates) {
                 if (!GateInvertible(g1)) { continue; }
                 for (size_t ai = 0; ai < pool.size(); ++ai) {
@@ -682,7 +684,133 @@ namespace cobra {
                 }
             }
 
-            return std::nullopt;
+            // --- Phase 2: peel invertible G1, apply unary, then
+            //     match non-invertible G2(atom, inner) ---
+            //
+            // Finds: G1(atom_A, Unary(G2(atom_B, inner_C)))
+            // where G1 is invertible, Unary is Neg or Not, and G2 is
+            // any gate (And/Or/Mul scanned with compatibility filtering).
+            //
+            // This covers overlap-conditioned patterns like:
+            //   Add(overlap, Neg(And(neg_var, Mul(overlap, var))))
+            for (auto g1 : kAllGates) {
+                if (!GateInvertible(g1)) { continue; }
+                for (size_t ai = 0; ai < pool.size(); ++ai) {
+                    auto r1 = GateResidual(target, pool[ai].vals, g1, mask);
+                    if (vmap.contains(r1)) { continue; }
+
+                    // Try Neg and Not of the residual
+                    for (int wrap = 0; wrap < 2; ++wrap) {
+                        ProbeVals lifted;
+                        for (size_t i = 0; i < kNProbes; ++i) {
+                            lifted[i] = (wrap == 0) ? ((~r1[i] + 1) & mask) : (~r1[i] & mask);
+                        }
+
+                        // Direct inner match (lifted == inner)
+                        {
+                            const auto *p = inner_idx.find(lifted);
+                            if (p != nullptr) {
+                                auto inner_e = make_inner(inner[*p]);
+                                auto wrapped = (wrap == 0)
+                                    ? Expr::Negate(std::move(inner_e))
+                                    : Expr::BitwiseNot(std::move(inner_e));
+                                auto e =
+                                    GateExpr(g1, CloneExpr(*pool[ai].expr), std::move(wrapped));
+                                if (TryUpdate(best, std::move(e), eval, nv, bw, baseline)) {
+                                    return best;
+                                }
+                            }
+                        }
+
+                        // And/Or scan: lifted = G2(atom_B, inner_C)
+                        for (auto g2 : { Gate::kAnd, Gate::kOr }) {
+                            for (size_t bi = 0; bi < pool.size(); ++bi) {
+                                if (!Compatible(pool[bi].vals, lifted, g2)) { continue; }
+                                for (size_t ii = 0; ii < inner.size(); ++ii) {
+                                    bool matches = (g2 == Gate::kAnd)
+                                        ? AndMatches(pool[bi].vals, inner[ii].vals, lifted)
+                                        : OrMatches(pool[bi].vals, inner[ii].vals, lifted);
+                                    if (!matches) { continue; }
+                                    auto g2_e = GateExpr(
+                                        g2, CloneExpr(*pool[bi].expr), make_inner(inner[ii])
+                                    );
+                                    auto wrapped = (wrap == 0)
+                                        ? Expr::Negate(std::move(g2_e))
+                                        : Expr::BitwiseNot(std::move(g2_e));
+                                    auto e       = GateExpr(
+                                        g1, CloneExpr(*pool[ai].expr), std::move(wrapped)
+                                    );
+                                    if (TryUpdate(best, std::move(e), eval, nv, bw, baseline)) {
+                                        return best;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Mul scan: lifted = Mul(atom_B, inner_C)
+                        {
+                            std::vector< size_t > candidates;
+                            for (size_t bi = 0; bi < pool.size(); ++bi) {
+                                const bool filtered = CollectMulProbe0Candidates(
+                                    inner_cache.mul_probe0_buckets, pool[bi].vals[0], lifted[0],
+                                    bw, candidates
+                                );
+                                if (filtered) {
+                                    for (size_t ii_idx : candidates) {
+                                        if (!MulMatches(
+                                                pool[bi].vals, inner[ii_idx].vals, lifted, mask,
+                                                1
+                                            ))
+                                        {
+                                            continue;
+                                        }
+                                        auto g2_e = GateExpr(
+                                            Gate::kMul, CloneExpr(*pool[bi].expr),
+                                            make_inner(inner[ii_idx])
+                                        );
+                                        auto wrapped = (wrap == 0)
+                                            ? Expr::Negate(std::move(g2_e))
+                                            : Expr::BitwiseNot(std::move(g2_e));
+                                        auto e       = GateExpr(
+                                            g1, CloneExpr(*pool[ai].expr), std::move(wrapped)
+                                        );
+                                        if (TryUpdate(
+                                                best, std::move(e), eval, nv, bw, baseline
+                                            ))
+                                        {
+                                            return best;
+                                        }
+                                    }
+                                    continue;
+                                }
+                                for (size_t ii = 0; ii < inner.size(); ++ii) {
+                                    if (!MulMatches(
+                                            pool[bi].vals, inner[ii].vals, lifted, mask
+                                        ))
+                                    {
+                                        continue;
+                                    }
+                                    auto g2_e = GateExpr(
+                                        Gate::kMul, CloneExpr(*pool[bi].expr),
+                                        make_inner(inner[ii])
+                                    );
+                                    auto wrapped = (wrap == 0)
+                                        ? Expr::Negate(std::move(g2_e))
+                                        : Expr::BitwiseNot(std::move(g2_e));
+                                    auto e       = GateExpr(
+                                        g1, CloneExpr(*pool[ai].expr), std::move(wrapped)
+                                    );
+                                    if (TryUpdate(best, std::move(e), eval, nv, bw, baseline)) {
+                                        return best;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            return best;
         }
 
     } // namespace
