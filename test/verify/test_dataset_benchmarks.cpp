@@ -4,7 +4,6 @@
 #include "cobra/core/ExprCost.h"
 #include "cobra/core/PassContract.h"
 #include "cobra/core/Profile.h"
-#include "cobra/core/SignatureChecker.h"
 #include "cobra/core/Simplifier.h"
 #include <fstream>
 #include <gtest/gtest.h>
@@ -109,11 +108,6 @@ namespace {
             }
 
             Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
-            if (input_expr) {
-                opts.evaluator = [&folded](const std::vector< uint64_t > &v) -> uint64_t {
-                    return EvalExpr(*folded, v, 64);
-                };
-            }
 
             auto result =
                 Simplify(parse_result.value().sig, parse_result.value().vars, input_expr, opts);
