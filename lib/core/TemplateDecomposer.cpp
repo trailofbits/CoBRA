@@ -8,6 +8,7 @@
 #include "cobra/core/SignatureSimplifier.h"
 #include "cobra/core/Simplifier.h"
 #include "cobra/core/Trace.h"
+#include <absl/container/flat_hash_map.h>
 #include <array>
 #include <bit>
 #include <cstddef>
@@ -16,7 +17,6 @@
 #include <memory>
 #include <optional>
 #include <random>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -46,10 +46,9 @@ namespace cobra {
 
         bool GateInvertible(Gate g) { return g == Gate::kXor || g == Gate::kAdd; }
 
-        // Fingerprint-indexed map: maps ProbeVals → size_t using a cheap
-        // 64-bit fingerprint as primary key, with full equality check on
-        // lookup to handle the (rare) collisions.  Avoids hashing 128 bytes
-        // per lookup that unordered_map<ProbeVals,...> would require.
+        // 64-bit fingerprint of a ProbeVals array. Used as the hash key
+        // in ValMap. Collisions are astronomically unlikely (~10^-12 for
+        // typical pool sizes) and handled conservatively downstream.
         uint64_t Fingerprint(const ProbeVals &v) {
             // XOR-fold with position-dependent rotation to avoid
             // commutative cancellation (a^b == b^a).
@@ -58,46 +57,34 @@ namespace cobra {
             return h;
         }
 
+        // Maps 64-bit probe-value fingerprints to pool/inner indices.
+        // Uses absl::flat_hash_map for SIMD-accelerated lookup.
         class ValMap
         {
           public:
-            struct Entry
-            {
-                size_t value;
-            };
-
             void insert(const ProbeVals &key, size_t value) {
-                auto fp = Fingerprint(key);
-                buckets_[fp].push_back({ .key = key, .value = value });
+                map_.try_emplace(Fingerprint(key), static_cast< uint32_t >(value));
             }
 
-            // Returns pointer to value if found, nullptr otherwise.
             const size_t *find(const ProbeVals &key) const {
-                auto fp = Fingerprint(key);
-                auto it = buckets_.find(fp);
-                if (it == buckets_.end()) { return nullptr; }
-                for (const auto &entry : it->second) {
-                    if (entry.key == key) { return &entry.value; }
-                }
-                return nullptr;
+                auto it = map_.find(Fingerprint(key));
+                if (it == map_.end()) { return nullptr; }
+                idx_buf_ = it->second;
+                return &idx_buf_;
             }
 
             bool contains(const ProbeVals &key) const { return find(key) != nullptr; }
 
           private:
-            struct Slot
-            {
-                ProbeVals key;
-                size_t value;
-            };
-
-            std::unordered_map< uint64_t, std::vector< Slot > > buckets_;
+            absl::flat_hash_map< uint64_t, uint32_t > map_;
+            mutable size_t idx_buf_ = 0;
         };
 
         struct Atom
         {
             std::unique_ptr< Expr > expr;
             ProbeVals vals;
+            ExprCost cost;
         };
 
         // Evaluate expr at all probe points.
@@ -116,13 +103,16 @@ namespace cobra {
         ) {
             const auto *slot = idx.find(vals);
             if (slot != nullptr) {
-                if (IsBetter(ComputeCost(*e).cost, ComputeCost(*pool[*slot].expr).cost)) {
+                auto new_cost = ComputeCost(*e).cost;
+                if (IsBetter(new_cost, pool[*slot].cost)) {
                     pool[*slot].expr = std::move(e);
+                    pool[*slot].cost = new_cost;
                 }
                 return;
             }
+            auto c = ComputeCost(*e).cost;
             idx.insert(vals, pool.size());
-            pool.push_back({ .expr = std::move(e), .vals = vals });
+            pool.push_back({ .expr = std::move(e), .vals = vals, .cost = c });
         }
 
         // Build the bounded atom pool.
@@ -171,11 +161,19 @@ namespace cobra {
                 }
             }
 
-            // Neg and NOT of every atom so far
+            // Neg and NOT of every atom so far.
+            // Compute probe values arithmetically from existing vals
+            // instead of re-evaluating through EvalExpr (16 calls each).
             const size_t base = pool.size();
             for (size_t k = 0; k < base; ++k) {
-                add(Expr::Negate(CloneExpr(*pool[k].expr)));
-                add(Expr::BitwiseNot(CloneExpr(*pool[k].expr)));
+                ProbeVals neg_v;
+                ProbeVals not_v;
+                for (size_t i = 0; i < kNProbes; ++i) {
+                    neg_v[i] = (-pool[k].vals[i]) & mask;
+                    not_v[i] = (~pool[k].vals[i]) & mask;
+                }
+                Push(pool, idx, Expr::Negate(CloneExpr(*pool[k].expr)), neg_v);
+                Push(pool, idx, Expr::BitwiseNot(CloneExpr(*pool[k].expr)), not_v);
             }
         }
 
@@ -204,6 +202,24 @@ namespace cobra {
             return r;
         }
 
+        // Check G(a[0], b[0]) == target[0] at probe 0 only.
+        // Cheap rejection filter before the full 16-probe GateMatches.
+        bool Probe0Matches(uint64_t a0, uint64_t b0, uint64_t t0, Gate g, uint64_t mask) {
+            switch (g) {
+                case Gate::kAnd:
+                    return (a0 & b0) == t0;
+                case Gate::kOr:
+                    return (a0 | b0) == t0;
+                case Gate::kXor:
+                    return (a0 ^ b0) == t0;
+                case Gate::kAdd:
+                    return ((a0 + b0) & mask) == t0;
+                case Gate::kMul:
+                    return ((a0 * b0) & mask) == t0;
+            }
+            return false;
+        }
+
         // Check if G(a, b) == target, short-circuiting on first mismatch.
         bool GateMatches(
             const ProbeVals &a, const ProbeVals &b, const ProbeVals &target, Gate g,
@@ -226,9 +242,6 @@ namespace cobra {
                         break;
                     case Gate::kMul:
                         r = (a[i] * b[i]) & mask;
-                        break;
-                    default:
-                        r = 0;
                         break;
                 }
                 if (r != target[i]) { return false; }
@@ -287,7 +300,7 @@ namespace cobra {
         {
             std::vector< InnerComp > comps;
             ValMap index;
-            std::unordered_map< uint64_t, std::vector< size_t > > mul_probe0_buckets;
+            absl::flat_hash_map< uint64_t, std::vector< size_t > > mul_probe0_buckets;
         };
 
         InnerCompositions BuildInnerCompositions(
@@ -307,6 +320,7 @@ namespace cobra {
                     }
                 }
             }
+
             return inner;
         }
 
@@ -354,6 +368,12 @@ namespace cobra {
                 } else {
                     for (size_t ai = 0; ai < pool.size(); ++ai) {
                         for (size_t bi = 0; bi < pool.size(); ++bi) {
+                            if (!Probe0Matches(
+                                    pool[ai].vals[0], pool[bi].vals[0], target[0], g, mask
+                                ))
+                            {
+                                continue;
+                            }
                             if (!GateMatches(pool[ai].vals, pool[bi].vals, target, g, mask)) {
                                 continue;
                             }
@@ -369,30 +389,7 @@ namespace cobra {
             return best;
         }
 
-        // Layer 1, invertible gates only (XOR, ADD).
-        // Uses hash lookup — O(pool) per gate.
-        std::optional< SignaturePayload > Layer1Fast(
-            const ProbeVals &target, const std::vector< Atom > &pool, const ValMap &vmap,
-            uint64_t mask, const Evaluator &eval, uint32_t nv, uint32_t bw,
-            const ExprCost *baseline
-        ) {
-            std::optional< SignaturePayload > best;
-            for (auto g : kAllGates) {
-                if (!GateInvertible(g)) { continue; }
-                for (size_t ai = 0; ai < pool.size(); ++ai) {
-                    auto res         = GateResidual(target, pool[ai].vals, g, mask);
-                    const auto *slot = vmap.find(res);
-                    if (slot == nullptr) { continue; }
-                    auto e =
-                        GateExpr(g, CloneExpr(*pool[ai].expr), CloneExpr(*pool[*slot].expr));
-                    TryUpdate(best, std::move(e), eval, nv, bw, baseline);
-                }
-                if (best.has_value()) { return best; }
-            }
-            return best;
-        }
-
-        // Check if atom A is compatible as a left operand of a
+        // Check if atom A is compatible as an operand of a
         // non-invertible gate that produces the target.
         bool Compatible(const ProbeVals &a, const ProbeVals &target, Gate g) {
             for (size_t i = 0; i < kNProbes; ++i) {
@@ -450,7 +447,7 @@ namespace cobra {
         // admissible inner[0] values and restrict the scan to matching buckets.
         // Falls back to a full scan when probe 0 is too degenerate to be useful.
         bool CollectMulProbe0Candidates(
-            const std::unordered_map< uint64_t, std::vector< size_t > > &probe0_buckets,
+            const absl::flat_hash_map< uint64_t, std::vector< size_t > > &probe0_buckets,
             uint64_t lhs_probe0, uint64_t target_probe0, uint32_t bitwidth,
             std::vector< size_t > &out
         ) {
@@ -460,21 +457,12 @@ namespace cobra {
             lhs_probe0    &= Bitmask(bitwidth);
             target_probe0 &= Bitmask(bitwidth);
 
-            if (lhs_probe0 == 0) {
-                // 0 * x == 0 for all x; this probe gives no filtering power.
-                return target_probe0 != 0;
-            }
+            if (lhs_probe0 == 0) { return target_probe0 != 0; }
 
             const auto twos =
                 std::min(bitwidth, static_cast< uint32_t >(std::countr_zero(lhs_probe0)));
-            if ((target_probe0 & Bitmask(twos)) != 0) {
-                // No modular solutions exist for probe 0.
-                return true;
-            }
-            if (twos > kMaxEnumeratedShift) {
-                // Too many residue classes; keep the exact legacy scan.
-                return false;
-            }
+            if ((target_probe0 & Bitmask(twos)) != 0) { return true; }
+            if (twos > kMaxEnumeratedShift) { return false; }
 
             const uint32_t reduced_bits = bitwidth - twos;
             uint64_t base_solution      = 0;
@@ -507,7 +495,7 @@ namespace cobra {
 
         // Layer 2: target = G_out(A, G_in(B, C)).
         std::optional< SignaturePayload > Layer2(
-            const ProbeVals &target, const std::vector< Atom > &pool, const ValMap &vmap,
+            const ProbeVals &target, const std::vector< Atom > &pool,
             const InnerCompositions &inner_cache, uint64_t mask, const Evaluator &eval,
             uint32_t nv, uint32_t bw, const ExprCost *baseline
         ) {
@@ -574,7 +562,11 @@ namespace cobra {
                     for (size_t ai_idx : pool_compat) {
                         const auto &ai = pool[ai_idx];
                         for (size_t ii_idx : inner_compat) {
-                            const auto &ii     = inner[ii_idx];
+                            const auto &ii = inner[ii_idx];
+                            if (!Probe0Matches(ai.vals[0], ii.vals[0], target[0], g_out, mask))
+                            {
+                                continue;
+                            }
                             const bool matches = (g_out == Gate::kAnd)
                                 ? AndMatches(ai.vals, ii.vals, target)
                                 : OrMatches(ai.vals, ii.vals, target);
@@ -643,7 +635,7 @@ namespace cobra {
                 );
             };
 
-            // --- Phase 1: invertible G1, invertible G2 (existing) ---
+            // Invertible G1, invertible G2: hash-based lookup.
             for (auto g1 : kAllGates) {
                 if (!GateInvertible(g1)) { continue; }
                 for (size_t ai = 0; ai < pool.size(); ++ai) {
@@ -684,15 +676,31 @@ namespace cobra {
                 }
             }
 
-            // --- Phase 2: peel invertible G1, apply unary, then
-            //     match non-invertible G2(atom, inner) ---
-            //
-            // Finds: G1(atom_A, Unary(G2(atom_B, inner_C)))
-            // where G1 is invertible, Unary is Neg or Not, and G2 is
-            // any gate (And/Or/Mul scanned with compatibility filtering).
-            //
-            // This covers overlap-conditioned patterns like:
-            //   Add(overlap, Neg(And(neg_var, Mul(overlap, var))))
+            return best;
+        }
+
+        // Layer 4: target = G1(A, Unary(G2(B, inner_C)))
+        // where G1 is invertible, Unary is Neg or Not, and G2 is
+        // any gate (And/Or/Mul scanned with compatibility filtering).
+        //
+        // This covers overlap-conditioned patterns like:
+        //   Add(overlap, Neg(And(neg_var, Mul(overlap, var))))
+        std::optional< SignaturePayload > Layer4(
+            const ProbeVals &target, const std::vector< Atom > &pool, const ValMap &vmap,
+            const InnerCompositions &inner_cache, uint64_t mask, const Evaluator &eval,
+            uint32_t nv, uint32_t bw, const ExprCost *baseline
+        ) {
+            const auto &inner     = inner_cache.comps;
+            const auto &inner_idx = inner_cache.index;
+            std::optional< SignaturePayload > best;
+
+            auto make_inner = [&](const InnerComp &ic) {
+                return GateExpr(
+                    ic.gate, CloneExpr(*pool[ic.bi].expr), CloneExpr(*pool[ic.ci].expr)
+                );
+            };
+
+            std::vector< size_t > mul_candidates;
             for (auto g1 : kAllGates) {
                 if (!GateInvertible(g1)) { continue; }
                 for (size_t ai = 0; ai < pool.size(); ++ai) {
@@ -723,11 +731,21 @@ namespace cobra {
                         }
 
                         // And/Or scan: lifted = G2(atom_B, inner_C)
+                        // Probe-0 check rejects most (pool, inner) pairs
+                        // with a single integer comparison before touching
+                        // the full 16-probe arrays.
                         for (auto g2 : { Gate::kAnd, Gate::kOr }) {
                             for (size_t bi = 0; bi < pool.size(); ++bi) {
                                 if (!Compatible(pool[bi].vals, lifted, g2)) { continue; }
                                 for (size_t ii = 0; ii < inner.size(); ++ii) {
-                                    bool matches = (g2 == Gate::kAnd)
+                                    if (!Probe0Matches(
+                                            pool[bi].vals[0], inner[ii].vals[0], lifted[0], g2,
+                                            mask
+                                        ))
+                                    {
+                                        continue;
+                                    }
+                                    const bool matches = (g2 == Gate::kAnd)
                                         ? AndMatches(pool[bi].vals, inner[ii].vals, lifted)
                                         : OrMatches(pool[bi].vals, inner[ii].vals, lifted);
                                     if (!matches) { continue; }
@@ -749,14 +767,13 @@ namespace cobra {
 
                         // Mul scan: lifted = Mul(atom_B, inner_C)
                         {
-                            std::vector< size_t > candidates;
                             for (size_t bi = 0; bi < pool.size(); ++bi) {
                                 const bool filtered = CollectMulProbe0Candidates(
                                     inner_cache.mul_probe0_buckets, pool[bi].vals[0], lifted[0],
-                                    bw, candidates
+                                    bw, mul_candidates
                                 );
                                 if (filtered) {
-                                    for (size_t ii_idx : candidates) {
+                                    for (size_t ii_idx : mul_candidates) {
                                         if (!MulMatches(
                                                 pool[bi].vals, inner[ii_idx].vals, lifted, mask,
                                                 1
@@ -923,8 +940,7 @@ namespace cobra {
             COBRA_ZONE_N("TemplateLayer2");
             auto inner = BuildInnerCompositions(pool, vmap, kMask);
             auto r2    = Layer2(
-                target, pool, vmap, inner, kMask, *ctx.eval, num_vars, opts.bitwidth,
-                baseline_cost
+                target, pool, inner, kMask, *ctx.eval, num_vars, opts.bitwidth, baseline_cost
             );
             if (r2.has_value()) {
                 return SolverResult< SignaturePayload >::Success(std::move(*r2));
@@ -997,6 +1013,19 @@ namespace cobra {
             );
             if (r3.has_value()) {
                 return SolverResult< SignaturePayload >::Success(std::move(*r3));
+            }
+        }
+
+        // Layer 4: target = G1(A, Unary(G2(B, inner_C)))
+        // Unary-wrapped non-invertible gate scan for overlap patterns.
+        {
+            COBRA_ZONE_N("TemplateLayer4");
+            auto r4 = Layer4(
+                target, pool, vmap, *inner_cache, kMask, *ctx.eval, num_vars, opts.bitwidth,
+                baseline_cost
+            );
+            if (r4.has_value()) {
+                return SolverResult< SignaturePayload >::Success(std::move(*r4));
             }
         }
 

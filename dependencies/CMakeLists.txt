@@ -15,12 +15,14 @@ cmake_minimum_required(VERSION 3.20)
 project(cobra-dependencies LANGUAGES C CXX)
 
 option(USE_EXTERNAL_LLVM "Use system LLVM instead of building from source" ON)
+option(USE_EXTERNAL_ABSEIL "Use system abseil instead of building from source" OFF)
 option(USE_EXTERNAL_GOOGLETEST "Use system GoogleTest instead of building from source" OFF)
 option(COBRA_ENABLE_Z3 "Enable Z3 dependency (requires lib/verify to be implemented)" OFF)
 option(USE_EXTERNAL_Z3 "Use system Z3 instead of building from source" OFF)
 
 include(superbuild.cmake)
 
+include(abseil.cmake)
 include(llvm.cmake)
 include(googletest.cmake)
 

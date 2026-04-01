@@ -61,3 +61,6 @@ target_include_directories(cobra-core PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
+
+find_package(absl REQUIRED)
+target_link_libraries(cobra-core PRIVATE absl::flat_hash_map)
