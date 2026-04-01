@@ -167,6 +167,17 @@ target_include_directories(test_oses_diagnostic PRIVATE
 target_compile_definitions(test_oses_diagnostic PRIVATE
     DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
 
+# CoB core-candidate regression diagnostic (manual, not auto-discovered)
+add_executable(test_cob_core_candidate_diagnostic
+               verify/test_cob_core_candidate_diagnostic.cpp
+               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(test_cob_core_candidate_diagnostic PRIVATE
+    cobra-core GTest::gtest_main)
+target_include_directories(test_cob_core_candidate_diagnostic PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+target_compile_definitions(test_cob_core_candidate_diagnostic PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
 # Verify-failed forensic (manual, not auto-discovered)
 add_executable(test_verify_failed_forensic verify/test_verify_failed_forensic.cpp
                ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
