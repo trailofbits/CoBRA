@@ -26,10 +26,9 @@ eval_factorial_poly(uint64_t x, const std::vector< UnivariateTerm > &terms, uint
 // Helper: build an evaluator from a univariate factorial poly
 // for variable var_index in a num_vars-variable expression.
 static Evaluator make_univariate_eval(
-    const std::vector< UnivariateTerm > &terms, uint32_t var_index, uint32_t num_vars,
+    const std::vector< UnivariateTerm > &terms, uint32_t var_index, uint32_t /*num_vars*/,
     uint32_t bitwidth, uint64_t constant = 0
 ) {
-    assert(var_index < num_vars);
     return [=](const std::vector< uint64_t > &v) -> uint64_t {
         uint64_t mask = Bitmask(bitwidth);
         return (constant + eval_factorial_poly(v[var_index], terms, bitwidth)) & mask;
@@ -262,7 +261,7 @@ TEST(SingletonPowerRecoveryTest, PreservesVariableIndexAboveUint8) {
 TEST(SingletonPowerRecoveryTest, SplittingVsRecoveryOracle) {
     // For x^2, verify that singleton-power recovery's h_2 mod 2^{w-1}
     // equals coefficient splitting's mul_c[1].
-    for (uint32_t w : { 8, 16, 32, 64 }) {
+    for (uint32_t w : { 8u, 16u, 32u, 64u }) {
         uint64_t mask = Bitmask(w);
         uint64_t half = Bitmask(w - 1);
 

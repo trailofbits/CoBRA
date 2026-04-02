@@ -5,7 +5,12 @@ updates:
     schedule:
       interval: weekly
     groups:
-      actions:
+      ci-infrastructure:
         patterns:
-          - "*"
+          - "actions/checkout"
+          - "actions/cache"
+      ci-tools:
+        patterns:
+          - "actions/upload-artifact"
+          - "actions/download-artifact"
     open-pull-requests-limit: 5

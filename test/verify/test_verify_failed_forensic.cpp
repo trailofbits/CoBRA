@@ -73,32 +73,6 @@ namespace {
         return s;
     }
 
-    std::string kind_str(Expr::Kind k) {
-        switch (k) {
-            case Expr::Kind::kConstant:
-                return "Const";
-            case Expr::Kind::kVariable:
-                return "Var";
-            case Expr::Kind::kAdd:
-                return "Add";
-            case Expr::Kind::kMul:
-                return "Mul";
-            case Expr::Kind::kAnd:
-                return "And";
-            case Expr::Kind::kOr:
-                return "Or";
-            case Expr::Kind::kXor:
-                return "Xor";
-            case Expr::Kind::kNot:
-                return "Not";
-            case Expr::Kind::kNeg:
-                return "Neg";
-            case Expr::Kind::kShr:
-                return "Shr";
-        }
-        return "?";
-    }
-
     // Classify the "reconstruction shape" of an expression:
     // what operator families does it use?
     struct ReconShape
@@ -643,11 +617,6 @@ namespace {
                 return "none";
         }
         return "unknown";
-    }
-
-    bool IsBitwiseKind(Expr::Kind k) {
-        return k == Expr::Kind::kAnd || k == Expr::Kind::kOr || k == Expr::Kind::kXor
-            || k == Expr::Kind::kNot;
     }
 
     uint32_t CountNodes(const Expr &e) {

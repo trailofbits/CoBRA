@@ -1,3 +1,7 @@
+if(NOT LLVM_FOUND)
+    message(FATAL_ERROR "CobraPass requires LLVM — set COBRA_BUILD_LLVM_PASS=OFF to skip")
+endif()
+
 add_library(CobraPass MODULE
     CobraPass.cpp
     MBADetector.cpp

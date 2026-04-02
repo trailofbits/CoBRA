@@ -33,7 +33,7 @@ TEST(DegreeCapTest, KnownValues) {
 }
 
 TEST(DegreeCapTest, BoundaryInvariant) {
-    for (uint32_t w : { 2, 3, 4, 8, 16, 32, 64 }) {
+    for (uint32_t w : { 2u, 3u, 4u, 8u, 16u, 32u, 64u }) {
         uint32_t dw = DegreeCap(w);
         EXPECT_LT(TwosInFactorial(dw - 1), w) << "w=" << w;
         EXPECT_GE(TwosInFactorial(dw), w) << "w=" << w;
@@ -73,7 +73,7 @@ TEST(ModInverseOddTest, InverseOfOne) {
 }
 
 TEST(ModInverseOddTest, InverseOfThree) {
-    for (uint32_t bits : { 2, 4, 8, 16, 32, 63, 64 }) {
+    for (uint32_t bits : { 2u, 4u, 8u, 16u, 32u, 63u, 64u }) {
         uint64_t inv  = ModInverseOdd(3, bits);
         uint64_t mask = Bitmask(bits);
         EXPECT_EQ((3 * inv) & mask, 1u) << "bits=" << bits;
@@ -81,7 +81,7 @@ TEST(ModInverseOddTest, InverseOfThree) {
 }
 
 TEST(ModInverseOddTest, InverseOfOddFactorials) {
-    for (uint32_t w : { 8, 16, 32, 64 }) {
+    for (uint32_t w : { 8u, 16u, 32u, 64u }) {
         uint32_t dw = DegreeCap(w);
         for (uint32_t k = 1; k < dw; ++k) {
             uint32_t v    = TwosInFactorial(k);

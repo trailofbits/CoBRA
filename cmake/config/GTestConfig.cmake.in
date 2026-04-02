@@ -1,0 +1,2 @@
+# Forwarding config — delegates to system GoogleTest
+include("@GTest_DIR@/GTestConfig.cmake")

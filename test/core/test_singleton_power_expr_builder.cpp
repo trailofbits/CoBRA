@@ -53,7 +53,6 @@ TEST(FactorialToMonomialTest, X_3_At_W64) {
     auto expr = BuildSingletonPowerExpr(powers);
     ASSERT_NE(expr, nullptr);
 
-    uint64_t mask = Bitmask(64);
     for (uint64_t x : { 0ULL, 1ULL, 2ULL, 3ULL, 10ULL, 255ULL }) {
         uint64_t expected = eval_factorial_poly(
             x,
@@ -125,7 +124,7 @@ TEST(SingletonPowerExprBuilderTest, PreservesVariableIndexAboveUint8) {
 TEST(SingletonPowerExprBuilderTest, MultiBitwidthEvaluation) {
     // x^3 across multiple bitwidths.
     // x^3 = x_(3) + 3*x_(2) + x_(1).
-    for (uint32_t w : { 2, 4, 8, 16, 32, 64 }) {
+    for (uint32_t w : { 2u, 4u, 8u, 16u, 32u, 64u }) {
         uint64_t mask                       = Bitmask(w);
         std::vector< UnivariateTerm > terms = {
             { 1,        1 },

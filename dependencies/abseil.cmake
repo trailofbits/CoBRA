@@ -5,14 +5,11 @@ if(USE_EXTERNAL_ABSEIL)
     find_package(absl REQUIRED)
     message(STATUS "Using external abseil")
 
-    # Write a forwarding abslConfig.cmake.
-    set(_absl_config_dir
-        "${COBRA_INSTALL_PREFIX}/lib/cmake/absl")
+    set(_absl_config_dir "${COBRA_INSTALL_PREFIX}/lib/cmake/absl")
     file(MAKE_DIRECTORY "${_absl_config_dir}")
-    file(WRITE "${_absl_config_dir}/abslConfig.cmake"
-        "# Forwarding config — delegates to system abseil\n"
-        "include(\"${absl_DIR}/abslConfig.cmake\")\n"
-    )
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/config/abslConfig.cmake.in"
+        "${_absl_config_dir}/abslConfig.cmake" @ONLY)
 
     cobra_mark_satisfied(abseil)
 else()

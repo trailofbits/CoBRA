@@ -150,7 +150,7 @@ namespace cobra {
         }
 
         PassResult ResolveBitwiseCompose(
-            const BitwiseComposeCont &cont, CompetitionGroup &group, const WorkItem &item,
+            const BitwiseComposeCont &cont, CompetitionGroup &group, const WorkItem & /*item*/,
             OrchestratorContext &ctx
         ) {
             PassResult pr;
@@ -198,7 +198,7 @@ namespace cobra {
         }
 
         PassResult ResolveHybridCompose(
-            const HybridComposeCont &cont, CompetitionGroup &group, const WorkItem &item,
+            const HybridComposeCont &cont, CompetitionGroup &group, const WorkItem & /*item*/,
             OrchestratorContext &ctx
         ) {
             PassResult pr;

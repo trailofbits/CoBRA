@@ -106,9 +106,9 @@ namespace cobra {
         {
             std::vector< uint64_t > sig_x;
             std::vector< uint64_t > sig_y;
-            int i = 0;
-            int l = 0;
-            int r = 0;
+            size_t i = 0;
+            size_t l = 0;
+            size_t r = 0;
         };
 
         bool ExprStructurallyEqual(const Expr &lhs, const Expr &rhs) {
@@ -160,13 +160,13 @@ namespace cobra {
             };
 
             std::array< std::vector< uint64_t >, 4 > sigs;
-            for (int i = 0; i < 4; ++i) {
+            for (size_t i = 0; i < 4; ++i) {
                 sigs[i] = EvaluateBooleanSignature(*factors[i], num_vars, bitwidth);
             }
 
             struct Roles
             {
-                int i, o, l, r;
+                size_t i, o, l, r;
             };
 
             static constexpr Roles kAssignments[8] = {

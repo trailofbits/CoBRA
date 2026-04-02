@@ -1,0 +1,2 @@
+# Forwarding config — delegates to system abseil
+include("@absl_DIR@/abslConfig.cmake")

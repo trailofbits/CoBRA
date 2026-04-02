@@ -109,8 +109,6 @@ namespace {
         return n;
     }
 
-    bool has_var_dep(const Expr &e) { return HasVarDep(e); }
-
     // Check if node has arithmetic under bitwise
     bool has_arith_under_bitwise(const Expr &e, bool under_bw) {
         bool is_bw =
@@ -277,7 +275,7 @@ TEST(LinearExhaustedAudit, DeepDiagnostic) {
 
     for (int target_line : kLinearExhausted) {
         if (target_line < 1 || target_line > static_cast< int >(lines.size())) { continue; }
-        const auto &raw = lines[target_line - 1];
+        const auto &raw = lines[static_cast< size_t >(target_line) - 1];
         if (raw.empty() || raw[0] == '#') { continue; }
 
         size_t sep = find_separator(raw);

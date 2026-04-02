@@ -5,14 +5,11 @@ if(USE_EXTERNAL_GOOGLETEST)
     find_package(GTest REQUIRED)
     message(STATUS "Using external GoogleTest")
 
-    # Write a forwarding GTestConfig.cmake.
-    set(_gtest_config_dir
-        "${COBRA_INSTALL_PREFIX}/lib/cmake/GTest")
+    set(_gtest_config_dir "${COBRA_INSTALL_PREFIX}/lib/cmake/GTest")
     file(MAKE_DIRECTORY "${_gtest_config_dir}")
-    file(WRITE "${_gtest_config_dir}/GTestConfig.cmake"
-        "# Forwarding config — delegates to system GoogleTest\n"
-        "include(\"${GTest_DIR}/GTestConfig.cmake\")\n"
-    )
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/config/GTestConfig.cmake.in"
+        "${_gtest_config_dir}/GTestConfig.cmake" @ONLY)
 
     cobra_mark_satisfied(googletest)
 else()

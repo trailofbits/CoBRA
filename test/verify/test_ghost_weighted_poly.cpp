@@ -79,7 +79,7 @@ TEST(GhostWeightedPoly, HigherDegreeProbe) {
 
     for (int target_line : kTargetLines) {
         if (target_line < 1 || target_line > static_cast< int >(lines.size())) { continue; }
-        const auto &raw = lines[target_line - 1];
+        const auto &raw = lines[static_cast< size_t >(target_line) - 1];
         if (raw.empty() || raw[0] == '#') { continue; }
 
         size_t sep = find_separator(raw);
@@ -103,8 +103,7 @@ TEST(GhostWeightedPoly, HigherDegreeProbe) {
         auto bool_real = static_cast< uint32_t >(bool_elim.real_vars.size());
 
         auto folded_ptr     = std::make_shared< std::unique_ptr< Expr > >(CloneExpr(*folded));
-        Evaluator orig_eval = [folded_ptr,
-                               &vars](const std::vector< uint64_t > &v) -> uint64_t {
+        Evaluator orig_eval = [folded_ptr](const std::vector< uint64_t > &v) -> uint64_t {
             return EvalExpr(**folded_ptr, v, 64);
         };
 

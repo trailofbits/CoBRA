@@ -1,0 +1,2 @@
+# Forwarding config — delegates to system highway
+include("@hwy_DIR@/hwyConfig.cmake")

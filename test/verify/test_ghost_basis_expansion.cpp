@@ -58,8 +58,6 @@ namespace {
         return s.substr(start, end - start + 1);
     }
 
-    const uint64_t kMask = ~0ULL; // 64-bit
-
     // Ghost primitive: x^2 - x = x*(x-1)
     uint64_t sq_sub(uint64_t x) { return (x * x) - x; }
 
@@ -217,7 +215,7 @@ TEST(GhostBasisExpansion, TieredProbe) {
 
     for (int target_line : kTargetLines) {
         if (target_line < 1 || target_line > static_cast< int >(lines.size())) { continue; }
-        const auto &raw = lines[target_line - 1];
+        const auto &raw = lines[static_cast< size_t >(target_line) - 1];
         if (raw.empty() || raw[0] == '#') { continue; }
 
         size_t sep = find_separator(raw);
@@ -241,8 +239,7 @@ TEST(GhostBasisExpansion, TieredProbe) {
         auto bool_real = static_cast< uint32_t >(bool_elim.real_vars.size());
 
         auto folded_ptr     = std::make_shared< std::unique_ptr< Expr > >(CloneExpr(*folded));
-        Evaluator orig_eval = [folded_ptr,
-                               &vars](const std::vector< uint64_t > &v) -> uint64_t {
+        Evaluator orig_eval = [folded_ptr](const std::vector< uint64_t > &v) -> uint64_t {
             return EvalExpr(**folded_ptr, v, 64);
         };
 
@@ -270,8 +267,7 @@ TEST(GhostBasisExpansion, TieredProbe) {
 
         auto cob_shared = std::make_shared< std::unique_ptr< Expr > >(CloneExpr(*cob_expr));
         std::function< uint64_t(const std::vector< uint64_t > &) > residual =
-            [reduced_eval, cob_shared,
-             bool_real](const std::vector< uint64_t > &v) -> uint64_t {
+            [reduced_eval, cob_shared](const std::vector< uint64_t > &v) -> uint64_t {
             return reduced_eval(v) - EvalExpr(**cob_shared, v, 64);
         };
 

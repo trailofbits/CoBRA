@@ -356,7 +356,7 @@ TEST(StructuralClassifierTest, FallbackDominatesSupported) {
     auto mixed =
         Expr::Mul(Expr::BitwiseAnd(Expr::Variable(0), Expr::Variable(1)), Expr::Variable(2));
     auto e = Expr::Add(std::move(cube), std::move(mixed));
-    auto c = ClassifyStructural(*e);
+    ClassifyStructural(*e);
 }
 
 TEST(StructuralClassifierTest, CubePlusMultilinearIsPowerRecovery) {
@@ -364,7 +364,7 @@ TEST(StructuralClassifierTest, CubePlusMultilinearIsPowerRecovery) {
     auto cube = Expr::Mul(Expr::Mul(Expr::Variable(0), Expr::Variable(0)), Expr::Variable(0));
     auto xy   = Expr::Mul(Expr::Variable(0), Expr::Variable(1));
     auto e    = Expr::Add(std::move(cube), std::move(xy));
-    auto c    = ClassifyStructural(*e);
+    ClassifyStructural(*e);
 }
 
 // Semantic class tests

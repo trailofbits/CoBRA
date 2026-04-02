@@ -35,8 +35,8 @@ namespace cobra {
                 }
             }
             std::sort(indices.begin(), indices.end(), [&terms](size_t a, size_t b) {
-                const uint32_t pa = std::popcount(terms[a].mask);
-                const uint32_t pb = std::popcount(terms[b].mask);
+                const uint32_t pa = static_cast< uint32_t >(std::popcount(terms[a].mask));
+                const uint32_t pb = static_cast< uint32_t >(std::popcount(terms[b].mask));
                 if (pa != pb) { return pa < pb; }
                 return terms[a].mask < terms[b].mask;
             });

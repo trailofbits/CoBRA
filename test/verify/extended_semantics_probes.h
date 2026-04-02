@@ -271,20 +271,21 @@ namespace cobra::probe {
 
         for (int p = 0; p < kNumProbes; ++p) {
             std::vector< uint64_t > v(n, 0);
-            uint64_t extra_state =
-                0xD1B54A32D192ED03ULL ^ (static_cast< uint64_t >(p) * 0x9E3779B97F4A7C15ULL);
+            uint64_t extra_state = static_cast< uint64_t >(0xD1B54A32D192ED03ULL)
+                ^ (static_cast< uint64_t >(p) * static_cast< uint64_t >(0x9E3779B97F4A7C15ULL));
 
             for (uint32_t i = 0; i < n; ++i) {
                 uint64_t raw = 0;
                 if (i < 6) {
-                    raw = kSeeds[(p * 6) + i];
+                    raw = kSeeds[static_cast< uint32_t >(p) * 6 + i];
                 } else {
                     raw = splitmix64(extra_state);
                 }
 
                 uint64_t val = raw & kMask;
                 if (kMask > 1 && (val == 0 || val == 1)) {
-                    val = (3ULL + static_cast< uint64_t >(i) + static_cast< uint64_t >(p))
+                    val = (uint64_t{ 3 } + static_cast< uint64_t >(i)
+                           + static_cast< uint64_t >(p))
                         & kMask;
                     if (val == 0 || val == 1) { val = 3ULL & kMask; }
                 }

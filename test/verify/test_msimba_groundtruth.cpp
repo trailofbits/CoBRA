@@ -113,7 +113,6 @@ TEST(MSiMBAGroundTruth, ExhaustiveEvalCheck) {
     constexpr int kProbesPerExpr = 1000;
     std::mt19937_64 rng(42);
 
-    int total      = 0;
     int simplified = 0;
     int failed     = 0;
 
@@ -128,7 +127,6 @@ TEST(MSiMBAGroundTruth, ExhaustiveEvalCheck) {
 
         std::string obfuscated = trim(line.substr(0, sep));
         if (obfuscated.empty()) { continue; }
-        total++;
 
         auto parse_result = ParseAndEvaluate(obfuscated, 64);
         if (!parse_result.has_value()) { continue; }

@@ -1247,7 +1247,7 @@ TEST(SimplifierTest, SemilinearCanonicalizesMaskedComplementSum) {
     auto result = Simplify(sig, vars, input.get(), opts);
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
-    EXPECT_EQ(Render(*result.value().expr, result.value().real_vars), "(~a & y) + 1");
+    EXPECT_EQ(Render(*result.value().expr, result.value().real_vars), "-(a | ~y)");
 
     auto remapped = CloneExpr(*result.value().expr);
     auto support  = BuildVarSupport(vars, result.value().real_vars);

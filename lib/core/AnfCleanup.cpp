@@ -256,11 +256,11 @@ namespace cobra {
                 if (kSubsetSize < 2) { continue; }
 
                 uint32_t var_mask = 0;
-                for (int b = 0; b < kNv; ++b) {
+                for (size_t b = 0; b < static_cast< size_t >(kNv); ++b) {
                     if ((s & (1U << b)) != 0u) { var_mask |= var_bits[b]; }
                 }
 
-                const uint32_t kFamilySize = (1ULL << kSubsetSize) - 1;
+                const uint32_t kFamilySize = static_cast< uint32_t >((1ULL << kSubsetSize) - 1);
                 // Skip if this covers all monomials (Rule 1 handles)
                 if (kFamilySize >= monomials.size()) { continue; }
 

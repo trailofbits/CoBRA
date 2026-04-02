@@ -205,12 +205,14 @@ namespace cobra {
                 result.spurious_vars.push_back(vars[v]);
             }
         }
+#ifdef COBRA_ENABLE_TRACE
         for (const auto &sv : result.spurious_vars) {
             COBRA_TRACE("AuxVarEliminator", "  spurious: {}", sv);
         }
         for (const auto &rv : result.real_vars) {
             COBRA_TRACE("AuxVarEliminator", "  live: {}", rv);
         }
+#endif
         COBRA_TRACE_SIG("AuxVarEliminator", "compacted sig", result.reduced_sig);
         return result;
     }

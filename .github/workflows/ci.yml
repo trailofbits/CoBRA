@@ -23,17 +23,14 @@ jobs:
             cc: gcc-14
             cxx: g++-14
             name: Linux GCC
-            lint: false
           - os: ubuntu-24.04
             cc: clang-22
             cxx: clang++-22
             name: Linux Clang
-            lint: true
-          - os: macos-14
+          - os: macos-15
             cc: clang
             cxx: clang++
             name: macOS
-            lint: false
 
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
@@ -49,13 +46,13 @@ jobs:
           wget -qO llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh 22 all
-          sudo apt-get install -y -qq libz3-dev
+          sudo apt-get install -y -qq libz3-dev ninja-build
           echo "LLVM_DIR=/usr/lib/llvm-22/lib/cmake/llvm" >> "$GITHUB_ENV"
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install llvm z3
+          brew install llvm z3 ninja
           LLVM_PREFIX="$(brew --prefix llvm)"
           echo "${LLVM_PREFIX}/bin" >> "$GITHUB_PATH"
           {
@@ -65,36 +62,58 @@ jobs:
             echo "LDFLAGS=-L${LLVM_PREFIX}/lib/c++ -Wl,-rpath,${LLVM_PREFIX}/lib/c++"
           } >> "$GITHUB_ENV"
 
-      - name: Cache GoogleTest
+      - name: Log tool versions
+        run: |
+          "${CC:-${{ matrix.cc }}}" --version
+          cmake --version
+          ninja --version
+
+      - name: Cache dependencies
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: build-deps/install
-          key: deps-${{ matrix.os }}-${{ matrix.cc }}-gtest1.16.0-hwy1.3.0
+          key: deps-${{ matrix.os }}-${{ matrix.cc }}-${{ hashFiles('dependencies/*.cmake') }}
 
       - name: Build dependencies
         run: |
-          cmake -S dependencies -B build-deps \
+          cmake -S dependencies -B build-deps -G Ninja \
             -DCMAKE_C_COMPILER="${CC:-${{ matrix.cc }}}" \
             -DCMAKE_CXX_COMPILER="${CXX:-${{ matrix.cxx }}}" \
             -DCMAKE_BUILD_TYPE=Release \
-            -DUSE_EXTERNAL_LLVM=ON
+            -DUSE_EXTERNAL_LLVM=ON \
+            -DCOBRA_BUILD_TESTS=ON
           cmake --build build-deps
 
       - name: Build CoBRA
         run: |
-          cmake -S . -B build \
+          cmake -S . -B build -G Ninja \
             -DCMAKE_C_COMPILER="${CC:-${{ matrix.cc }}}" \
             -DCMAKE_CXX_COMPILER="${CXX:-${{ matrix.cxx }}}" \
             -DCMAKE_PREFIX_PATH="$(pwd)/build-deps/install" \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_CXX_FLAGS="-march=native"
+            -DCMAKE_CXX_FLAGS_INIT="-march=native" \
+            -DCOBRA_BUILD_TESTS=ON \
+            -DCOBRA_BUILD_LLVM_PASS=ON
           cmake --build build
 
       - name: Run tests
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build -j "$(nproc 2>/dev/null || sysctl -n hw.ncpu)" --output-on-failure
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install clang-format
+        run: |
+          wget -qO llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 22 all
 
       - name: clang-format check
-        if: matrix.lint
         run: |
           find include lib tools \( -name '*.h' -o -name '*.cpp' \) -print0 \
             | xargs -0 clang-format-22 --dry-run --Werror

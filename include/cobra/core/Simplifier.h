@@ -19,8 +19,8 @@ namespace cobra {
         uint32_t max_vars                 = 16;
         bool spot_check                   = true;
         bool enable_bitwise_decomposition = true;
+        StructuralFlag structural_flags   = static_cast< StructuralFlag >(0);
         Evaluator evaluator;
-        StructuralFlag structural_flags = static_cast< StructuralFlag >(0);
     };
 
     Result< SimplifyOutcome > Simplify(
