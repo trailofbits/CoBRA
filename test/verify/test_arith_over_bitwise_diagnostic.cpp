@@ -73,29 +73,6 @@ namespace {
         }
     }
 
-    // Check if the CoB result (boolean-domain correct) differs from
-    // the original evaluator at full width
-    bool has_arith_under_bitwise(const Expr &e) {
-        // Add or Mul with a child that has non-leaf bitwise
-        // (mirrors the classifier logic)
-        bool child_has_bitwise = false;
-        for (const auto &c : e.children) {
-            if (has_arith_under_bitwise(*c)) { return true; }
-            // Check if child is a non-leaf bitwise node
-            if (c->kind == Expr::Kind::kAnd || c->kind == Expr::Kind::kOr
-                || c->kind == Expr::Kind::kXor || c->kind == Expr::Kind::kNot)
-            {
-                // Only non-leaf if it has variable dependence
-                // (simplified check: has children beyond constants)
-                child_has_bitwise = true;
-            }
-        }
-        if (child_has_bitwise && (e.kind == Expr::Kind::kAdd || e.kind == Expr::Kind::kMul)) {
-            return true;
-        }
-        return false;
-    }
-
     struct FailureEntry
     {
         int line_num;

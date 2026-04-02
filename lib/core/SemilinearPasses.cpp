@@ -58,8 +58,8 @@ namespace cobra {
             if (expr.kind != Expr::Kind::kAdd || expr.children.size() != 2) { return false; }
 
             const Expr *const_node = nullptr;
-            int const_idx          = -1;
-            for (int i = 0; i < 2; ++i) {
+            size_t const_idx       = 0;
+            for (size_t i = 0; i < 2; ++i) {
                 if (expr.children[i]->kind == Expr::Kind::kConstant) {
                     const_node = expr.children[i].get();
                     const_idx  = i;
@@ -114,11 +114,13 @@ namespace cobra {
             if (xor_const_idx >= 0) {
                 const uint64_t kMask = Bitmask(bitwidth);
                 const uint64_t kNegK = ModNeg(coeff, bitwidth);
-                const uint64_t kC    = term->children[xor_const_idx]->constant_val;
+                const uint64_t kC =
+                    term->children[static_cast< size_t >(xor_const_idx)]->constant_val;
                 const uint64_t kNotC = (~kC) & kMask;
 
-                auto var_child = CloneExpr(*term->children[1 - xor_const_idx]);
-                auto new_xor   = Expr::BitwiseXor(Expr::Constant(kNotC), std::move(var_child));
+                auto var_child =
+                    CloneExpr(*term->children[static_cast< size_t >(1 - xor_const_idx)]);
+                auto new_xor = Expr::BitwiseXor(Expr::Constant(kNotC), std::move(var_child));
                 return ApplyCoefficient(std::move(new_xor), kNegK, bitwidth);
             }
         }

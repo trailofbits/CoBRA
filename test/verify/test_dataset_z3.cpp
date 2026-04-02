@@ -171,10 +171,10 @@ TEST(DatasetZ3, MSiMBASample) {
     for (int idx : indices) {
         if (idx >= static_cast< int >(lines.size())) { continue; }
 
-        size_t sep = find_separator(lines[idx]);
+        size_t sep = find_separator(lines[static_cast< size_t >(idx)]);
         if (sep == std::string::npos) { continue; }
 
-        std::string obfuscated = trim(lines[idx].substr(0, sep));
+        std::string obfuscated = trim(lines[static_cast< size_t >(idx)].substr(0, sep));
         if (obfuscated.empty()) { continue; }
 
         auto parse_result = ParseAndEvaluate(obfuscated, 64);

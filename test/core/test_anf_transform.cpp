@@ -83,7 +83,7 @@ TEST(AnfTransformTest, ThreeVarAnd) {
     // f(a,b,c) = a & b & c: truth table [0,0,0,0,0,0,0,1]
     std::vector< uint64_t > sig = { 0, 0, 0, 0, 0, 0, 0, 1 };
     auto anf                    = ComputeAnf(sig, 3);
-    for (int i = 0; i < 7; ++i) { EXPECT_EQ(anf[i], 0); }
+    for (size_t i = 0; i < 7; ++i) { EXPECT_EQ(anf[i], 0); }
     EXPECT_EQ(anf[7], 1); // only a&b&c
 }
 

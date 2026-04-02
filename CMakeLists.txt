@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(cobra VERSION 0.1.0 LANGUAGES C CXX)
+project(cobra VERSION 1.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -9,8 +9,54 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-option(COBRA_BUILD_LLVM_PASS "Build the LLVM pass plugin" ON)
-option(COBRA_BUILD_TESTS "Build tests" ON)
+# --- Compiler warnings and hardening ---
+set(_cobra_gcc_clang $<CXX_COMPILER_ID:GNU,Clang,AppleClang>)
+set(_cobra_msvc $<CXX_COMPILER_ID:MSVC>)
+set(_cobra_linux $<AND:$<CXX_COMPILER_ID:GNU,Clang>,$<PLATFORM_ID:Linux>>)
+
+# Warnings
+add_compile_options(
+    $<${_cobra_gcc_clang}:-Wall>
+    $<${_cobra_gcc_clang}:-Wextra>
+    $<${_cobra_gcc_clang}:-Wpedantic>
+    $<${_cobra_gcc_clang}:-Wconversion>
+    $<${_cobra_gcc_clang}:-Wsign-conversion>
+    # GCC/Clang warn on designated inits that omit defaulted fields — suppress
+    $<$<CXX_COMPILER_ID:GNU>:-Wno-missing-field-initializers>
+    $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-missing-designated-field-initializers>
+    $<${_cobra_msvc}:/W4>
+)
+
+# Runtime hardening (GCC/Clang)
+add_compile_options(
+    $<${_cobra_gcc_clang}:-fstack-protector-strong>
+    $<${_cobra_gcc_clang}:-ftrivial-auto-var-init=zero>
+    $<$<AND:${_cobra_gcc_clang},$<NOT:$<CONFIG:Debug>>>:-D_FORTIFY_SOURCE=3>
+    $<${_cobra_linux}:-fstack-clash-protection>
+    $<$<AND:${_cobra_linux},$<STREQUAL:${CMAKE_SYSTEM_PROCESSOR},x86_64>>:-fcf-protection=full>
+)
+
+# Runtime hardening (MSVC)
+add_compile_options(
+    $<${_cobra_msvc}:/sdl>
+    $<${_cobra_msvc}:/guard:cf>
+    $<${_cobra_msvc}:/GS>
+)
+
+# libc++ hardened container bounds checking (~0.3% overhead)
+add_compile_options($<$<CXX_COMPILER_ID:Clang,AppleClang>:-D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_FAST>)
+
+# Linker hardening
+add_link_options(
+    $<${_cobra_linux}:-Wl,-z,relro,-z,now,-z,noexecstack>
+    $<${_cobra_msvc}:/DYNAMICBASE>
+    $<${_cobra_msvc}:/NXCOMPAT>
+    $<${_cobra_msvc}:/CETCOMPAT>
+    $<${_cobra_msvc}:/guard:cf>
+)
+
+option(COBRA_BUILD_LLVM_PASS "Build the LLVM pass plugin (requires LLVM 19-22)" OFF)
+option(COBRA_BUILD_TESTS "Build tests (requires GoogleTest in prefix)" OFF)
 option(COBRA_ENABLE_TRACE "Enable detailed pipeline tracing to stderr (debug builds)" OFF)
 option(COBRA_ENABLE_TRACY "Enable Tracy profiler instrumentation" OFF)
 

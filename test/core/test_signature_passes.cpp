@@ -1402,7 +1402,7 @@ TEST(SignaturePass, ResidualRecombineWithCoreExpr) {
     auto ctx = MakeCtx(opts, vars);
 
     auto core_expr          = Expr::Mul(Expr::Variable(0), Expr::Variable(1));
-    Evaluator residual_eval = [&opts](const std::vector< uint64_t > &vals) -> uint64_t {
+    Evaluator residual_eval = [](const std::vector< uint64_t > &vals) -> uint64_t {
         return vals[0] ^ vals[1];
     };
 

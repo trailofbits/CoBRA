@@ -74,7 +74,7 @@ TEST(ResidualCharacterize, TwoVarDense) {
 
     for (int target_line : kTargetLines) {
         if (target_line < 1 || target_line > static_cast< int >(lines.size())) { continue; }
-        const auto &raw = lines[target_line - 1];
+        const auto &raw = lines[static_cast< size_t >(target_line) - 1];
         if (raw.empty() || raw[0] == '#') { continue; }
 
         size_t sep = find_separator(raw);
@@ -99,8 +99,7 @@ TEST(ResidualCharacterize, TwoVarDense) {
         if (bool_real != 2) { continue; }
 
         auto folded_ptr     = std::make_shared< std::unique_ptr< Expr > >(CloneExpr(*folded));
-        Evaluator orig_eval = [folded_ptr,
-                               &vars](const std::vector< uint64_t > &v) -> uint64_t {
+        Evaluator orig_eval = [folded_ptr](const std::vector< uint64_t > &v) -> uint64_t {
             return EvalExpr(**folded_ptr, v, 64);
         };
 
@@ -146,9 +145,9 @@ TEST(ResidualCharacterize, TwoVarDense) {
         std::cerr << "       ";
         for (int y = 0; y <= 7; ++y) { std::cerr << std::setw(8) << y; }
         std::cerr << "\n";
-        for (int x = 0; x <= 7; ++x) {
+        for (uint64_t x = 0; x <= 7; ++x) {
             std::cerr << "  x=" << x << " ";
-            for (int y = 0; y <= 7; ++y) {
+            for (uint64_t y = 0; y <= 7; ++y) {
                 int64_t val = static_cast< int64_t >(r(x, y));
                 std::cerr << std::setw(8) << val;
             }
@@ -189,9 +188,9 @@ TEST(ResidualCharacterize, TwoVarDense) {
         std::cerr << "       ";
         for (int y = 0; y <= 6; ++y) { std::cerr << std::setw(8) << y; }
         std::cerr << "\n";
-        for (int x = 0; x <= 6; ++x) {
+        for (uint64_t x = 0; x <= 6; ++x) {
             std::cerr << "  x=" << x << " ";
-            for (int y = 0; y <= 6; ++y) {
+            for (uint64_t y = 0; y <= 6; ++y) {
                 int64_t dxy = static_cast< int64_t >(
                     r(x + 1, y + 1) - r(x + 1, y) - r(x, y + 1) + r(x, y)
                 );

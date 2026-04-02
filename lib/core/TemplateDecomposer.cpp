@@ -717,8 +717,8 @@ namespace cobra {
             {
                 COBRA_ZONE_N("L2Mul");
                 std::vector< size_t > mul_probe0_candidates;
-                size_t mul_bucketed_outer = 0;
-                size_t mul_fallback_outer = 0;
+                [[maybe_unused]] size_t mul_bucketed_outer = 0;
+                [[maybe_unused]] size_t mul_fallback_outer = 0;
 
                 for (const auto &ai : pool) {
                     const bool used_probe0_filter = CollectMulProbe0Candidates(

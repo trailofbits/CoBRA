@@ -95,9 +95,9 @@ namespace {
                 if ((a & b) != 0) { continue; }
                 for (int c = 0; c < range; ++c) {
                     std::vector< uint64_t > v(3);
-                    v[vi] = static_cast< uint64_t >(a);
-                    v[vj] = static_cast< uint64_t >(b);
-                    v[vk] = static_cast< uint64_t >(c);
+                    v[static_cast< size_t >(vi)] = static_cast< uint64_t >(a);
+                    v[static_cast< size_t >(vj)] = static_cast< uint64_t >(b);
+                    v[static_cast< size_t >(vk)] = static_cast< uint64_t >(c);
                     if (r(v) != 0) { ++violations; }
                 }
             }
@@ -115,7 +115,7 @@ namespace {
             // Find a reference value for the other variable
             uint64_t ref_other = 0;
             for (uint64_t other = 1; other <= static_cast< uint64_t >(fixed); ++other) {
-                if ((fixed & other) != 0) {
+                if ((static_cast< uint64_t >(fixed) & other) != 0) {
                     ref_other = other;
                     break;
                 }
@@ -123,18 +123,18 @@ namespace {
             if (ref_other == 0) { continue; }
 
             std::vector< uint64_t > ref_v(2);
-            ref_v[var_idx]     = static_cast< uint64_t >(fixed);
-            ref_v[1 - var_idx] = ref_other;
-            uint64_t r_ref     = r(ref_v);
-            uint64_t o_ref     = fixed & ref_other;
+            ref_v[static_cast< size_t >(var_idx)]     = static_cast< uint64_t >(fixed);
+            ref_v[static_cast< size_t >(1 - var_idx)] = ref_other;
+            uint64_t r_ref                            = r(ref_v);
+            uint64_t o_ref = static_cast< uint64_t >(fixed) & ref_other;
 
             for (int other = 0; other < range; ++other) {
                 uint64_t o = static_cast< uint64_t >(fixed) & static_cast< uint64_t >(other);
                 if (o == 0) { continue; }
                 std::vector< uint64_t > v(2);
-                v[var_idx]     = static_cast< uint64_t >(fixed);
-                v[1 - var_idx] = static_cast< uint64_t >(other);
-                uint64_t r_val = r(v);
+                v[static_cast< size_t >(var_idx)]     = static_cast< uint64_t >(fixed);
+                v[static_cast< size_t >(1 - var_idx)] = static_cast< uint64_t >(other);
+                uint64_t r_val                        = r(v);
                 if (r_val * o_ref != r_ref * o) { return false; }
             }
         }
@@ -203,10 +203,10 @@ namespace {
         os << "  f(v" << var_idx << ") samples: ";
         for (int val = 1; val <= 15; val += 2) {
             std::vector< uint64_t > v(2);
-            v[var_idx]     = static_cast< uint64_t >(val);
-            v[1 - var_idx] = 1;
+            v[static_cast< size_t >(var_idx)]     = static_cast< uint64_t >(val);
+            v[static_cast< size_t >(1 - var_idx)] = 1;
             // overlap = val & 1 = 1 for odd val, so f(val) = r
-            auto fval      = static_cast< int64_t >(r(v));
+            auto fval                             = static_cast< int64_t >(r(v));
             os << val << "->" << fval << " ";
         }
         os << "\n";
@@ -250,7 +250,7 @@ TEST(OverlapSemanticExtractor, FullCluster) {
         ASSERT_GE(tl, 1);
         ASSERT_LE(tl, static_cast< int >(lines.size()));
 
-        const auto &raw = lines[tl - 1];
+        const auto &raw = lines[static_cast< size_t >(tl) - 1];
         if (raw.empty() || raw[0] == '#') { continue; }
 
         size_t sep = find_separator(raw);
@@ -304,8 +304,8 @@ TEST(OverlapSemanticExtractor, FullCluster) {
 
         auto cob_shared = std::make_shared< std::unique_ptr< Expr > >(CloneExpr(*cob_expr));
 
-        ResidualFn residual = [reduced_eval, cob_shared,
-                               nreal](const std::vector< uint64_t > &v) -> uint64_t {
+        ResidualFn residual = [reduced_eval,
+                               cob_shared](const std::vector< uint64_t > &v) -> uint64_t {
             return reduced_eval(v) - EvalExpr(**cob_shared, v, 64);
         };
 

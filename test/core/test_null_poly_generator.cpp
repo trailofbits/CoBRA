@@ -47,7 +47,7 @@ namespace {
 TEST(NullPolyGeneratorSmokeTest, UnivariateXSquaredMinusX) {
     // 2^{w-1} * (x^2 - x) is null for any w >= 2.
     // Factorial form: 2^{w-1} * x_(2).
-    for (uint32_t w : { 2, 3, 4, 8, 16, 32, 64 }) {
+    for (uint32_t w : { 2u, 3u, 4u, 8u, 16u, 32u, 64u }) {
         uint64_t mask     = Bitmask(w);
         uint64_t half     = (w < 64) ? (1ULL << (w - 1)) : (1ULL << 63);
         uint64_t neg_half = (0 - half) & mask;
@@ -66,7 +66,7 @@ TEST(NullPolyGeneratorSmokeTest, UnivariateXSquaredMinusX) {
 TEST(NullPolyGeneratorSmokeTest, MultivariateXSquaredYMinusXY) {
     // 2^{w-1} * (x^2*y - x*y) is null for any w >= 2.
     // Factorial form: 2^{w-1} * x_(2)*y_(1).
-    for (uint32_t w : { 2, 4, 8, 32, 64 }) {
+    for (uint32_t w : { 2u, 4u, 8u, 32u, 64u }) {
         uint64_t mask     = Bitmask(w);
         uint64_t half     = (w < 64) ? (1ULL << (w - 1)) : (1ULL << 63);
         uint64_t neg_half = (0 - half) & mask;
@@ -84,7 +84,7 @@ TEST(NullPolyGeneratorSmokeTest, TwoSquaredCoords) {
     // 2^{w-2} * (x^2*y^2 - x^2*y - x*y^2 + x*y) is null for w >= 2.
     // Factorial form: 2^{w-2} * x_(2)*y_(2).
     // Test at w >= 4 for nontrivial coefficient; w=2 exercises k >= w.
-    for (uint32_t w : { 4, 8, 16, 32, 64 }) {
+    for (uint32_t w : { 4u, 8u, 16u, 32u, 64u }) {
         uint64_t mask        = Bitmask(w);
         uint64_t quarter     = 1ULL << (w - 2);
         uint64_t neg_quarter = (0 - quarter) & mask;

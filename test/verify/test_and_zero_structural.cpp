@@ -181,7 +181,7 @@ TEST(AndZeroStructural, AnchorDecomposition) {
         ASSERT_GE(tl, 1);
         ASSERT_LE(tl, static_cast< int >(lines.size()));
 
-        const auto &raw = lines[tl - 1];
+        const auto &raw = lines[static_cast< size_t >(tl) - 1];
         ASSERT_FALSE(raw.empty());
 
         size_t sep = find_separator(raw);

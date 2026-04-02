@@ -277,7 +277,7 @@ namespace cobra::probe {
             for (uint32_t i = 0; i < n; ++i) {
                 uint64_t raw = 0;
                 if (i < 6) {
-                    raw = kSeeds[(p * 6) + i];
+                    raw = kSeeds[static_cast< uint32_t >(p) * 6 + i];
                 } else {
                     raw = splitmix64(extra_state);
                 }

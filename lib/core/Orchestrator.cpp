@@ -945,7 +945,8 @@ namespace cobra {
                         continue;
                     }
 
-                    telemetry.queue_high_water = worklist.HighWaterMark();
+                    telemetry.queue_high_water =
+                        static_cast< uint32_t >(worklist.HighWaterMark());
                     return Ok(ToSimplifyOutcome(
                         OrchestratorResult{
                             .outcome = PassOutcome::Success(
@@ -1155,7 +1156,7 @@ namespace cobra {
             final_meta.cause_chain = exhaustion_reason.causes;
         }
 
-        telemetry.queue_high_water = worklist.HighWaterMark();
+        telemetry.queue_high_water = static_cast< uint32_t >(worklist.HighWaterMark());
         return Ok(ToSimplifyOutcome(
             OrchestratorResult{
                 .outcome      = PassOutcome::Blocked(std::move(exhaustion_reason)),

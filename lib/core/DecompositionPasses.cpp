@@ -396,7 +396,7 @@ namespace cobra {
         bool is_bn =
             IsBooleanNullResidual(residual_eval, support, num_vars, ctx.bitwidth, residual_sig);
 
-        RemainderOrigin origin;
+        RemainderOrigin origin = RemainderOrigin::kProductCore;
         switch (core.extractor_kind) {
             case ExtractorKind::kProductAST:
                 origin = RemainderOrigin::kProductCore;

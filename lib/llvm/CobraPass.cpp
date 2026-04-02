@@ -35,7 +35,7 @@ STATISTIC(NumSkippedUnsupported, "Number of candidates skipped (unsupported)");
 namespace cobra {
 
     llvm::PreservedAnalyses
-    CobraPass::run(llvm::Function &f, llvm::FunctionAnalysisManager &AM) {
+    CobraPass::run(llvm::Function &f, llvm::FunctionAnalysisManager & /*AM*/) {
         bool changed = false;
 
         auto candidates = DetectMbaCandidates(f, min_ast_size_, max_vars_);

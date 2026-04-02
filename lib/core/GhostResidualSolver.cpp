@@ -61,10 +61,9 @@ namespace cobra {
                 5, 6,  11, 14, 19, 22, 29, 34, 41, 50, 59, 66, 73, 82, 91, 100,
                 9, 12, 17, 20, 25, 30, 35, 40, 47, 56, 63, 70, 79, 86, 95, 102,
             };
-            for (int p = 0; p < kNumProbes; ++p) {
+            for (size_t p = 0; p < kNumProbes; ++p) {
                 for (uint32_t v = 0; v < num_vars && v < 6; ++v) {
-                    bank[static_cast< size_t >(p)].values[v] =
-                        kSeeds[static_cast< size_t >((p * 6) + v)] & kMask;
+                    bank[p].values[v] = kSeeds[(p * 6) + v] & kMask;
                 }
             }
         }

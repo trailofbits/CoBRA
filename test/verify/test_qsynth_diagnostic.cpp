@@ -59,13 +59,6 @@ namespace {
         return d + 1;
     }
 
-    uint32_t count_ops(const Expr &e) {
-        uint32_t n = 0;
-        if (e.kind != Expr::Kind::kConstant && e.kind != Expr::Kind::kVariable) { n = 1; }
-        for (const auto &c : e.children) { n += count_ops(*c); }
-        return n;
-    }
-
     std::string kind_str(Expr::Kind k) {
         switch (k) {
             case Expr::Kind::kConstant:
@@ -239,9 +232,7 @@ TEST(QSynthDiagnostic, DecompEngineTelemetry) {
     int poly4_extracted      = 0;
     int template_extracted   = 0;
     int no_extractor         = 0;
-    int res_supported_solved = 0;
     int res_sup_recombined   = 0;
-    int res_poly_solved      = 0;
     int res_poly_recombined  = 0;
     int res_tmpl_solved      = 0;
     int res_tmpl_recombined  = 0;
@@ -428,7 +419,7 @@ TEST(QSynthDiagnostic, DecompEngineTelemetry) {
                     }
                     std::cerr << "]\n";
                     // Spot-check a few points
-                    for (int dbg = 0; dbg < 3; ++dbg) {
+                    for (uint32_t dbg = 0; dbg < 3; ++dbg) {
                         std::vector< uint64_t > pt(kNv);
                         for (uint32_t vi = 0; vi < kNv; ++vi) {
                             pt[vi] = static_cast< uint64_t >(dbg * 17 + vi * 7 + 1);
@@ -591,9 +582,7 @@ TEST(QSynthDiagnostic, DecompEngineTelemetry) {
         if (!probe && p4.has_value()) { probe = probe_residual(*p4, "Poly4"); }
 
         if (probe.has_value()) {
-            if (probe->supported_solved) { res_supported_solved++; }
             if (probe->sup_recombines) { res_sup_recombined++; }
-            if (probe->poly_solved) { res_poly_solved++; }
             if (probe->poly_recombines) { res_poly_recombined++; }
             if (probe->tmpl_solved) { res_tmpl_solved++; }
             if (probe->tmpl_recombines) { res_tmpl_recombined++; }
@@ -630,7 +619,7 @@ TEST(QSynthDiagnostic, DecompEngineTelemetry) {
                 std::cerr << "  " << label << " all_direct_fail:";
 
                 auto classify_rejection = [&](CoreCandidate &core,
-                                              const std::string &name) -> std::string {
+                                              const std::string & /*name*/) -> std::string {
                     const auto kNv     = static_cast< uint32_t >(vars.size());
                     const uint32_t kBw = 64;
 
@@ -965,9 +954,10 @@ TEST(QSynthDiagnostic, FactoredGhostTelemetry) {
             auto advance_tuple = [&]() -> bool {
                 int pos = static_cast< int >(prim.arity) - 1;
                 while (pos >= 0) {
-                    indices[pos]++;
-                    if (indices[pos] <= res_count - prim.arity + pos) {
-                        for (int k = pos + 1; k < prim.arity; ++k) {
+                    auto upos = static_cast< uint32_t >(pos);
+                    indices[upos]++;
+                    if (indices[upos] <= res_count - prim.arity + upos) {
+                        for (uint32_t k = upos + 1; k < prim.arity; ++k) {
                             indices[k] = indices[k - 1] + 1;
                         }
                         return true;
@@ -1701,7 +1691,7 @@ TEST(QSynthDiagnostic, MultiWeightNullBasisTelemetry) {
 
         // FW check via random probes
         auto fw_check = [&](auto model_fn) -> bool {
-            std::mt19937_64 rng(0xBEEF + line_num);
+            std::mt19937_64 rng(0xBEEF + static_cast< unsigned >(line_num));
             for (int i = 0; i < 16; ++i) {
                 uint64_t a = rng() & kMask;
                 uint64_t b = rng() & kMask;
@@ -1863,11 +1853,6 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
     int core_non_bn  = 0;
     int no_core_ct   = 0;
     int core_bn      = 0;
-
-    // Sub-counters for routing_miss
-    int rm_orig_direct = 0; // Simplify succeeds on original AST
-    int rm_post_direct = 0; // succeeds after preconditioning
-    // TryDecomposition counters removed — use orchestrator pipeline
 
     // Sub-counters for core_non_bn
     int nb_sup_verified_0 = 0; // sup_solved=1, verified=0
@@ -2191,7 +2176,7 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
                     return residual_eval(full);
                 };
 
-                std::mt19937_64 rng(0xBEEF + line_num);
+                std::mt19937_64 rng(0xBEEF + static_cast< unsigned >(line_num));
                 const uint64_t kMask = Bitmask(64);
 
                 // First: check reduced space
@@ -2217,7 +2202,7 @@ TEST(QSynthDiagnostic, UnsupportedSetTaxonomy) {
                 }
 
                 // Then: check full space
-                rng.seed(0xCAFE + line_num);
+                rng.seed(0xCAFE + static_cast< unsigned >(line_num));
                 for (int probe = 0; probe < 32; ++probe) {
                     std::vector< uint64_t > pt(kNv);
                     for (uint32_t vi = 0; vi < kNv; ++vi) { pt[vi] = rng() & kMask; }
@@ -2549,7 +2534,7 @@ TEST(QSynthDiagnostic, NonBnResidualCharacterization) {
         std::cerr << "\n";
 
         // Polynomial recovery at D=2,3,4 (raw, not degree-escalated)
-        for (uint8_t deg : { 2, 3, 4 }) {
+        for (uint8_t deg : { uint8_t{ 2 }, uint8_t{ 3 }, uint8_t{ 4 } }) {
             if (res_nv > 6) { continue; }
             auto poly      = RecoverMultivarPoly(residual_eval, res_sup, kNv, 64, deg);
             bool recovered = poly.Succeeded();
@@ -2597,7 +2582,7 @@ TEST(QSynthDiagnostic, NonBnResidualCharacterization) {
         // Verify residual AST matches residual evaluator
         bool ast_matches_eval = true;
         {
-            std::mt19937_64 rng(0xF00D + line_num);
+            std::mt19937_64 rng(0xF00D + static_cast< unsigned >(line_num));
             for (int i = 0; i < 16; ++i) {
                 std::vector< uint64_t > pt(kNv);
                 for (uint32_t vi = 0; vi < kNv; ++vi) { pt[vi] = rng() & kMask; }
@@ -2809,7 +2794,7 @@ TEST(QSynthDiagnostic, NoCoreCharacterization) {
             }
         }
         bool p2fw = false, p3fw = false, p4fw = false;
-        for (uint8_t deg : { 2, 3, 4 }) {
+        for (uint8_t deg : { uint8_t{ 2 }, uint8_t{ 3 }, uint8_t{ 4 } }) {
             auto poly = RecoverMultivarPoly(opts.evaluator, support, kNv, 64, deg);
             if (!poly.Succeeded()) { continue; }
             auto pexpr = BuildPolyExpr(poly.Payload());
@@ -2887,7 +2872,7 @@ TEST(QSynthDiagnostic, NoCoreCharacterization) {
                                     ) -> uint64_t { return EvalExpr(*truth_folded, v, 64); };
                 // Verify truth against original on
                 // random points
-                std::mt19937_64 rng(0xBEEF + d.line);
+                std::mt19937_64 rng(0xBEEF + static_cast< unsigned >(d.line));
                 uint64_t mask = Bitmask(64);
                 bool fw_ok    = true;
                 for (int p = 0; p < 64; ++p) {
@@ -2958,10 +2943,8 @@ TEST(QSynthDiagnostic, RecoverableCaseTrace) {
         ASSERT_TRUE(ast.has_value());
         auto folded = FoldConstantBitwise(std::move(ast->expr), 64);
 
-        const auto &sig  = parse->sig;
-        const auto &vars = parse->vars;
-        auto kNv         = static_cast< uint32_t >(vars.size());
-
+        const auto &sig    = parse->sig;
+        const auto &vars   = parse->vars;
         auto folded_shared = std::make_shared< std::unique_ptr< Expr > >(std::move(folded));
         Options opts{
             .bitwidth   = 64,
@@ -3073,10 +3056,6 @@ TEST(QSynthDiagnostic, RecoverableCaseTrace) {
 //   4. Substitute atoms back, full-width verify
 
 namespace {
-
-    bool IsArithKind(Expr::Kind k) {
-        return k == Expr::Kind::kAdd || k == Expr::Kind::kMul || k == Expr::Kind::kNeg;
-    }
 
     bool IsBitwiseKind(Expr::Kind k) {
         return k == Expr::Kind::kAnd || k == Expr::Kind::kOr || k == Expr::Kind::kXor

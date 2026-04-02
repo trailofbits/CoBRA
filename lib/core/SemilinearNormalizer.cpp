@@ -280,7 +280,7 @@ namespace cobra {
 
             // Lower (~a) & c  =  c - (a & c)  when a has variables
             if (expr.kind == Expr::Kind::kAnd && IsPurelyBitwise(expr) && HasVariable(expr)) {
-                for (int side = 0; side < 2; ++side) {
+                for (size_t side = 0; side < 2; ++side) {
                     const auto &lhs = *expr.children[side];
                     const auto &rhs = *expr.children[1 - side];
                     if (lhs.kind != Expr::Kind::kNot) { continue; }
@@ -380,7 +380,8 @@ namespace cobra {
     } // namespace
 
     Result< SemilinearIR > NormalizeToSemilinear(
-        const Expr &expr, const std::vector< std::string > &vars, uint32_t bitwidth
+        const Expr &expr, [[maybe_unused]] const std::vector< std::string > &vars,
+        uint32_t bitwidth
     ) {
         COBRA_TRACE(
             "Semilinear", "NormalizeToSemilinear: vars={} bitwidth={}", vars.size(), bitwidth

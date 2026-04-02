@@ -558,7 +558,7 @@ TEST(L244Trace, BackSubstitutionFwCheck) {
     for (int trial = 0; trial < 20; ++trial) {
         std::vector< uint64_t > input(orig_vc);
         for (uint32_t v = 0; v < orig_vc; ++v) {
-            input[v] = probes[trial % probes.size()]
+            input[v] = probes[static_cast< size_t >(trial) % probes.size()]
                 ^ (static_cast< uint64_t >(v + 1) * 0xDEADBEEFULL);
         }
         uint64_t orig_val = EvalExpr(*folded, input, 64);

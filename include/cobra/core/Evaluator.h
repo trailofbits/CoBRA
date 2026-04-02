@@ -132,7 +132,7 @@ namespace cobra {
             uint32_t buf_size = source_arity;
             for (uint32_t idx : idx_map) { buf_size = std::max(buf_size, idx + 1); }
             return Evaluator(
-                [base, idx_map, buf_size, original_vals = std::vector< uint64_t >(buf_size, 0)](
+                [base, idx_map, original_vals = std::vector< uint64_t >(buf_size, 0)](
                     const std::vector< uint64_t > &reduced_vals
                 ) mutable -> uint64_t {
                     for (size_t i = 0; i < idx_map.size(); ++i) {

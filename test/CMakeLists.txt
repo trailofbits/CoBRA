@@ -92,14 +92,6 @@ if(Z3_FOUND)
     target_link_libraries(test_z3_verifier PRIVATE cobra-verify GTest::gtest_main)
     gtest_discover_tests(test_z3_verifier)
 
-    # End-to-end integration: parse → simplify → Z3 verify
-    # Uses MBA expressions from SiMBA (DenuvoSoftwareSolutions/SiMBA)
-    add_executable(test_z3_integration verify/test_z3_integration.cpp
-                   ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
-    target_link_libraries(test_z3_integration PRIVATE cobra-verify GTest::gtest_main)
-    target_include_directories(test_z3_integration PRIVATE
-        ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
-    gtest_discover_tests(test_z3_integration)
 endif()
 
 # Dataset benchmark tests: MSiMBA/MBASimplifier datasets

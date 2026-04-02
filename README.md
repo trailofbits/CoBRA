@@ -112,7 +112,7 @@ Input Expression
 See [BUILD.md](BUILD.md) for full details including optional dependencies (LLVM, Z3).
 
 ```bash
-# Build dependencies (GoogleTest, optionally LLVM/Z3)
+# Build dependencies (Abseil, Highway; optionally GoogleTest, LLVM, Z3)
 cmake -S dependencies -B build-deps -DCMAKE_BUILD_TYPE=Release
 cmake --build build-deps
 
@@ -122,16 +122,23 @@ cmake -S . -B build \
   -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 
-# Run tests
+# (Optional) Build and run tests
+cmake -S dependencies -B build-deps -DCMAKE_BUILD_TYPE=Release -DCOBRA_BUILD_TESTS=ON
+cmake --build build-deps
+cmake -S . -B build \
+  -DCMAKE_PREFIX_PATH=$(pwd)/build-deps/install \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCOBRA_BUILD_TESTS=ON
+cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-### CLI-Only (No LLVM)
+### With LLVM Pass Plugin
 
 ```bash
 cmake -S . -B build \
   -DCMAKE_PREFIX_PATH=$(pwd)/build-deps/install \
-  -DCOBRA_BUILD_LLVM_PASS=OFF \
+  -DCOBRA_BUILD_LLVM_PASS=ON \
   -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```

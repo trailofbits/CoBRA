@@ -107,9 +107,7 @@ TEST(SemilinearSelfcheckDiagnostic, AnalyzeFailures) {
         }
         normalize_ok++;
 
-        auto &ir           = ir_result.value();
-        auto num_terms_pre = static_cast< uint32_t >(ir.terms.size());
-        auto num_atoms_pre = static_cast< uint32_t >(ir.atom_table.size());
+        auto &ir = ir_result.value();
 
         // Simplify structure
         SimplifyStructure(ir);

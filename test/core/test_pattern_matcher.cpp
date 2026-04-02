@@ -260,7 +260,9 @@ TEST(PatternMatcherTest, FourVarOrAll) {
 TEST(PatternMatcherTest, FourVarXorAll) {
     // x ^ y ^ z ^ w (parity)
     std::vector< uint64_t > sig(16);
-    for (int i = 0; i < 16; ++i) { sig[i] = ((i >> 0) ^ (i >> 1) ^ (i >> 2) ^ (i >> 3)) & 1; }
+    for (size_t i = 0; i < 16; ++i) {
+        sig[i] = ((i >> 0) ^ (i >> 1) ^ (i >> 2) ^ (i >> 3)) & 1;
+    }
     auto r = MatchPattern(sig, 4, 64);
     ASSERT_TRUE(r.has_value());
     EXPECT_EQ(r.value()->kind, Expr::Kind::kXor);
@@ -269,7 +271,7 @@ TEST(PatternMatcherTest, FourVarXorAll) {
 TEST(PatternMatcherTest, FourVarJustW) {
     // f = w: sig[i] = (i >> 3) & 1
     std::vector< uint64_t > sig(16);
-    for (int i = 0; i < 16; ++i) { sig[i] = (i >> 3) & 1; }
+    for (size_t i = 0; i < 16; ++i) { sig[i] = (i >> 3) & 1; }
     auto r = MatchPattern(sig, 4, 64);
     ASSERT_TRUE(r.has_value());
     EXPECT_EQ(r.value()->kind, Expr::Kind::kVariable);
@@ -279,7 +281,7 @@ TEST(PatternMatcherTest, FourVarJustW) {
 TEST(PatternMatcherTest, FourVarXandW) {
     // f = x & w
     std::vector< uint64_t > sig(16);
-    for (int i = 0; i < 16; ++i) { sig[i] = ((i >> 0) & 1) & ((i >> 3) & 1); }
+    for (size_t i = 0; i < 16; ++i) { sig[i] = ((i >> 0) & 1) & ((i >> 3) & 1); }
     auto r = MatchPattern(sig, 4, 64);
     ASSERT_TRUE(r.has_value());
     for (uint32_t i = 0; i < 16; ++i) {
@@ -331,7 +333,7 @@ TEST(PatternMatcherTest, FiveVarOrAll) {
 
 TEST(PatternMatcherTest, FiveVarXorAll) {
     std::vector< uint64_t > sig(32);
-    for (int i = 0; i < 32; ++i) {
+    for (size_t i = 0; i < 32; ++i) {
         sig[i] = ((i >> 0) ^ (i >> 1) ^ (i >> 2) ^ (i >> 3) ^ (i >> 4)) & 1;
     }
     auto r = MatchPattern(sig, 5, 64);
@@ -341,7 +343,7 @@ TEST(PatternMatcherTest, FiveVarXorAll) {
 
 TEST(PatternMatcherTest, FiveVarJustV) {
     std::vector< uint64_t > sig(32);
-    for (int i = 0; i < 32; ++i) { sig[i] = (i >> 4) & 1; }
+    for (size_t i = 0; i < 32; ++i) { sig[i] = (i >> 4) & 1; }
     auto r = MatchPattern(sig, 5, 64);
     ASSERT_TRUE(r.has_value());
     EXPECT_EQ(r.value()->kind, Expr::Kind::kVariable);
@@ -351,10 +353,10 @@ TEST(PatternMatcherTest, FiveVarJustV) {
 TEST(PatternMatcherTest, FiveVarMixed) {
     // f = (x ^ y) & (z | (w & v))
     std::vector< uint64_t > sig(32);
-    for (int i = 0; i < 32; ++i) {
+    for (size_t i = 0; i < 32; ++i) {
         int x = (i >> 0) & 1, y = (i >> 1) & 1, z = (i >> 2) & 1;
         int w = (i >> 3) & 1, v = (i >> 4) & 1;
-        sig[i] = (x ^ y) & (z | (w & v));
+        sig[i] = static_cast< uint64_t >((x ^ y) & (z | (w & v)));
     }
     auto r = MatchPattern(sig, 5, 64);
     ASSERT_TRUE(r.has_value());
@@ -532,7 +534,7 @@ TEST(PatternMatcherTest, ThreeVarExhaustiveCorrectness) {
     for (uint32_t key = 0; key < 256; ++key) {
         // Build signature from key
         std::vector< uint64_t > sig(8);
-        for (int i = 0; i < 8; ++i) { sig[i] = (key >> i) & 1; }
+        for (size_t i = 0; i < 8; ++i) { sig[i] = (key >> i) & 1; }
 
         auto result = MatchPattern(sig, 3, 64);
         if (!result.has_value()) { continue; }
@@ -560,7 +562,7 @@ TEST(PatternMatcherTest, FourVarExhaustiveCorrectness) {
     int matched = 0;
     for (uint32_t key = 0; key < 65536; ++key) {
         std::vector< uint64_t > sig(16);
-        for (int i = 0; i < 16; ++i) { sig[i] = (key >> i) & 1; }
+        for (size_t i = 0; i < 16; ++i) { sig[i] = (key >> i) & 1; }
 
         auto result = MatchPattern(sig, 4, 64);
         if (!result.has_value()) { continue; }
@@ -588,7 +590,7 @@ TEST(PatternMatcherTest, FourVarExhaustiveCorrectness) {
 TEST(PatternMatcherTest, FiveVarSampledCorrectness) {
     auto verify = [](uint32_t key) {
         std::vector< uint64_t > sig(32);
-        for (int i = 0; i < 32; ++i) { sig[i] = (key >> i) & 1; }
+        for (size_t i = 0; i < 32; ++i) { sig[i] = (key >> i) & 1; }
         auto result = MatchPattern(sig, 5, 64);
         EXPECT_TRUE(result.has_value()) << "key=0x" << std::hex << key;
         if (!result.has_value()) { return; }
