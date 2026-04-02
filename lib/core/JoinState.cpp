@@ -6,7 +6,7 @@
 namespace cobra {
 
     JoinId CreateJoin(
-        std::unordered_map< JoinId, JoinState > &joins, JoinId &next_id, JoinState state
+        absl::flat_hash_map< JoinId, JoinState > &joins, JoinId &next_id, JoinState state
     ) {
         JoinId id = next_id++;
         joins.emplace(id, std::move(state));

@@ -13,7 +13,7 @@ using namespace cobra;
 // --- CreateGroup tests ---
 
 TEST(CompetitionGroup, CreateGroupSetsHandleToOne) {
-    std::unordered_map< GroupId, CompetitionGroup > groups;
+    absl::flat_hash_map< GroupId, CompetitionGroup > groups;
     GroupId next_id = 0;
     auto id         = CreateGroup(groups, next_id);
     ASSERT_EQ(groups.count(id), 1);
@@ -23,7 +23,7 @@ TEST(CompetitionGroup, CreateGroupSetsHandleToOne) {
 }
 
 TEST(CompetitionGroup, CreateGroupIncrementsId) {
-    std::unordered_map< GroupId, CompetitionGroup > groups;
+    absl::flat_hash_map< GroupId, CompetitionGroup > groups;
     GroupId next_id = 0;
     auto id0        = CreateGroup(groups, next_id);
     auto id1        = CreateGroup(groups, next_id);
@@ -32,7 +32,7 @@ TEST(CompetitionGroup, CreateGroupIncrementsId) {
 }
 
 TEST(CompetitionGroup, CreateGroupWithBaselineCost) {
-    std::unordered_map< GroupId, CompetitionGroup > groups;
+    absl::flat_hash_map< GroupId, CompetitionGroup > groups;
     GroupId next_id = 0;
     ExprCost baseline{ .weighted_size = 10, .max_depth = 3 };
     auto id = CreateGroup(groups, next_id, baseline);
@@ -43,7 +43,7 @@ TEST(CompetitionGroup, CreateGroupWithBaselineCost) {
 // --- SubmitCandidate tests ---
 
 TEST(CompetitionGroup, SubmitToEmptyGroupAccepted) {
-    std::unordered_map< GroupId, CompetitionGroup > groups;
+    absl::flat_hash_map< GroupId, CompetitionGroup > groups;
     GroupId next_id = 0;
     auto id         = CreateGroup(groups, next_id);
 
@@ -58,7 +58,7 @@ TEST(CompetitionGroup, SubmitToEmptyGroupAccepted) {
 }
 
 TEST(CompetitionGroup, SubmitWorseRejected) {
-    std::unordered_map< GroupId, CompetitionGroup > groups;
+    absl::flat_hash_map< GroupId, CompetitionGroup > groups;
     GroupId next_id = 0;
     auto id         = CreateGroup(groups, next_id);
 
@@ -77,7 +77,7 @@ TEST(CompetitionGroup, SubmitWorseRejected) {
 }
 
 TEST(CompetitionGroup, SubmitBetterAccepted) {
-    std::unordered_map< GroupId, CompetitionGroup > groups;
+    absl::flat_hash_map< GroupId, CompetitionGroup > groups;
     GroupId next_id = 0;
     auto id         = CreateGroup(groups, next_id);
 
@@ -96,7 +96,7 @@ TEST(CompetitionGroup, SubmitBetterAccepted) {
 }
 
 TEST(CompetitionGroup, SubmitBelowBaselineRejected) {
-    std::unordered_map< GroupId, CompetitionGroup > groups;
+    absl::flat_hash_map< GroupId, CompetitionGroup > groups;
     GroupId next_id = 0;
     ExprCost baseline{ .weighted_size = 5 };
     auto id = CreateGroup(groups, next_id, baseline);
@@ -110,7 +110,7 @@ TEST(CompetitionGroup, SubmitBelowBaselineRejected) {
 }
 
 TEST(CompetitionGroup, SubmitBetterThanBaselineAccepted) {
-    std::unordered_map< GroupId, CompetitionGroup > groups;
+    absl::flat_hash_map< GroupId, CompetitionGroup > groups;
     GroupId next_id = 0;
     ExprCost baseline{ .weighted_size = 10 };
     auto id = CreateGroup(groups, next_id, baseline);
@@ -125,7 +125,7 @@ TEST(CompetitionGroup, SubmitBetterThanBaselineAccepted) {
 }
 
 TEST(CompetitionGroup, SubmitEqualCostRejected) {
-    std::unordered_map< GroupId, CompetitionGroup > groups;
+    absl::flat_hash_map< GroupId, CompetitionGroup > groups;
     GroupId next_id = 0;
     auto id         = CreateGroup(groups, next_id);
 
@@ -145,7 +145,7 @@ TEST(CompetitionGroup, SubmitEqualCostRejected) {
 // --- ReleaseHandle tests ---
 
 TEST(CompetitionGroup, ReleaseLastHandleReturnsResolved) {
-    std::unordered_map< GroupId, CompetitionGroup > groups;
+    absl::flat_hash_map< GroupId, CompetitionGroup > groups;
     GroupId next_id = 0;
     auto id         = CreateGroup(groups, next_id);
 
@@ -158,7 +158,7 @@ TEST(CompetitionGroup, ReleaseLastHandleReturnsResolved) {
 }
 
 TEST(CompetitionGroup, ReleaseNonLastHandleReturnsNullopt) {
-    std::unordered_map< GroupId, CompetitionGroup > groups;
+    absl::flat_hash_map< GroupId, CompetitionGroup > groups;
     GroupId next_id = 0;
     auto id         = CreateGroup(groups, next_id);
     AcquireHandle(groups, id);
@@ -170,7 +170,7 @@ TEST(CompetitionGroup, ReleaseNonLastHandleReturnsNullopt) {
 }
 
 TEST(CompetitionGroup, AcquireAndReleaseMultipleHandles) {
-    std::unordered_map< GroupId, CompetitionGroup > groups;
+    absl::flat_hash_map< GroupId, CompetitionGroup > groups;
     GroupId next_id = 0;
     auto id         = CreateGroup(groups, next_id);
     AcquireHandle(groups, id);
@@ -185,7 +185,7 @@ TEST(CompetitionGroup, AcquireAndReleaseMultipleHandles) {
 }
 
 TEST(CompetitionGroup, ReleaseMissingGroupReturnsNullopt) {
-    std::unordered_map< GroupId, CompetitionGroup > groups;
+    absl::flat_hash_map< GroupId, CompetitionGroup > groups;
     EXPECT_FALSE(ReleaseHandle(groups, 42).has_value());
 }
 
@@ -259,7 +259,7 @@ TEST(CompetitionGroup, TwoResolvedOrderedByDepth) {
 // --- Nested group tests ---
 
 TEST(CompetitionGroup, NestedGroupReleasesParentHandle) {
-    std::unordered_map< GroupId, CompetitionGroup > groups;
+    absl::flat_hash_map< GroupId, CompetitionGroup > groups;
     GroupId next_id = 0;
 
     auto parent_id = CreateGroup(groups, next_id);
@@ -285,7 +285,7 @@ TEST(CompetitionGroup, NestedGroupReleasesParentHandle) {
 // --- Technique failure tracking ---
 
 TEST(CompetitionGroup, TechniqueFailuresAccumulate) {
-    std::unordered_map< GroupId, CompetitionGroup > groups;
+    absl::flat_hash_map< GroupId, CompetitionGroup > groups;
     GroupId next_id = 0;
     auto id         = CreateGroup(groups, next_id);
 
@@ -299,14 +299,14 @@ TEST(CompetitionGroup, TechniqueFailuresAccumulate) {
 // --- Continuation field tests ---
 
 TEST(CompetitionGroup, ContinuationDefaultsToNullopt) {
-    std::unordered_map< GroupId, CompetitionGroup > groups;
+    absl::flat_hash_map< GroupId, CompetitionGroup > groups;
     GroupId next_id = 0;
     auto id         = CreateGroup(groups, next_id);
     EXPECT_FALSE(groups.at(id).continuation.has_value());
 }
 
 TEST(CompetitionGroup, ContinuationMonostate) {
-    std::unordered_map< GroupId, CompetitionGroup > groups;
+    absl::flat_hash_map< GroupId, CompetitionGroup > groups;
     GroupId next_id            = 0;
     auto id                    = CreateGroup(groups, next_id);
     groups.at(id).continuation = ContinuationData{ std::monostate{} };
@@ -315,7 +315,7 @@ TEST(CompetitionGroup, ContinuationMonostate) {
 }
 
 TEST(CompetitionGroup, ContinuationBitwiseCompose) {
-    std::unordered_map< GroupId, CompetitionGroup > groups;
+    absl::flat_hash_map< GroupId, CompetitionGroup > groups;
     GroupId next_id            = 0;
     auto id                    = CreateGroup(groups, next_id);
     groups.at(id).continuation = ContinuationData{

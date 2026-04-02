@@ -23,6 +23,7 @@ option(USE_EXTERNAL_Z3 "Use system Z3 instead of building from source" OFF)
 include(superbuild.cmake)
 
 include(abseil.cmake)
+include(highway.cmake)
 include(llvm.cmake)
 include(googletest.cmake)
 

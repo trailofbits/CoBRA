@@ -6,7 +6,7 @@
 namespace cobra {
 
     GroupId CreateGroup(
-        std::unordered_map< GroupId, CompetitionGroup > &groups, GroupId &next_id,
+        absl::flat_hash_map< GroupId, CompetitionGroup > &groups, GroupId &next_id,
         std::optional< ExprCost > baseline_cost
     ) {
         GroupId id = next_id++;
@@ -18,7 +18,7 @@ namespace cobra {
     }
 
     bool SubmitCandidate(
-        std::unordered_map< GroupId, CompetitionGroup > &groups, GroupId group_id,
+        absl::flat_hash_map< GroupId, CompetitionGroup > &groups, GroupId group_id,
         CandidateRecord record
     ) {
         auto it = groups.find(group_id);
@@ -45,7 +45,7 @@ namespace cobra {
     }
 
     bool
-    AcquireHandle(std::unordered_map< GroupId, CompetitionGroup > &groups, GroupId group_id) {
+    AcquireHandle(absl::flat_hash_map< GroupId, CompetitionGroup > &groups, GroupId group_id) {
         auto it = groups.find(group_id);
         if (it == groups.end()) { return false; }
         ++it->second.open_handles;
@@ -53,7 +53,7 @@ namespace cobra {
     }
 
     std::optional< WorkItem >
-    ReleaseHandle(std::unordered_map< GroupId, CompetitionGroup > &groups, GroupId group_id) {
+    ReleaseHandle(absl::flat_hash_map< GroupId, CompetitionGroup > &groups, GroupId group_id) {
         auto it = groups.find(group_id);
         // A child may finish after the parent group has already
         // resolved and been erased; treat the late release as a no-op.

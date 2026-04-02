@@ -11,11 +11,11 @@
 #include "cobra/core/SemilinearIR.h"
 #include "cobra/core/Simplifier.h"
 
+#include <absl/container/flat_hash_map.h>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
-#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -359,10 +359,10 @@ namespace cobra {
         // signature from the AST because the parser's sig is stale.
         bool lowering_fired = false;
         // Competition group registry for Phase 3 technique competition.
-        std::unordered_map< GroupId, CompetitionGroup > competition_groups;
+        absl::flat_hash_map< GroupId, CompetitionGroup > competition_groups;
         GroupId next_group_id = 0;
         // Join state registry for multi-operand rewrites.
-        std::unordered_map< JoinId, JoinState > join_states;
+        absl::flat_hash_map< JoinId, JoinState > join_states;
         JoinId next_join_id = 0;
     };
 
@@ -405,7 +405,7 @@ namespace cobra {
         bool HasAttempted(const StateFingerprint &fp, PassId pass) const;
 
       private:
-        std::unordered_map< StateFingerprint, std::vector< PassId > > cache_;
+        absl::flat_hash_map< StateFingerprint, std::vector< PassId > > cache_;
     };
 
     // ---------------------------------------------------------------
@@ -442,6 +442,6 @@ namespace cobra {
     // Decrements a group's open_handles. Returns a
     // kCompetitionResolved WorkItem when handles reach zero.
     std::optional< WorkItem >
-    ReleaseHandle(std::unordered_map< GroupId, CompetitionGroup > &groups, GroupId group_id);
+    ReleaseHandle(absl::flat_hash_map< GroupId, CompetitionGroup > &groups, GroupId group_id);
 
 } // namespace cobra

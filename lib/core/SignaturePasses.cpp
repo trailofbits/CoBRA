@@ -51,7 +51,7 @@ namespace cobra {
         }
 
         bool SubmitNormalizedCandidate(
-            std::unordered_map< GroupId, CompetitionGroup > &groups, GroupId group_id,
+            absl::flat_hash_map< GroupId, CompetitionGroup > &groups, GroupId group_id,
             CandidateRecord record, uint32_t bitwidth
         ) {
             return SubmitCandidate(

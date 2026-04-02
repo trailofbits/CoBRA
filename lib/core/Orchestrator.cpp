@@ -846,7 +846,7 @@ namespace cobra {
 
         // Build registry lookup map
         const auto &registry = GetPassRegistry();
-        std::unordered_map< PassId, const PassDescriptor * > registry_map;
+        absl::flat_hash_map< PassId, const PassDescriptor * > registry_map;
         for (const auto &desc : registry) { registry_map[desc.id] = &desc; }
         PassAttemptCache cache;
         uint32_t expansions    = 0;

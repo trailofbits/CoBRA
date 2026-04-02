@@ -5,11 +5,11 @@
 #include "cobra/core/Expr.h"
 #include "cobra/core/ExprCost.h"
 
+#include <absl/container/flat_hash_map.h>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
-#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -67,7 +67,7 @@ namespace cobra {
 
     // Allocates a new join and returns its id.
     JoinId CreateJoin(
-        std::unordered_map< JoinId, JoinState > &joins, JoinId &next_id, JoinState state
+        absl::flat_hash_map< JoinId, JoinState > &joins, JoinId &next_id, JoinState state
     );
 
     // Walk the AST, replacing the first node whose hash matches

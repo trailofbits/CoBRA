@@ -69,7 +69,7 @@ jobs:
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: build-deps/install
-          key: gtest-${{ matrix.os }}-${{ matrix.cc }}-v1.16.0
+          key: deps-${{ matrix.os }}-${{ matrix.cc }}-gtest1.16.0-hwy1.3.0
 
       - name: Build dependencies
         run: |
@@ -86,7 +86,8 @@ jobs:
             -DCMAKE_C_COMPILER="${CC:-${{ matrix.cc }}}" \
             -DCMAKE_CXX_COMPILER="${CXX:-${{ matrix.cxx }}}" \
             -DCMAKE_PREFIX_PATH="$(pwd)/build-deps/install" \
-            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_FLAGS="-march=native"
           cmake --build build
 
       - name: Run tests

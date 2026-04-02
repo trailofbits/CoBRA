@@ -14,9 +14,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <hwy/highway.h>
 #include <memory>
 #include <optional>
 #include <random>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -38,7 +40,16 @@ namespace cobra {
         constexpr uint32_t kNProbes = 16;
         constexpr uint32_t kMaxVars = 6;
 
-        using ProbeVals = std::array< uint64_t, kNProbes >;
+        struct HWY_ALIGN_MAX ProbeVals : std::array< uint64_t, kNProbes >
+        {
+            using std::array< uint64_t, kNProbes >::array;
+        };
+
+        namespace hn = hwy::HWY_NAMESPACE;
+
+        // Highway tag for uint64_t vectors. ScalableTag picks the widest
+        // register available (128-bit NEON, 256-bit AVX2, 512-bit AVX-512).
+        using D64 = hn::ScalableTag< uint64_t >;
 
         enum class Gate { kAnd, kOr, kXor, kAdd, kMul };
         constexpr std::array kAllGates = { Gate::kAnd, Gate::kOr, Gate::kXor, Gate::kAdd,
@@ -177,26 +188,46 @@ namespace cobra {
             }
         }
 
-        // Apply gate element-wise at probe points.
+        // Apply gate element-wise at probe points (Highway-vectorized).
         ProbeVals GateApply(const ProbeVals &a, const ProbeVals &b, Gate g, uint64_t mask) {
             ProbeVals r;
-            for (size_t i = 0; i < kNProbes; ++i) {
-                switch (g) {
-                    case Gate::kAnd:
-                        r[i] = a[i] & b[i];
-                        break;
-                    case Gate::kOr:
-                        r[i] = a[i] | b[i];
-                        break;
-                    case Gate::kXor:
-                        r[i] = a[i] ^ b[i];
-                        break;
-                    case Gate::kAdd:
-                        r[i] = (a[i] + b[i]) & mask;
-                        break;
-                    case Gate::kMul:
-                        r[i] = (a[i] * b[i]) & mask;
-                        break;
+            const D64 d;
+            const size_t kN = hn::Lanes(d);
+            switch (g) {
+                case Gate::kAnd:
+                    for (size_t i = 0; i < kNProbes; i += kN) {
+                        hn::Store(hn::And(hn::Load(d, &a[i]), hn::Load(d, &b[i])), d, &r[i]);
+                    }
+                    break;
+                case Gate::kOr:
+                    for (size_t i = 0; i < kNProbes; i += kN) {
+                        hn::Store(hn::Or(hn::Load(d, &a[i]), hn::Load(d, &b[i])), d, &r[i]);
+                    }
+                    break;
+                case Gate::kXor:
+                    for (size_t i = 0; i < kNProbes; i += kN) {
+                        hn::Store(hn::Xor(hn::Load(d, &a[i]), hn::Load(d, &b[i])), d, &r[i]);
+                    }
+                    break;
+                case Gate::kAdd: {
+                    const auto vm = hn::Set(d, mask);
+                    for (size_t i = 0; i < kNProbes; i += kN) {
+                        hn::Store(
+                            hn::And(hn::Add(hn::Load(d, &a[i]), hn::Load(d, &b[i])), vm), d,
+                            &r[i]
+                        );
+                    }
+                    break;
+                }
+                case Gate::kMul: {
+                    const auto vm = hn::Set(d, mask);
+                    for (size_t i = 0; i < kNProbes; i += kN) {
+                        hn::Store(
+                            hn::And(hn::Mul(hn::Load(d, &a[i]), hn::Load(d, &b[i])), vm), d,
+                            &r[i]
+                        );
+                    }
+                    break;
                 }
             }
             return r;
@@ -220,51 +251,106 @@ namespace cobra {
             return false;
         }
 
-        // Check if G(a, b) == target, short-circuiting on first mismatch.
+        // Check if G(a, b) == target across all probes (Highway-vectorized).
+        // Accumulates diff = G(a,b) ^ target via OR; returns true when zero.
         bool GateMatches(
             const ProbeVals &a, const ProbeVals &b, const ProbeVals &target, Gate g,
             uint64_t mask
         ) {
-            for (size_t i = 0; i < kNProbes; ++i) {
-                uint64_t r = 0;
-                switch (g) {
-                    case Gate::kAnd:
-                        r = a[i] & b[i];
-                        break;
-                    case Gate::kOr:
-                        r = a[i] | b[i];
-                        break;
-                    case Gate::kXor:
-                        r = a[i] ^ b[i];
-                        break;
-                    case Gate::kAdd:
-                        r = (a[i] + b[i]) & mask;
-                        break;
-                    case Gate::kMul:
-                        r = (a[i] * b[i]) & mask;
-                        break;
+            const D64 d;
+            const size_t kN = hn::Lanes(d);
+            auto acc        = hn::Zero(d);
+            switch (g) {
+                case Gate::kAnd:
+                    for (size_t i = 0; i < kNProbes; i += kN) {
+                        acc = hn::Or(
+                            acc,
+                            hn::Xor(
+                                hn::And(hn::Load(d, &a[i]), hn::Load(d, &b[i])),
+                                hn::Load(d, &target[i])
+                            )
+                        );
+                    }
+                    break;
+                case Gate::kOr:
+                    for (size_t i = 0; i < kNProbes; i += kN) {
+                        acc = hn::Or(
+                            acc,
+                            hn::Xor(
+                                hn::Or(hn::Load(d, &a[i]), hn::Load(d, &b[i])),
+                                hn::Load(d, &target[i])
+                            )
+                        );
+                    }
+                    break;
+                case Gate::kXor:
+                    for (size_t i = 0; i < kNProbes; i += kN) {
+                        acc = hn::Or(
+                            acc,
+                            hn::Xor(
+                                hn::Xor(hn::Load(d, &a[i]), hn::Load(d, &b[i])),
+                                hn::Load(d, &target[i])
+                            )
+                        );
+                    }
+                    break;
+                case Gate::kAdd: {
+                    const auto vm = hn::Set(d, mask);
+                    for (size_t i = 0; i < kNProbes; i += kN) {
+                        acc = hn::Or(
+                            acc,
+                            hn::Xor(
+                                hn::And(hn::Add(hn::Load(d, &a[i]), hn::Load(d, &b[i])), vm),
+                                hn::Load(d, &target[i])
+                            )
+                        );
+                    }
+                    break;
                 }
-                if (r != target[i]) { return false; }
+                case Gate::kMul: {
+                    const auto vm = hn::Set(d, mask);
+                    for (size_t i = 0; i < kNProbes; i += kN) {
+                        acc = hn::Or(
+                            acc,
+                            hn::Xor(
+                                hn::And(hn::Mul(hn::Load(d, &a[i]), hn::Load(d, &b[i])), vm),
+                                hn::Load(d, &target[i])
+                            )
+                        );
+                    }
+                    break;
+                }
             }
-            return true;
+            return hn::AllFalse(d, hn::Ne(acc, hn::Zero(d)));
         }
 
         // Compute residual for invertible gate: B = target G^{-1} A.
         ProbeVals
         GateResidual(const ProbeVals &target, const ProbeVals &a, Gate g, uint64_t mask) {
             ProbeVals r;
-            for (size_t i = 0; i < kNProbes; ++i) {
-                switch (g) {
-                    case Gate::kXor:
-                        r[i] = target[i] ^ a[i];
-                        break;
-                    case Gate::kAdd:
-                        r[i] = (target[i] - a[i]) & mask;
-                        break;
-                    default:
-                        r[i] = 0;
-                        break;
+            const D64 d;
+            const size_t kN = hn::Lanes(d);
+            switch (g) {
+                case Gate::kXor:
+                    for (size_t i = 0; i < kNProbes; i += kN) {
+                        hn::Store(
+                            hn::Xor(hn::Load(d, &target[i]), hn::Load(d, &a[i])), d, &r[i]
+                        );
+                    }
+                    break;
+                case Gate::kAdd: {
+                    const auto vm = hn::Set(d, mask);
+                    for (size_t i = 0; i < kNProbes; i += kN) {
+                        hn::Store(
+                            hn::And(hn::Sub(hn::Load(d, &target[i]), hn::Load(d, &a[i])), vm),
+                            d, &r[i]
+                        );
+                    }
+                    break;
                 }
+                default:
+                    r.fill(0);
+                    break;
             }
             return r;
         }
@@ -307,9 +393,10 @@ namespace cobra {
             const std::vector< Atom > &pool, const ValMap &vmap, uint64_t mask
         ) {
             InnerCompositions inner;
+            const size_t pn = pool.size();
             for (auto g_in : kAllGates) {
-                for (size_t bi = 0; bi < pool.size(); ++bi) {
-                    for (size_t ci = bi; ci < pool.size(); ++ci) {
+                for (size_t bi = 0; bi < pn; ++bi) {
+                    for (size_t ci = bi; ci < pn; ++ci) {
                         auto v = GateApply(pool[bi].vals, pool[ci].vals, g_in, mask);
                         if (vmap.contains(v)) { continue; }
                         if (inner.index.contains(v)) { continue; }
@@ -348,15 +435,16 @@ namespace cobra {
 
         // Layer 1: target = G(A, B) for atoms A, B.
         std::optional< SignaturePayload > Layer1(
-            const ProbeVals &target, const std::vector< Atom > &pool, const ValMap &vmap,
+            const ProbeVals &target, std::span< const Atom > pool, const ValMap &vmap,
             uint64_t mask, const Evaluator &eval, uint32_t nv, uint32_t bw,
             const ExprCost *baseline
         ) {
             std::optional< SignaturePayload > best;
+            const size_t pool_n = pool.size();
 
             for (auto g : kAllGates) {
                 if (GateInvertible(g)) {
-                    for (size_t ai = 0; ai < pool.size(); ++ai) {
+                    for (size_t ai = 0; ai < pool_n; ++ai) {
                         auto res         = GateResidual(target, pool[ai].vals, g, mask);
                         const auto *slot = vmap.find(res);
                         if (slot == nullptr) { continue; }
@@ -366,8 +454,8 @@ namespace cobra {
                         TryUpdate(best, std::move(e), eval, nv, bw, baseline);
                     }
                 } else {
-                    for (size_t ai = 0; ai < pool.size(); ++ai) {
-                        for (size_t bi = 0; bi < pool.size(); ++bi) {
+                    for (size_t ai = 0; ai < pool_n; ++ai) {
+                        for (size_t bi = 0; bi < pool_n; ++bi) {
                             if (!Probe0Matches(
                                     pool[ai].vals[0], pool[bi].vals[0], target[0], g, mask
                                 ))
@@ -391,56 +479,101 @@ namespace cobra {
 
         // Check if atom A is compatible as an operand of a
         // non-invertible gate that produces the target.
+        // AndNot(a, b) = a & ~b — maps to NEON BIC / x86 ANDN.
         bool Compatible(const ProbeVals &a, const ProbeVals &target, Gate g) {
-            for (size_t i = 0; i < kNProbes; ++i) {
-                switch (g) {
-                    case Gate::kOr:
-                        if ((a[i] & ~target[i]) != 0) { return false; }
-                        break;
-                    case Gate::kAnd:
-                        if ((target[i] & ~a[i]) != 0) { return false; }
-                        break;
-                    default:
-                        break;
-                }
+            const D64 d;
+            const size_t kN = hn::Lanes(d);
+            auto acc        = hn::Zero(d);
+            switch (g) {
+                case Gate::kAnd:
+                    for (size_t i = 0; i < kNProbes; i += kN) {
+                        acc = hn::Or(
+                            acc, hn::AndNot(hn::Load(d, &a[i]), hn::Load(d, &target[i]))
+                        );
+                    }
+                    break;
+                case Gate::kOr:
+                    for (size_t i = 0; i < kNProbes; i += kN) {
+                        acc = hn::Or(
+                            acc, hn::AndNot(hn::Load(d, &target[i]), hn::Load(d, &a[i]))
+                        );
+                    }
+                    break;
+                default:
+                    break;
             }
-            return true;
+            return hn::AllFalse(d, hn::Ne(acc, hn::Zero(d)));
         }
 
-        template< typename CandidateVec >
+        template< typename T >
+            requires (std::same_as< T, Atom > || std::same_as< T, InnerComp >)
         std::vector< size_t > CollectCompatibleIndices(
-            const CandidateVec &candidates, const ProbeVals &target, Gate g
+            std::span< const T > candidates, const ProbeVals &target, Gate g
         ) {
             std::vector< size_t > indices;
-            indices.reserve(candidates.size());
-            for (size_t i = 0; i < candidates.size(); ++i) {
+            const size_t n = candidates.size();
+            indices.reserve(n);
+            for (size_t i = 0; i < n; ++i) {
                 if (Compatible(candidates[i].vals, target, g)) { indices.push_back(i); }
             }
             return indices;
         }
 
         bool AndMatches(const ProbeVals &a, const ProbeVals &b, const ProbeVals &target) {
-            for (size_t i = 0; i < kNProbes; ++i) {
-                if ((a[i] & b[i]) != target[i]) { return false; }
+            const D64 d;
+            const size_t kN = hn::Lanes(d);
+            auto acc        = hn::Zero(d);
+            for (size_t i = 0; i < kNProbes; i += kN) {
+                acc = hn::Or(
+                    acc,
+                    hn::Xor(
+                        hn::And(hn::Load(d, &a[i]), hn::Load(d, &b[i])), hn::Load(d, &target[i])
+                    )
+                );
             }
-            return true;
+            return hn::AllFalse(d, hn::Ne(acc, hn::Zero(d)));
         }
 
         bool OrMatches(const ProbeVals &a, const ProbeVals &b, const ProbeVals &target) {
-            for (size_t i = 0; i < kNProbes; ++i) {
-                if ((a[i] | b[i]) != target[i]) { return false; }
+            const D64 d;
+            const size_t kN = hn::Lanes(d);
+            auto acc        = hn::Zero(d);
+            for (size_t i = 0; i < kNProbes; i += kN) {
+                acc = hn::Or(
+                    acc,
+                    hn::Xor(
+                        hn::Or(hn::Load(d, &a[i]), hn::Load(d, &b[i])), hn::Load(d, &target[i])
+                    )
+                );
             }
-            return true;
+            return hn::AllFalse(d, hn::Ne(acc, hn::Zero(d)));
         }
 
         bool MulMatches(
             const ProbeVals &a, const ProbeVals &b, const ProbeVals &target, uint64_t mask,
             size_t start_probe = 0
         ) {
-            for (size_t i = start_probe; i < kNProbes; ++i) {
-                if (((a[i] * b[i]) & mask) != target[i]) { return false; }
+            const D64 d;
+            const size_t kN = hn::Lanes(d);
+            const auto vm   = hn::Set(d, mask);
+            auto acc        = hn::Zero(d);
+            // Process all kNProbes via SIMD. When start_probe > 0 the
+            // skipped prefix lanes are zeroed so they can't set diff bits.
+            for (size_t i = 0; i < kNProbes; i += kN) {
+                auto diff = hn::Xor(
+                    hn::And(hn::Mul(hn::Load(d, &a[i]), hn::Load(d, &b[i])), vm),
+                    hn::Load(d, &target[i])
+                );
+                if (i < start_probe) {
+                    // Zero lanes before start_probe so they don't contribute.
+                    auto lane_idx = hn::Iota(d, static_cast< uint64_t >(i));
+                    diff          = hn::IfThenElseZero(
+                        hn::Ge(lane_idx, hn::Set(d, static_cast< uint64_t >(start_probe))), diff
+                    );
+                }
+                acc = hn::Or(acc, diff);
             }
-            return true;
+            return hn::AllFalse(d, hn::Ne(acc, hn::Zero(d)));
         }
 
         // For target = A * inner (mod 2^bw), use probe 0 to derive the set of
@@ -495,12 +628,12 @@ namespace cobra {
 
         // Layer 2: target = G_out(A, G_in(B, C)).
         std::optional< SignaturePayload > Layer2(
-            const ProbeVals &target, const std::vector< Atom > &pool,
+            const ProbeVals &target, std::span< const Atom > pool,
             const InnerCompositions &inner_cache, uint64_t mask, const Evaluator &eval,
             uint32_t nv, uint32_t bw, const ExprCost *baseline
         ) {
-            const auto &inner     = inner_cache.comps;
-            const auto &inner_idx = inner_cache.index;
+            std::span< const InnerComp > inner = inner_cache.comps;
+            const auto &inner_idx              = inner_cache.index;
             std::optional< SignaturePayload > best;
 
             COBRA_PLOT("L2InnerSize", static_cast< int64_t >(inner.size()));
@@ -621,13 +754,14 @@ namespace cobra {
         }
 
         std::optional< SignaturePayload > Layer3(
-            const ProbeVals &target, const std::vector< Atom > &pool, const ValMap &vmap,
+            const ProbeVals &target, std::span< const Atom > pool, const ValMap &vmap,
             const InnerCompositions &inner_cache, uint64_t mask, const Evaluator &eval,
             uint32_t nv, uint32_t bw, const ExprCost *baseline
         ) {
-            const auto &inner     = inner_cache.comps;
-            const auto &inner_idx = inner_cache.index;
+            std::span< const InnerComp > inner = inner_cache.comps;
+            const auto &inner_idx              = inner_cache.index;
             std::optional< SignaturePayload > best;
+            const size_t pool_n = pool.size();
 
             auto make_inner = [&](const InnerComp &ic) {
                 return GateExpr(
@@ -638,13 +772,13 @@ namespace cobra {
             // Invertible G1, invertible G2: hash-based lookup.
             for (auto g1 : kAllGates) {
                 if (!GateInvertible(g1)) { continue; }
-                for (size_t ai = 0; ai < pool.size(); ++ai) {
+                for (size_t ai = 0; ai < pool_n; ++ai) {
                     auto r1 = GateResidual(target, pool[ai].vals, g1, mask);
                     if (vmap.contains(r1)) { continue; }
 
                     for (auto g2 : kAllGates) {
                         if (!GateInvertible(g2)) { continue; }
-                        for (size_t bi = 0; bi < pool.size(); ++bi) {
+                        for (size_t bi = 0; bi < pool_n; ++bi) {
                             auto r2 = GateResidual(r1, pool[bi].vals, g2, mask);
                             std::unique_ptr< Expr > r2_expr;
                             {
@@ -686,13 +820,15 @@ namespace cobra {
         // This covers overlap-conditioned patterns like:
         //   Add(overlap, Neg(And(neg_var, Mul(overlap, var))))
         std::optional< SignaturePayload > Layer4(
-            const ProbeVals &target, const std::vector< Atom > &pool, const ValMap &vmap,
+            const ProbeVals &target, std::span< const Atom > pool, const ValMap &vmap,
             const InnerCompositions &inner_cache, uint64_t mask, const Evaluator &eval,
             uint32_t nv, uint32_t bw, const ExprCost *baseline
         ) {
-            const auto &inner     = inner_cache.comps;
-            const auto &inner_idx = inner_cache.index;
+            std::span< const InnerComp > inner = inner_cache.comps;
+            const auto &inner_idx              = inner_cache.index;
             std::optional< SignaturePayload > best;
+            const size_t pool_n  = pool.size();
+            const size_t inner_n = inner.size();
 
             auto make_inner = [&](const InnerComp &ic) {
                 return GateExpr(
@@ -703,7 +839,7 @@ namespace cobra {
             std::vector< size_t > mul_candidates;
             for (auto g1 : kAllGates) {
                 if (!GateInvertible(g1)) { continue; }
-                for (size_t ai = 0; ai < pool.size(); ++ai) {
+                for (size_t ai = 0; ai < pool_n; ++ai) {
                     auto r1 = GateResidual(target, pool[ai].vals, g1, mask);
                     if (vmap.contains(r1)) { continue; }
 
@@ -735,9 +871,9 @@ namespace cobra {
                         // with a single integer comparison before touching
                         // the full 16-probe arrays.
                         for (auto g2 : { Gate::kAnd, Gate::kOr }) {
-                            for (size_t bi = 0; bi < pool.size(); ++bi) {
+                            for (size_t bi = 0; bi < pool_n; ++bi) {
                                 if (!Compatible(pool[bi].vals, lifted, g2)) { continue; }
-                                for (size_t ii = 0; ii < inner.size(); ++ii) {
+                                for (size_t ii = 0; ii < inner_n; ++ii) {
                                     if (!Probe0Matches(
                                             pool[bi].vals[0], inner[ii].vals[0], lifted[0], g2,
                                             mask
@@ -767,7 +903,7 @@ namespace cobra {
 
                         // Mul scan: lifted = Mul(atom_B, inner_C)
                         {
-                            for (size_t bi = 0; bi < pool.size(); ++bi) {
+                            for (size_t bi = 0; bi < pool_n; ++bi) {
                                 const bool filtered = CollectMulProbe0Candidates(
                                     inner_cache.mul_probe0_buckets, pool[bi].vals[0], lifted[0],
                                     bw, mul_candidates
@@ -800,7 +936,7 @@ namespace cobra {
                                     }
                                     continue;
                                 }
-                                for (size_t ii = 0; ii < inner.size(); ++ii) {
+                                for (size_t ii = 0; ii < inner_n; ++ii) {
                                     if (!MulMatches(
                                             pool[bi].vals, inner[ii].vals, lifted, mask
                                         ))
