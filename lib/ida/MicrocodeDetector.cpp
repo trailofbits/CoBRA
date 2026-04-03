@@ -48,10 +48,8 @@ namespace ida_cobra {
         const std::vector< uint64_t > &var_vals,
         uint64_t mask
     ) {
-        auto eval_operand = [&](const mop_t &op) -> uint64_t {
+        auto resolve_leaf = [&](const mop_t &op) -> uint64_t {
             switch (op.t) {
-                case mop_d:
-                    return EvalMinsn(*op.d, var_keys, var_vals, mask);
                 case mop_n:
                     return static_cast< uint64_t >(op.nnn->value) & mask;
                 case mop_r:
@@ -67,68 +65,73 @@ namespace ida_cobra {
             }
         };
 
-        uint64_t l = eval_operand(insn.l);
-        uint64_t r = eval_operand(insn.r);
+        // Flatten the minsn tree into post-order, then evaluate
+        // bottom-up with a value stack.
+        auto post = MicrocodePostOrder(insn);
 
-        switch (insn.opcode) {
-            case m_add:
-                return (l + r) & mask;
-            case m_sub:
-                return (l - r) & mask;
-            case m_mul:
-                return (l * r) & mask;
-            case m_and:
-                return l & r;
-            case m_or:
-                return l | r;
-            case m_xor:
-                return l ^ r;
-            case m_bnot:
-                return (~l) & mask;
-            case m_neg:
-                return (static_cast< uint64_t >(0) - l) & mask;
-            default:
-                return 0;
+        std::vector< uint64_t > vals;
+        for (auto it = post.rbegin(); it != post.rend(); ++it) {
+            const minsn_t *n = *it;
+
+            uint64_t r = 0;
+            if (n->r.t == mop_d) { r = vals.back(); vals.pop_back(); }
+            else                  { r = resolve_leaf(n->r); }
+
+            uint64_t l = 0;
+            if (n->l.t == mop_d) { l = vals.back(); vals.pop_back(); }
+            else                  { l = resolve_leaf(n->l); }
+
+            switch (n->opcode) {
+                case m_add:  vals.push_back((l + r) & mask);                             break;
+                case m_sub:  vals.push_back((l - r) & mask);                             break;
+                case m_mul:  vals.push_back((l * r) & mask);                             break;
+                case m_and:  vals.push_back(l & r);                                      break;
+                case m_or:   vals.push_back(l | r);                                      break;
+                case m_xor:  vals.push_back(l ^ r);                                      break;
+                case m_bnot: vals.push_back((~l) & mask);                                break;
+                case m_neg:  vals.push_back((static_cast< uint64_t >(0) - l) & mask);    break;
+                default:     vals.push_back(0);                                          break;
+            }
         }
+
+        return vals.back();
     }
 
     namespace {
 
         // Collect unique leaf (input) operands from a minsn tree.
         // Only walks .l and .r — never .d (the destination).
-        // Deduplicates by value equality (mop_t::operator==).
+        // Uses an explicit worklist instead of recursion.
         struct LeafCollector
         {
             std::vector< mop_t * > leaves;
 
-            void Collect(minsn_t &insn) {
-                CollectOp(insn.l);
-                CollectOp(insn.r);
-            }
+            void Collect(minsn_t &root) {
+                std::vector< mop_t * > worklist;
+                worklist.push_back(&root.r);
+                worklist.push_back(&root.l);
 
-        private:
-            void CollectOp(mop_t &op) {
-                if (op.t == mop_d) {
-                    Collect(*op.d);
-                    return;
-                }
-                if (op.t == mop_n || op.t == mop_z) { return; }
+                while (!worklist.empty()) {
+                    mop_t *op = worklist.back();
+                    worklist.pop_back();
 
-                if (op.t == mop_r || op.t == mop_l || op.t == mop_S || op.t == mop_v) {
-                    for (const auto *existing : leaves) {
-                        if (*existing == op) { return; }
+                    if (op->t == mop_d) {
+                        worklist.push_back(&op->d->r);
+                        worklist.push_back(&op->d->l);
+                        continue;
                     }
-                    leaves.push_back(&op);
+                    if (op->t == mop_n || op->t == mop_z) { continue; }
+
+                    if (op->t == mop_r || op->t == mop_l || op->t == mop_S || op->t == mop_v) {
+                        bool found = false;
+                        for (const auto *existing : leaves) {
+                            if (*existing == *op) { found = true; break; }
+                        }
+                        if (!found) { leaves.push_back(op); }
+                    }
                 }
             }
         };
-
-        // Build a human-readable name for a leaf operand.
-        std::string LeafName(const mop_t &op) {
-            qstring buf;
-            op.print(&buf);
-            return std::string(buf.c_str());
-        }
 
         // Derive the MBA bitwidth from the operand sizes of its leaves.
         uint32_t LeafBitwidth(const std::vector< mop_t * > &leaves) {
@@ -137,6 +140,13 @@ namespace ida_cobra {
                 if (op->size > max_size) { max_size = op->size; }
             }
             return max_size > 0 ? static_cast< uint32_t >(max_size) * 8 : 64;
+        }
+
+        // Build a human-readable name for a leaf operand.
+        std::string LeafName(const mop_t &op) {
+            qstring buf;
+            op.print(&buf);
+            return std::string(buf.c_str());
         }
 
     } // anonymous namespace

@@ -27,6 +27,22 @@ namespace ida_cobra {
     // fits in 64 bits).
     bool IsMba(const minsn_t &insn);
 
+    // Flatten a minsn tree into post-order (two-stack method).
+    // Children linked via mop_d are expanded; leaf operands are not included.
+    inline std::vector< const minsn_t * > MicrocodePostOrder(const minsn_t &root) {
+        std::vector< const minsn_t * > post;
+        std::vector< const minsn_t * > work;
+        work.push_back(&root);
+        while (!work.empty()) {
+            const minsn_t *n = work.back();
+            work.pop_back();
+            post.push_back(n);
+            if (n->l.t == mop_d) { work.push_back(n->l.d); }
+            if (n->r.t == mop_d) { work.push_back(n->r.d); }
+        }
+        return post;
+    }
+
     // Evaluate a minsn tree with the given variable assignments.
     // Variables are matched by value equality (mop_t::operator==),
     // not pointer identity.
