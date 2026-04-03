@@ -1,6 +1,7 @@
 #include "MBADetector.h"
 #include "cobra/core/BitWidth.h"
 #include "cobra/core/Expr.h"
+#include "cobra/core/ExtensionLowering.h"
 #include "cobra/core/Simplifier.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -13,6 +14,7 @@
 #include "llvm/Support/Casting.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -155,11 +157,20 @@ namespace cobra {
 
                 auto *inst = llvm::cast< llvm::Instruction >(v);
 
-                if (inst->getOpcode() == llvm::Instruction::ZExt
-                    || inst->getOpcode() == llvm::Instruction::SExt)
-                {
+                if (inst->getOpcode() == llvm::Instruction::ZExt) {
                     const uint64_t operand = eval(inst->getOperand(0));
-                    cache[v]               = operand & mask;
+                    const uint32_t src_bits =
+                        inst->getOperand(0)->getType()->getIntegerBitWidth();
+                    assert(src_bits >= 1 && src_bits <= 64);
+                    cache[v] = EvalZeroExtend(operand, src_bits, mask);
+                    return cache[v];
+                }
+                if (inst->getOpcode() == llvm::Instruction::SExt) {
+                    const uint64_t operand = eval(inst->getOperand(0));
+                    const uint32_t src_bits =
+                        inst->getOperand(0)->getType()->getIntegerBitWidth();
+                    assert(src_bits >= 1 && src_bits <= 64);
+                    cache[v] = EvalSignExtend(operand, src_bits, mask);
                     return cache[v];
                 }
 
@@ -295,13 +306,21 @@ namespace cobra {
             auto *inst = llvm::dyn_cast< llvm::Instruction >(v);
             if (inst == nullptr || !tree_set.contains(inst)) { return nullptr; }
 
-            // ZExt/SExt — pass through to inner operand
-            if (inst->getOpcode() == llvm::Instruction::ZExt
-                || inst->getOpcode() == llvm::Instruction::SExt)
-            {
-                return BuildExprFromIR(
-                    inst->getOperand(0), leaves, tree_set, mask, phi_redirects
-                );
+            if (inst->getOpcode() == llvm::Instruction::ZExt) {
+                auto inner =
+                    BuildExprFromIR(inst->getOperand(0), leaves, tree_set, mask, phi_redirects);
+                if (inner == nullptr) { return nullptr; }
+                const uint32_t src_bits = inst->getOperand(0)->getType()->getIntegerBitWidth();
+                assert(src_bits >= 1 && src_bits <= 64);
+                return LowerZeroExtend(std::move(inner), src_bits);
+            }
+            if (inst->getOpcode() == llvm::Instruction::SExt) {
+                auto inner =
+                    BuildExprFromIR(inst->getOperand(0), leaves, tree_set, mask, phi_redirects);
+                if (inner == nullptr) { return nullptr; }
+                const uint32_t src_bits = inst->getOperand(0)->getType()->getIntegerBitWidth();
+                assert(src_bits >= 1 && src_bits <= 64);
+                return LowerSignExtend(std::move(inner), src_bits);
             }
 
             // LShr with constant shift amount
