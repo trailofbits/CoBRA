@@ -117,3 +117,86 @@ jobs:
         run: |
           find include lib tools \( -name '*.h' -o -name '*.cpp' \) -print0 \
             | xargs -0 clang-format-22 --dry-run --Werror
+
+  ida-plugin:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            cc: gcc-14
+            cxx: g++-14
+            name: Linux
+          - os: macos-15
+            cc: clang
+            cxx: clang++
+            name: macOS
+          - os: windows-latest
+            name: Windows
+
+    name: IDA Plugin (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Clone IDA SDK
+        run: >
+          git clone --depth 1 --branch v9.3.0-sdk.3
+          https://github.com/HexRaysSA/ida-sdk.git ida-sdk
+
+      - name: Install Ninja
+        uses: seanmiddleditch/gha-setup-ninja@3b1f8f6a5a1d8e1ef56963b9399a8e5b0d5a6f30 # v5
+
+      - name: Cache dependencies
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: build-deps/install
+          key: deps-ida-${{ matrix.os }}-${{ hashFiles('dependencies/*.cmake') }}
+
+      - name: Build dependencies (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cmake -S dependencies -B build-deps -G Ninja \
+            -DCMAKE_C_COMPILER="${CC:-${{ matrix.cc }}}" \
+            -DCMAKE_CXX_COMPILER="${CXX:-${{ matrix.cxx }}}" \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-deps
+
+      - name: Build dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cmake -S dependencies -B build-deps -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-deps
+
+      - name: Build IDA plugin (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_C_COMPILER="${CC:-${{ matrix.cc }}}" \
+            -DCMAKE_CXX_COMPILER="${CXX:-${{ matrix.cxx }}}" \
+            -DCMAKE_PREFIX_PATH="$(pwd)/build-deps/install" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCOBRA_BUILD_IDA_PLUGIN=ON \
+            -DIDA_SDK_DIR="$(pwd)/ida-sdk/src"
+          cmake --build build --target ida-cobra
+
+      - name: Build IDA plugin (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cmake -S . -B build -G Ninja `
+            -DCMAKE_PREFIX_PATH="$(Resolve-Path build-deps/install)" `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCOBRA_BUILD_IDA_PLUGIN=ON `
+            -DIDA_SDK_DIR="$(Resolve-Path ida-sdk/src)"
+          cmake --build build --target ida-cobra
+
+      - name: Upload plugin artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ida-cobra-${{ matrix.name }}
+          path: |
+            build/lib/ida/ida-cobra.*
+            lib/ida/ida-cobra.cfg
