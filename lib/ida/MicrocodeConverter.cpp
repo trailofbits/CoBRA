@@ -5,7 +5,9 @@ namespace ida_cobra {
 
         int FindLeafIndex(const mop_t &op, const MBACandidate &candidate) {
             for (size_t i = 0; i < candidate.leaves.size(); ++i) {
-                if (*candidate.leaves[i] == op) { return static_cast< int >(i); }
+                if (*candidate.leaves[i] == op) {
+                    return static_cast< int >(i);
+                }
             }
             return -1;
         }
@@ -31,24 +33,37 @@ namespace ida_cobra {
         }
 
         std::unique_ptr< cobra::Expr > CombineExpr(
-            mcode_t opcode, std::unique_ptr< cobra::Expr > l,
-            std::unique_ptr< cobra::Expr > r
+            mcode_t opcode, std::unique_ptr< cobra::Expr > l, std::unique_ptr< cobra::Expr > r
         ) {
-            if (!l) { return nullptr; }
-            switch (opcode) {
-                case m_bnot: return cobra::Expr::BitwiseNot(std::move(l));
-                case m_neg:  return cobra::Expr::Negate(std::move(l));
-                default:     break;
+            if (!l) {
+                return nullptr;
             }
-            if (!r) { return nullptr; }
             switch (opcode) {
-                case m_add: return cobra::Expr::Add(std::move(l), std::move(r));
-                case m_sub: return cobra::Expr::Add(std::move(l), cobra::Expr::Negate(std::move(r)));
-                case m_mul: return cobra::Expr::Mul(std::move(l), std::move(r));
-                case m_and: return cobra::Expr::BitwiseAnd(std::move(l), std::move(r));
-                case m_or:  return cobra::Expr::BitwiseOr(std::move(l), std::move(r));
-                case m_xor: return cobra::Expr::BitwiseXor(std::move(l), std::move(r));
-                default:    return nullptr;
+                case m_bnot:
+                    return cobra::Expr::BitwiseNot(std::move(l));
+                case m_neg:
+                    return cobra::Expr::Negate(std::move(l));
+                default:
+                    break;
+            }
+            if (!r) {
+                return nullptr;
+            }
+            switch (opcode) {
+                case m_add:
+                    return cobra::Expr::Add(std::move(l), std::move(r));
+                case m_sub:
+                    return cobra::Expr::Add(std::move(l), cobra::Expr::Negate(std::move(r)));
+                case m_mul:
+                    return cobra::Expr::Mul(std::move(l), std::move(r));
+                case m_and:
+                    return cobra::Expr::BitwiseAnd(std::move(l), std::move(r));
+                case m_or:
+                    return cobra::Expr::BitwiseOr(std::move(l), std::move(r));
+                case m_xor:
+                    return cobra::Expr::BitwiseXor(std::move(l), std::move(r));
+                default:
+                    return nullptr;
             }
         }
 
@@ -56,11 +71,15 @@ namespace ida_cobra {
             uint32_t var_index, const MBACandidate &candidate,
             const std::vector< std::string > &real_vars
         ) {
-            if (var_index >= real_vars.size()) { return -1; }
+            if (var_index >= real_vars.size()) {
+                return -1;
+            }
 
             const std::string &name = real_vars[var_index];
             for (size_t i = 0; i < candidate.var_names.size(); ++i) {
-                if (candidate.var_names[i] == name) { return static_cast< int >(i); }
+                if (candidate.var_names[i] == name) {
+                    return static_cast< int >(i);
+                }
             }
             return -1;
         }
@@ -88,8 +107,10 @@ namespace ida_cobra {
             return insn;
         }
 
-        minsn_t *MakeLeafInsn(const cobra::Expr &expr, const MBACandidate &candidate,
-                              const std::vector< std::string > &real_vars, int size, ea_t ea) {
+        minsn_t *MakeLeafInsn(
+            const cobra::Expr &expr, const MBACandidate &candidate,
+            const std::vector< std::string > &real_vars, int size, ea_t ea
+        ) {
             if (expr.kind == cobra::Expr::Kind::kConstant) {
                 auto *insn   = new minsn_t(ea);
                 insn->opcode = m_mov;
@@ -110,16 +131,24 @@ namespace ida_cobra {
             return insn;
         }
 
-        minsn_t *CombineMinsn(const cobra::Expr &expr, minsn_t *child0, minsn_t *child1,
-                              int size, ea_t ea) {
+        minsn_t *CombineMinsn(
+            const cobra::Expr &expr, minsn_t *child0, minsn_t *child1, int size, ea_t ea
+        ) {
             switch (expr.kind) {
-                case cobra::Expr::Kind::kAdd: return MakeBinop(m_add, child0, child1, size, ea);
-                case cobra::Expr::Kind::kMul: return MakeBinop(m_mul, child0, child1, size, ea);
-                case cobra::Expr::Kind::kAnd: return MakeBinop(m_and, child0, child1, size, ea);
-                case cobra::Expr::Kind::kOr:  return MakeBinop(m_or,  child0, child1, size, ea);
-                case cobra::Expr::Kind::kXor: return MakeBinop(m_xor, child0, child1, size, ea);
-                case cobra::Expr::Kind::kNot: return MakeUnop(m_bnot, child0, size, ea);
-                case cobra::Expr::Kind::kNeg: return MakeUnop(m_neg, child0, size, ea);
+                case cobra::Expr::Kind::kAdd:
+                    return MakeBinop(m_add, child0, child1, size, ea);
+                case cobra::Expr::Kind::kMul:
+                    return MakeBinop(m_mul, child0, child1, size, ea);
+                case cobra::Expr::Kind::kAnd:
+                    return MakeBinop(m_and, child0, child1, size, ea);
+                case cobra::Expr::Kind::kOr:
+                    return MakeBinop(m_or, child0, child1, size, ea);
+                case cobra::Expr::Kind::kXor:
+                    return MakeBinop(m_xor, child0, child1, size, ea);
+                case cobra::Expr::Kind::kNot:
+                    return MakeUnop(m_bnot, child0, size, ea);
+                case cobra::Expr::Kind::kNeg:
+                    return MakeUnop(m_neg, child0, size, ea);
                 case cobra::Expr::Kind::kShr: {
                     auto *insn   = new minsn_t(ea);
                     insn->opcode = m_shr;
@@ -158,7 +187,9 @@ namespace ida_cobra {
                     work.pop_back();
                     post.push_back(n);
                     for (size_t i = 0; i < n->children.size(); ++i) {
-                        if (n->children[i]) { work.push_back(n->children[i].get()); }
+                        if (n->children[i]) {
+                            work.push_back(n->children[i].get());
+                        }
                     }
                 }
             }
@@ -167,8 +198,8 @@ namespace ida_cobra {
             for (auto it = post.rbegin(); it != post.rend(); ++it) {
                 const cobra::Expr *n = *it;
 
-                if (n->kind == cobra::Expr::Kind::kConstant ||
-                    n->kind == cobra::Expr::Kind::kVariable)
+                if (n->kind == cobra::Expr::Kind::kConstant
+                    || n->kind == cobra::Expr::Kind::kVariable)
                 {
                     vals.push_back(MakeLeafInsn(*n, candidate, real_vars, size, ea));
                     continue;
@@ -205,12 +236,20 @@ namespace ida_cobra {
             const minsn_t *n = *it;
 
             std::unique_ptr< cobra::Expr > r;
-            if (n->r.t == mop_d) { r = std::move(vals.back()); vals.pop_back(); }
-            else                  { r = ResolveLeafExpr(n->r, candidate); }
+            if (n->r.t == mop_d) {
+                r = std::move(vals.back());
+                vals.pop_back();
+            } else {
+                r = ResolveLeafExpr(n->r, candidate);
+            }
 
             std::unique_ptr< cobra::Expr > l;
-            if (n->l.t == mop_d) { l = std::move(vals.back()); vals.pop_back(); }
-            else                  { l = ResolveLeafExpr(n->l, candidate); }
+            if (n->l.t == mop_d) {
+                l = std::move(vals.back());
+                vals.pop_back();
+            } else {
+                l = ResolveLeafExpr(n->l, candidate);
+            }
 
             vals.push_back(CombineExpr(n->opcode, std::move(l), std::move(r)));
         }

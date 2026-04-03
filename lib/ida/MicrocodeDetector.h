@@ -37,8 +37,12 @@ namespace ida_cobra {
             const minsn_t *n = work.back();
             work.pop_back();
             post.push_back(n);
-            if (n->l.t == mop_d) { work.push_back(n->l.d); }
-            if (n->r.t == mop_d) { work.push_back(n->r.d); }
+            if (n->l.t == mop_d) {
+                work.push_back(n->l.d);
+            }
+            if (n->r.t == mop_d) {
+                work.push_back(n->r.d);
+            }
         }
         return post;
     }
@@ -47,10 +51,8 @@ namespace ida_cobra {
     // Variables are matched by value equality (mop_t::operator==),
     // not pointer identity.
     uint64_t EvalMinsn(
-        const minsn_t &insn,
-        const std::vector< mop_t * > &var_keys,
-        const std::vector< uint64_t > &var_vals,
-        uint64_t mask
+        const minsn_t &insn, const std::vector< mop_t * > &var_keys,
+        const std::vector< uint64_t > &var_vals, uint64_t mask
     );
 
     // Walk all top-level instructions in `mba`, detect MBA trees, compute

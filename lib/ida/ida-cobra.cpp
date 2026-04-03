@@ -43,8 +43,12 @@ static ssize_t idaapi hex_callback(void *ud, hexrays_event_t event, va_list va) 
     switch (event) {
         case hxe_microcode: {
             auto *mba = va_arg(va, mba_t *);
-            if (ctx->run_automatically) { ctx->active = true; }
-            if (ctx->active) { mba->set_mba_flags2(MBA2_PROP_COMPLEX); }
+            if (ctx->run_automatically) {
+                ctx->active = true;
+            }
+            if (ctx->active) {
+                mba->set_mba_flags2(MBA2_PROP_COMPLEX);
+            }
             break;
         }
         case hxe_populating_popup: {
@@ -56,28 +60,40 @@ static ssize_t idaapi hex_callback(void *ud, hexrays_event_t event, va_list va) 
         case hxe_glbopt: {
             auto *mba = va_arg(va, mba_t *);
 
-            if (!ctx->active) { return MERR_OK; }
+            if (!ctx->active) {
+                return MERR_OK;
+            }
 
             auto candidates = ida_cobra::DetectMbaCandidatesCrossBlock(*mba);
             int improved    = 0;
 
             for (auto &cand : candidates) {
                 auto expr = ida_cobra::BuildExprFromMinsn(*cand.root, cand);
-                if (!expr) { continue; }
+                if (!expr) {
+                    continue;
+                }
 
                 cobra::Options opts;
                 opts.bitwidth = cand.bitwidth;
 
                 auto result = cobra::Simplify(cand.sig, cand.var_names, expr.get(), opts);
-                if (!result.has_value()) { continue; }
+                if (!result.has_value()) {
+                    continue;
+                }
 
                 auto &outcome = result.value();
-                if (outcome.kind != cobra::SimplifyOutcome::Kind::kSimplified) { continue; }
-                if (!outcome.expr) { continue; }
+                if (outcome.kind != cobra::SimplifyOutcome::Kind::kSimplified) {
+                    continue;
+                }
+                if (!outcome.expr) {
+                    continue;
+                }
 
                 auto original_cost   = cobra::ComputeCost(*expr);
                 auto simplified_cost = cobra::ComputeCost(*outcome.expr);
-                if (!cobra::IsBetter(simplified_cost.cost, original_cost.cost)) { continue; }
+                if (!cobra::IsBetter(simplified_cost.cost, original_cost.cost)) {
+                    continue;
+                }
 
                 if (!ida_cobra::ProbablyEquivalent(*cand.root, *outcome.expr, cand)) {
                     continue;
@@ -85,7 +101,9 @@ static ssize_t idaapi hex_callback(void *ud, hexrays_event_t event, va_list va) 
 
                 minsn_t *replacement =
                     ida_cobra::ReconstructMinsn(*outcome.expr, cand, outcome.real_vars);
-                if (replacement == nullptr) { continue; }
+                if (replacement == nullptr) {
+                    continue;
+                }
 
                 replacement->d.swap(cand.root->d);
                 cand.root->swap(*replacement);
@@ -133,7 +151,9 @@ plugin_ctx_t::plugin_ctx_t() : action_handler(this) {
 }
 
 static plugmod_t *idaapi init() {
-    if (!init_hexrays_plugin()) { return nullptr; }
+    if (!init_hexrays_plugin()) {
+        return nullptr;
+    }
 
     const char *hxver = get_hexrays_version();
     msg("ida-cobra: Hex-Rays %s detected, CoBRA MBA optimizer ready\n", hxver);

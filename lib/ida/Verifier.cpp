@@ -47,8 +47,7 @@ namespace ida_cobra {
             uint64_t original_result =
                 ida_cobra::EvalMinsn(original, candidate.leaves, vals, mask);
 
-            uint64_t simplified_result =
-                cobra::EvalCompiledExpr(compiled, vals, stack) & mask;
+            uint64_t simplified_result = cobra::EvalCompiledExpr(compiled, vals, stack) & mask;
 
             if (original_result != simplified_result) {
                 msg("ida-cobra: verification FAILED on test %d\n", test);
