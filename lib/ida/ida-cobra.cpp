@@ -58,7 +58,7 @@ static ssize_t idaapi hex_callback(void *ud, hexrays_event_t event, va_list va) 
 
             if (!ctx->active) { return MERR_OK; }
 
-            auto candidates = ida_cobra::DetectMbaCandidates(*mba);
+            auto candidates = ida_cobra::DetectMbaCandidatesCrossBlock(*mba);
             int improved    = 0;
 
             for (auto &cand : candidates) {
@@ -75,11 +75,9 @@ static ssize_t idaapi hex_callback(void *ud, hexrays_event_t event, va_list va) 
                 if (outcome.kind != cobra::SimplifyOutcome::Kind::kSimplified) { continue; }
                 if (!outcome.expr) { continue; }
 
-                auto original_nodes  = ida_cobra::CountNodes(*cand.root);
+                auto original_cost   = cobra::ComputeCost(*expr);
                 auto simplified_cost = cobra::ComputeCost(*outcome.expr);
-                if (static_cast< int >(simplified_cost.cost.weighted_size) >= original_nodes) {
-                    continue;
-                }
+                if (!cobra::IsBetter(simplified_cost.cost, original_cost.cost)) { continue; }
 
                 if (!ida_cobra::ProbablyEquivalent(*cand.root, *outcome.expr, cand)) {
                     continue;

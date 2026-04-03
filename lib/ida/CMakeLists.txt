@@ -30,7 +30,8 @@ set_target_properties(ida-cobra PROPERTIES
 if(APPLE)
     target_link_options(ida-cobra PRIVATE -undefined dynamic_lookup)
 elseif(UNIX)
-    target_link_options(ida-cobra PRIVATE -Wl,--no-undefined)
+    # IDA resolves SDK symbols at plugin load time; allow unresolved.
+    target_link_options(ida-cobra PRIVATE -Wl,--unresolved-symbols=ignore-in-shared-libs)
 endif()
 
 install(TARGETS ida-cobra
