@@ -37,12 +37,8 @@ namespace ida_cobra {
             const minsn_t *n = work.back();
             work.pop_back();
             post.push_back(n);
-            if (n->l.t == mop_d) {
-                work.push_back(n->l.d);
-            }
-            if (n->r.t == mop_d) {
-                work.push_back(n->r.d);
-            }
+            if (n->l.t == mop_d) { work.push_back(n->l.d); }
+            if (n->r.t == mop_d) { work.push_back(n->r.d); }
         }
         return post;
     }

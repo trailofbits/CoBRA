@@ -5,9 +5,7 @@ namespace ida_cobra {
 
         int FindLeafIndex(const mop_t &op, const MBACandidate &candidate) {
             for (size_t i = 0; i < candidate.leaves.size(); ++i) {
-                if (*candidate.leaves[i] == op) {
-                    return static_cast< int >(i);
-                }
+                if (*candidate.leaves[i] == op) { return static_cast< int >(i); }
             }
             return -1;
         }
@@ -35,9 +33,7 @@ namespace ida_cobra {
         std::unique_ptr< cobra::Expr > CombineExpr(
             mcode_t opcode, std::unique_ptr< cobra::Expr > l, std::unique_ptr< cobra::Expr > r
         ) {
-            if (!l) {
-                return nullptr;
-            }
+            if (!l) { return nullptr; }
             switch (opcode) {
                 case m_bnot:
                     return cobra::Expr::BitwiseNot(std::move(l));
@@ -46,9 +42,7 @@ namespace ida_cobra {
                 default:
                     break;
             }
-            if (!r) {
-                return nullptr;
-            }
+            if (!r) { return nullptr; }
             switch (opcode) {
                 case m_add:
                     return cobra::Expr::Add(std::move(l), std::move(r));
@@ -71,15 +65,11 @@ namespace ida_cobra {
             uint32_t var_index, const MBACandidate &candidate,
             const std::vector< std::string > &real_vars
         ) {
-            if (var_index >= real_vars.size()) {
-                return -1;
-            }
+            if (var_index >= real_vars.size()) { return -1; }
 
             const std::string &name = real_vars[var_index];
             for (size_t i = 0; i < candidate.var_names.size(); ++i) {
-                if (candidate.var_names[i] == name) {
-                    return static_cast< int >(i);
-                }
+                if (candidate.var_names[i] == name) { return static_cast< int >(i); }
             }
             return -1;
         }
@@ -187,9 +177,7 @@ namespace ida_cobra {
                     work.pop_back();
                     post.push_back(n);
                     for (size_t i = 0; i < n->children.size(); ++i) {
-                        if (n->children[i]) {
-                            work.push_back(n->children[i].get());
-                        }
+                        if (n->children[i]) { work.push_back(n->children[i].get()); }
                     }
                 }
             }
