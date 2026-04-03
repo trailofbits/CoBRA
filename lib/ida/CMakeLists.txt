@@ -43,7 +43,13 @@ target_include_directories(ida-cobra PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-target_compile_definitions(ida-cobra PRIVATE __EA64__=1)
+# IDA SDK platform defines
+target_compile_definitions(ida-cobra PRIVATE
+    __EA64__=1
+    $<$<PLATFORM_ID:Windows>:__NT__>
+    $<$<PLATFORM_ID:Linux>:__LINUX__>
+    $<$<PLATFORM_ID:Darwin>:__MAC__>
+)
 
 set_target_properties(ida-cobra PROPERTIES
     PREFIX ""
