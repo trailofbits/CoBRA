@@ -81,6 +81,7 @@ jobs:
             -DCMAKE_C_COMPILER="${CC:-${{ matrix.cc }}}" \
             -DCMAKE_CXX_COMPILER="${CXX:-${{ matrix.cxx }}}" \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCOBRA_ENABLE_LLVM=ON \
             -DUSE_EXTERNAL_LLVM=ON \
             -DCOBRA_BUILD_TESTS=ON
           cmake --build build-deps
