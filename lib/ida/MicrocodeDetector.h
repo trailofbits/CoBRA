@@ -23,8 +23,8 @@ namespace ida_cobra {
     };
 
     // Returns true if the instruction tree rooted at `insn` is an MBA
-    // expression (at least 1 boolean and 1 arithmetic opcode, no extensions
-    // at root, destination fits in 64 bits).
+    // expression (at least 1 boolean and 1 arithmetic opcode, destination
+    // fits in 64 bits).
     bool IsMba(const minsn_t &insn);
 
     // Evaluate a minsn tree with the given variable assignments.

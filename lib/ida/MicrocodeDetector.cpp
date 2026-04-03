@@ -130,11 +130,18 @@ namespace ida_cobra {
             return std::string(buf.c_str());
         }
 
+        // Derive the MBA bitwidth from the operand sizes of its leaves.
+        uint32_t LeafBitwidth(const std::vector< mop_t * > &leaves) {
+            int max_size = 0;
+            for (const auto *op : leaves) {
+                if (op->size > max_size) { max_size = op->size; }
+            }
+            return max_size > 0 ? static_cast< uint32_t >(max_size) * 8 : 64;
+        }
+
     } // anonymous namespace
 
     bool IsMba(const minsn_t &insn) {
-        if (is_mcode_xdsu(insn.opcode)) { return false; }
-
         if (insn.opcode >= m_jcnd) { return false; }
 
         if (insn.d.size > 8) { return false; }
@@ -142,6 +149,33 @@ namespace ida_cobra {
         OpcodeCounter counter;
         return const_cast< minsn_t & >(insn).for_all_insns(counter) != 0;
     }
+
+    namespace {
+
+        // Return true if the opcode is one that participates in MBA
+        // expressions (arithmetic or boolean).
+        bool IsMbaOpcode(mcode_t op) {
+            switch (op) {
+                case m_neg: case m_bnot:
+                case m_add: case m_sub: case m_mul:
+                case m_or:  case m_and: case m_xor:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        // Find the root of the actual MBA sub-expression inside an
+        // instruction tree.  Drills past wrapper opcodes (xdu, xds, mov, …)
+        // to find the topmost arithmetic/boolean instruction.
+        minsn_t *MbaRoot(minsn_t *insn) {
+            while (!IsMbaOpcode(insn->opcode) && insn->l.t == mop_d) {
+                insn = insn->l.d;
+            }
+            return IsMbaOpcode(insn->opcode) ? insn : nullptr;
+        }
+
+    } // anonymous namespace
 
     std::vector< MBACandidate > DetectMbaCandidates(mba_t &mba) {
         std::vector< MBACandidate > candidates;
@@ -154,14 +188,15 @@ namespace ida_cobra {
 
             int idaapi visit_minsn() override {
                 if (!IsMba(*curins)) { return 0; }
+                minsn_t *root = MbaRoot(curins);
+                if (!root) { return 0; }
 
                 LeafCollector lc;
-                lc.Collect(*curins);
+                lc.Collect(*root);
 
                 if (lc.leaves.size() > kMaxVars) { return 0; }
 
-                uint32_t bitwidth =
-                    curins->d.size > 0 ? static_cast< uint32_t >(curins->d.size) * 8 : 64;
+                uint32_t bitwidth = LeafBitwidth(lc.leaves);
                 uint64_t mask =
                     bitwidth >= 64 ? ~uint64_t{ 0 } : (uint64_t{ 1 } << bitwidth) - 1;
 
@@ -174,7 +209,7 @@ namespace ida_cobra {
                     std::vector< uint64_t > vals(n);
                     for (uint32_t v = 0; v < n; ++v) { vals[v] = (input >> v) & 1; }
 
-                    sig.push_back(EvalMinsn(*curins, lc.leaves, vals, mask));
+                    sig.push_back(EvalMinsn(*root, lc.leaves, vals, mask));
                 }
 
                 std::vector< std::string > names;
@@ -183,7 +218,7 @@ namespace ida_cobra {
 
                 out.push_back(
                     MBACandidate{
-                        .root      = curins,
+                        .root      = root,
                         .leaves    = std::move(lc.leaves),
                         .var_names = std::move(names),
                         .sig       = std::move(sig),
@@ -222,14 +257,15 @@ namespace ida_cobra {
                         if (already_in_tree.count(insn) != 0) { continue; }
 
                         if (!IsMba(*insn)) { continue; }
+                        minsn_t *root = MbaRoot(insn);
+                        if (!root) { continue; }
 
                         LeafCollector lc;
-                        MarkTree(insn, lc);
+                        MarkTree(root, lc);
 
                         if (lc.leaves.size() > kMaxVars) { continue; }
 
-                        uint32_t bitwidth =
-                            insn->d.size > 0 ? static_cast< uint32_t >(insn->d.size) * 8 : 64;
+                        uint32_t bitwidth = LeafBitwidth(lc.leaves);
                         uint64_t mask =
                             bitwidth >= 64 ? ~uint64_t{ 0 } : (uint64_t{ 1 } << bitwidth) - 1;
 
@@ -242,7 +278,7 @@ namespace ida_cobra {
                             for (uint32_t v = 0; v < n; ++v) {
                                 vals[v] = (input >> v) & 1;
                             }
-                            sig.push_back(EvalMinsn(*insn, lc.leaves, vals, mask));
+                            sig.push_back(EvalMinsn(*root, lc.leaves, vals, mask));
                         }
 
                         std::vector< std::string > names;
@@ -251,7 +287,7 @@ namespace ida_cobra {
 
                         candidates.push_back(
                             MBACandidate{
-                                .root      = insn,
+                                .root      = root,
                                 .leaves    = std::move(lc.leaves),
                                 .var_names = std::move(names),
                                 .sig       = std::move(sig),
