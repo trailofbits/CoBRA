@@ -99,7 +99,11 @@ static ssize_t idaapi hex_callback(void *ud, hexrays_event_t event, va_list va) 
 
             if (improved > 0) {
                 mba->verify(true);
-                msg("ida-cobra: simplified %d MBA expression(s)\n", improved);
+                msg("ida-cobra: simplified %d MBA expression(s) in %a\n", improved,
+                    mba->entry_ea);
+                // Tag the function so scripts can query which functions were simplified.
+                netnode n(mba->entry_ea);
+                n.altset(0, improved, 'C');
                 return MERR_LOOP;
             }
             return MERR_OK;
