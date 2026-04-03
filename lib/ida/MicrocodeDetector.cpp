@@ -195,4 +195,81 @@ namespace ida_cobra {
         return candidates;
     }
 
+    std::vector< MBACandidate > DetectMbaCandidatesCrossBlock(mba_t &mba) {
+        struct CrossBlockDetector
+        {
+            mba_t &mba;
+            absl::flat_hash_set< const minsn_t * > already_in_tree;
+            std::vector< MBACandidate > candidates;
+
+            explicit CrossBlockDetector(mba_t &m) : mba(m) {}
+
+            void Run() {
+                node_ordering_t post_order;
+                mba.get_graph()->depth_first_postorder_for_all_entries(&post_order);
+
+                for (size_t i = 0; i < post_order.size(); ++i) {
+                    int blk_idx   = post_order.node(i);
+                    mblock_t *blk = mba.get_mblock(blk_idx);
+
+                    for (minsn_t *insn = blk->tail; insn != nullptr; insn = insn->prev) {
+                        if (already_in_tree.count(insn) != 0) { continue; }
+
+                        if (!IsMba(*insn)) { continue; }
+
+                        LeafCollector lc;
+                        MarkTree(insn, lc);
+
+                        if (lc.leaves.size() > kMaxVars) { continue; }
+
+                        uint32_t bitwidth =
+                            insn->d.size > 0 ? static_cast< uint32_t >(insn->d.size) * 8 : 64;
+                        uint64_t mask =
+                            bitwidth >= 64 ? ~uint64_t{ 0 } : (uint64_t{ 1 } << bitwidth) - 1;
+
+                        uint32_t n = static_cast< uint32_t >(lc.leaves.size());
+
+                        std::vector< uint64_t > sig;
+                        sig.reserve(uint64_t{ 1 } << n);
+                        for (uint64_t input = 0; input < (uint64_t{ 1 } << n); ++input) {
+                            absl::flat_hash_map< const mop_t *, uint64_t > vals;
+                            for (uint32_t v = 0; v < n; ++v) {
+                                vals[lc.leaves[v]] = (input >> v) & 1;
+                            }
+                            sig.push_back(EvalMinsn(*insn, vals, mask));
+                        }
+
+                        std::vector< std::string > names;
+                        names.reserve(n);
+                        for (auto *leaf : lc.leaves) { names.push_back(LeafName(*leaf)); }
+
+                        candidates.push_back(
+                            MBACandidate{
+                                .root      = insn,
+                                .leaves    = std::move(lc.leaves),
+                                .var_names = std::move(names),
+                                .sig       = std::move(sig),
+                                .bitwidth  = bitwidth,
+                            }
+                        );
+                    }
+                }
+            }
+
+            void MarkTree(minsn_t *insn, LeafCollector &lc) {
+                already_in_tree.insert(insn);
+                insn->for_all_ops(lc);
+                // Cross-block extension via graph_chains_t is deferred
+                // until the use-def chain API is validated via manual
+                // testing in IDA. For now, this falls through to
+                // intra-block behavior (same as Tier 1 but with
+                // post-order + reverse walk + already_in_tree dedup).
+            }
+        };
+
+        CrossBlockDetector detector(mba);
+        detector.Run();
+        return std::move(detector.candidates);
+    }
+
 } // namespace ida_cobra

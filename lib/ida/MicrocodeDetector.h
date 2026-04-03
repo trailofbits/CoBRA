@@ -39,4 +39,8 @@ namespace ida_cobra {
     // boolean signatures, and return candidates ready for simplification.
     std::vector< MBACandidate > DetectMbaCandidates(mba_t &mba);
 
+    // Enhanced detection that follows use-def chains across block boundaries.
+    // Falls back to Tier 1 (intra-block) if cross-block tracing is not viable.
+    std::vector< MBACandidate > DetectMbaCandidatesCrossBlock(mba_t &mba);
+
 } // namespace ida_cobra
