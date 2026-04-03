@@ -38,19 +38,17 @@ namespace ida_cobra {
         std::vector< uint64_t > stack(compiled.stack_size);
 
         for (int test = 0; test < kNumTests; ++test) {
-            absl::flat_hash_map< const mop_t *, uint64_t > minsn_vals;
-            std::vector< uint64_t > expr_vals(candidate.leaves.size());
+            std::vector< uint64_t > vals(candidate.leaves.size());
 
             for (size_t i = 0; i < candidate.leaves.size(); ++i) {
-                uint64_t val                    = RandValue() & mask;
-                minsn_vals[candidate.leaves[i]] = val;
-                expr_vals[i]                    = val;
+                vals[i] = RandValue() & mask;
             }
 
-            uint64_t original_result = ida_cobra::EvalMinsn(original, minsn_vals, mask);
+            uint64_t original_result =
+                ida_cobra::EvalMinsn(original, candidate.leaves, vals, mask);
 
             uint64_t simplified_result =
-                cobra::EvalCompiledExpr(compiled, expr_vals, stack) & mask;
+                cobra::EvalCompiledExpr(compiled, vals, stack) & mask;
 
             if (original_result != simplified_result) {
                 msg("ida-cobra: verification FAILED on test %d\n", test);

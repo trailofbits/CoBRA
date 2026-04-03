@@ -3,7 +3,7 @@
 // STL and absl must be included before hexrays.hpp: the IDA SDK poisons
 // stdout, stderr, fwrite, fflush, snprintf etc. via fpro.h macros, which
 // breaks any subsequent libc++/absl header that references those identifiers.
-#include <absl/container/flat_hash_map.h>
+#include <absl/container/flat_hash_set.h>
 
 #include <cstdint>
 #include <string>
@@ -23,15 +23,33 @@ namespace ida_cobra {
     };
 
     // Returns true if the instruction tree rooted at `insn` is an MBA
-    // expression (at least 1 boolean and 1 arithmetic opcode, no extensions
-    // at root, destination fits in 64 bits).
+    // expression (at least 1 boolean and 1 arithmetic opcode, destination
+    // fits in 64 bits).
     bool IsMba(const minsn_t &insn);
 
+    // Flatten a minsn tree into post-order (two-stack method).
+    // Children linked via mop_d are expanded; leaf operands are not included.
+    inline std::vector< const minsn_t * > MicrocodePostOrder(const minsn_t &root) {
+        std::vector< const minsn_t * > post;
+        std::vector< const minsn_t * > work;
+        work.push_back(&root);
+        while (!work.empty()) {
+            const minsn_t *n = work.back();
+            work.pop_back();
+            post.push_back(n);
+            if (n->l.t == mop_d) { work.push_back(n->l.d); }
+            if (n->r.t == mop_d) { work.push_back(n->r.d); }
+        }
+        return post;
+    }
+
     // Evaluate a minsn tree with the given variable assignments.
-    // Used for signature computation (DetectMbaCandidates) and
-    // verification (ProbablyEquivalent).
+    // Variables are matched by value equality (mop_t::operator==),
+    // not pointer identity.
     uint64_t EvalMinsn(
-        const minsn_t &insn, const absl::flat_hash_map< const mop_t *, uint64_t > &var_values,
+        const minsn_t &insn,
+        const std::vector< mop_t * > &var_keys,
+        const std::vector< uint64_t > &var_vals,
         uint64_t mask
     );
 
