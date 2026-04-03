@@ -1,4 +1,5 @@
 #include "MicrocodeConverter.h"
+#include "cobra/core/ExtensionLowering.h"
 
 namespace ida_cobra {
     namespace {
@@ -222,6 +223,34 @@ namespace ida_cobra {
         std::vector< std::unique_ptr< cobra::Expr > > vals;
         for (auto it = post.rbegin(); it != post.rend(); ++it) {
             const minsn_t *n = *it;
+
+            // Extensions and mov: unary ops using only the left operand.
+            if (n->opcode == m_xdu || n->opcode == m_xds || n->opcode == m_mov) {
+                std::unique_ptr< cobra::Expr > l;
+                if (n->l.t == mop_d) {
+                    l = std::move(vals.back());
+                    vals.pop_back();
+                } else {
+                    l = ResolveLeafExpr(n->l, candidate);
+                }
+
+                if (n->opcode == m_mov) {
+                    vals.push_back(std::move(l));
+                } else {
+                    uint32_t src_bits = static_cast< uint32_t >(n->l.size) * 8;
+                    if (src_bits < 1 || src_bits > 64
+                        || src_bits > static_cast< uint32_t >(n->d.size) * 8)
+                    {
+                        return nullptr;
+                    }
+                    if (n->opcode == m_xdu) {
+                        vals.push_back(cobra::LowerZeroExtend(std::move(l), src_bits));
+                    } else {
+                        vals.push_back(cobra::LowerSignExtend(std::move(l), src_bits));
+                    }
+                }
+                continue;
+            }
 
             std::unique_ptr< cobra::Expr > r;
             if (n->r.t == mop_d) {

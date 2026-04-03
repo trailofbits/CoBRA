@@ -1,5 +1,6 @@
 // absl must be included before MicrocodeDetector.h (which pulls hexrays.hpp):
 // the IDA SDK poisons stdout/stderr/fwrite/fflush/snprintf via fpro.h macros.
+#include "cobra/core/ExtensionLowering.h"
 #include <absl/container/flat_hash_set.h>
 
 #include "MicrocodeDetector.h"
@@ -111,6 +112,19 @@ namespace ida_cobra {
                     break;
                 case m_neg:
                     vals.push_back((static_cast< uint64_t >(0) - l) & mask);
+                    break;
+                case m_xdu: {
+                    uint32_t src_bits = static_cast< uint32_t >(n->l.size) * 8;
+                    vals.push_back(cobra::EvalZeroExtend(l, src_bits, mask));
+                    break;
+                }
+                case m_xds: {
+                    uint32_t src_bits = static_cast< uint32_t >(n->l.size) * 8;
+                    vals.push_back(cobra::EvalSignExtend(l, src_bits, mask));
+                    break;
+                }
+                case m_mov:
+                    vals.push_back(l & mask);
                     break;
                 default:
                     vals.push_back(0);
