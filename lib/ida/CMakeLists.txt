@@ -53,7 +53,7 @@ target_compile_definitions(ida-cobra PRIVATE
 
 set_target_properties(ida-cobra PROPERTIES
     PREFIX ""
-    SUFFIX "${CMAKE_SHARED_MODULE_SUFFIX}"
+    SUFFIX "${CMAKE_SHARED_LIBRARY_SUFFIX}"
 )
 
 install(TARGETS ida-cobra
