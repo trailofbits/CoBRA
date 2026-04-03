@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [master]
+    tags: ['v*']
   pull_request:
     branches: [master]
 
@@ -200,3 +201,43 @@ jobs:
           path: |
             build/lib/ida/ida-cobra.*
             lib/ida/ida-cobra.cfg
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, lint, ida-plugin]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Download all IDA plugin artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdceab917 # v4.3.0
+        with:
+          pattern: ida-cobra-*
+          path: release-artifacts/
+
+      - name: Rename artifacts with version and platform
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          mkdir -p release
+          cp lib/ida/ida-cobra.cfg "release/ida-cobra.cfg"
+          for dir in release-artifacts/ida-cobra-*; do
+            platform="$(echo "$(basename "$dir" | sed 's/ida-cobra-//')" | tr '[:upper:]' '[:lower:]')"
+            for bin in "$dir"/build/lib/ida/ida-cobra.*; do
+              ext="${bin##*.}"
+              cp "$bin" "release/ida-cobra-${platform}-${version}.${ext}"
+            done
+          done
+
+      - name: Upload to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes \
+            release/*
