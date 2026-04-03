@@ -129,19 +129,32 @@ namespace ida_cobra {
         struct LeafCollector
         {
             std::vector< mop_t * > leaves;
+            bool valid = true;
 
             void Collect(minsn_t &root) {
                 std::vector< mop_t * > worklist;
                 worklist.push_back(&root.r);
                 worklist.push_back(&root.l);
 
-                while (!worklist.empty()) {
+                while (!worklist.empty() && valid) {
                     mop_t *op = worklist.back();
                     worklist.pop_back();
 
                     if (op->t == mop_d) {
-                        worklist.push_back(&op->d->r);
-                        worklist.push_back(&op->d->l);
+                        minsn_t *inner = op->d;
+                        // Validate extension widths before traversing.
+                        if (inner->opcode == m_xdu || inner->opcode == m_xds) {
+                            uint32_t src_bits = static_cast< uint32_t >(inner->l.size) * 8;
+                            uint32_t dst_bits = static_cast< uint32_t >(inner->d.size) * 8;
+                            if (src_bits < 1 || src_bits > 64 || dst_bits < 1 || dst_bits > 64
+                                || src_bits > dst_bits)
+                            {
+                                valid = false;
+                                return;
+                            }
+                        }
+                        worklist.push_back(&inner->r);
+                        worklist.push_back(&inner->l);
                         continue;
                     }
                     if (op->t == mop_n || op->t == mop_z) { continue; }
@@ -235,6 +248,7 @@ namespace ida_cobra {
                 LeafCollector lc;
                 lc.Collect(*root);
 
+                if (!lc.valid) { return 0; }
                 if (lc.leaves.size() > kMaxVars) { return 0; }
 
                 uint32_t bitwidth = static_cast< uint32_t >(root->d.size) * 8;
@@ -305,6 +319,7 @@ namespace ida_cobra {
                         LeafCollector lc;
                         MarkTree(root, lc);
 
+                        if (!lc.valid) { continue; }
                         if (lc.leaves.size() > kMaxVars) { continue; }
 
                         uint32_t bitwidth = static_cast< uint32_t >(root->d.size) * 8;
