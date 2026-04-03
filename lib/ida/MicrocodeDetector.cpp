@@ -207,12 +207,13 @@ namespace ida_cobra {
             }
         }
 
-        // Find the root of the actual MBA sub-expression inside an
-        // instruction tree.  Drills past wrapper opcodes (xdu, xds, mov, …)
-        // to find the topmost arithmetic/boolean instruction.
+        // Peel only m_mov wrappers. Accept MBA ops or xdu/xds as
+        // valid roots — extensions are part of the candidate tree.
         minsn_t *MbaRoot(minsn_t *insn) {
-            while (!IsMbaOpcode(insn->opcode) && insn->l.t == mop_d) { insn = insn->l.d; }
-            return IsMbaOpcode(insn->opcode) ? insn : nullptr;
+            while (insn->opcode == m_mov && insn->l.t == mop_d) { insn = insn->l.d; }
+            if (IsMbaOpcode(insn->opcode)) { return insn; }
+            if (insn->opcode == m_xdu || insn->opcode == m_xds) { return insn; }
+            return nullptr;
         }
 
     } // anonymous namespace
@@ -236,7 +237,8 @@ namespace ida_cobra {
 
                 if (lc.leaves.size() > kMaxVars) { return 0; }
 
-                uint32_t bitwidth = LeafBitwidth(lc.leaves);
+                uint32_t bitwidth = static_cast< uint32_t >(root->d.size) * 8;
+                if (bitwidth == 0 || bitwidth > 64) { return 0; }
                 uint64_t mask =
                     bitwidth >= 64 ? ~uint64_t{ 0 } : (uint64_t{ 1 } << bitwidth) - 1;
 
@@ -305,7 +307,8 @@ namespace ida_cobra {
 
                         if (lc.leaves.size() > kMaxVars) { continue; }
 
-                        uint32_t bitwidth = LeafBitwidth(lc.leaves);
+                        uint32_t bitwidth = static_cast< uint32_t >(root->d.size) * 8;
+                        if (bitwidth == 0 || bitwidth > 64) { continue; }
                         uint64_t mask =
                             bitwidth >= 64 ? ~uint64_t{ 0 } : (uint64_t{ 1 } << bitwidth) - 1;
 
