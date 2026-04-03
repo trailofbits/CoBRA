@@ -206,7 +206,7 @@ namespace ida_cobra {
 
             void Run() {
                 node_ordering_t post_order;
-                mba.get_graph()->depth_first_postorder_for_all_entries(&post_order);
+                mba.get_graph()->depth_first_postorder(&post_order);
 
                 for (size_t i = 0; i < post_order.size(); ++i) {
                     int blk_idx   = post_order.node(i);

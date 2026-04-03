@@ -4,6 +4,31 @@ if(NOT DEFINED IDA_SDK_DIR)
         "  cmake -DIDA_SDK_DIR=/path/to/ida-sdk/src ...")
 endif()
 
+# Detect platform-specific IDA stub library directory
+if(APPLE)
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+        set(_ida_lib_suffix "arm64_mac_64")
+    else()
+        set(_ida_lib_suffix "x64_mac_64")
+    endif()
+    set(_ida_lib_name "libida.dylib")
+elseif(WIN32)
+    set(_ida_lib_suffix "x64_win_64")
+    set(_ida_lib_name "ida.lib")
+else()
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+        set(_ida_lib_suffix "arm64_linux_64")
+    else()
+        set(_ida_lib_suffix "x64_linux_64")
+    endif()
+    set(_ida_lib_name "libida.so")
+endif()
+
+set(_ida_lib_path "${IDA_SDK_DIR}/lib/${_ida_lib_suffix}/${_ida_lib_name}")
+if(NOT EXISTS "${_ida_lib_path}")
+    message(FATAL_ERROR "IDA stub library not found: ${_ida_lib_path}")
+endif()
+
 add_library(ida-cobra MODULE
     ida-cobra.cpp
     MicrocodeDetector.cpp
@@ -11,28 +36,19 @@ add_library(ida-cobra MODULE
     Verifier.cpp
 )
 
-target_link_libraries(ida-cobra PRIVATE cobra-core)
+target_link_libraries(ida-cobra PRIVATE cobra-core "${_ida_lib_path}")
 
 target_include_directories(ida-cobra PRIVATE
     ${IDA_SDK_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-# IDA SDK requires __EA64__ for 64-bit address support
 target_compile_definitions(ida-cobra PRIVATE __EA64__=1)
 
 set_target_properties(ida-cobra PROPERTIES
     PREFIX ""
     SUFFIX "${CMAKE_SHARED_MODULE_SUFFIX}"
 )
-
-# IDA provides symbols at runtime — don't link them
-if(APPLE)
-    target_link_options(ida-cobra PRIVATE -undefined dynamic_lookup)
-elseif(UNIX)
-    # IDA resolves SDK symbols at plugin load time; allow unresolved.
-    target_link_options(ida-cobra PRIVATE -Wl,--unresolved-symbols=ignore-in-shared-libs)
-endif()
 
 install(TARGETS ida-cobra
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/cobra
