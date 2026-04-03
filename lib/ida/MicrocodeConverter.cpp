@@ -5,7 +5,7 @@ namespace ida_cobra {
 
         int FindLeafIndex(const mop_t &op, const MBACandidate &candidate) {
             for (size_t i = 0; i < candidate.leaves.size(); ++i) {
-                if (candidate.leaves[i] == &op) { return static_cast< int >(i); }
+                if (*candidate.leaves[i] == op) { return static_cast< int >(i); }
             }
             return -1;
         }

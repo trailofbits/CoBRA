@@ -43,23 +43,25 @@ namespace ida_cobra {
     } // anonymous namespace
 
     uint64_t EvalMinsn(
-        const minsn_t &insn, const absl::flat_hash_map< const mop_t *, uint64_t > &var_values,
+        const minsn_t &insn,
+        const std::vector< mop_t * > &var_keys,
+        const std::vector< uint64_t > &var_vals,
         uint64_t mask
     ) {
         auto eval_operand = [&](const mop_t &op) -> uint64_t {
             switch (op.t) {
                 case mop_d:
-                    return EvalMinsn(*op.d, var_values, mask);
+                    return EvalMinsn(*op.d, var_keys, var_vals, mask);
                 case mop_n:
                     return static_cast< uint64_t >(op.nnn->value) & mask;
                 case mop_r:
                 case mop_l:
                 case mop_S:
-                case mop_v: {
-                    auto it = var_values.find(&op);
-                    if (it != var_values.end()) { return it->second; }
+                case mop_v:
+                    for (size_t i = 0; i < var_keys.size(); ++i) {
+                        if (*var_keys[i] == op) { return var_vals[i]; }
+                    }
                     return 0;
-                }
                 default:
                     return 0;
             }
@@ -92,24 +94,32 @@ namespace ida_cobra {
 
     namespace {
 
-        // Collect leaf operands from a minsn tree by walking .l and .r recursively.
-        // Non-mop_d, non-mop_n operands become leaves.
-        struct LeafCollector : public mop_visitor_t
+        // Collect unique leaf (input) operands from a minsn tree.
+        // Only walks .l and .r — never .d (the destination).
+        // Deduplicates by value equality (mop_t::operator==).
+        struct LeafCollector
         {
             std::vector< mop_t * > leaves;
-            absl::flat_hash_set< const mop_t * > seen;
 
-            int idaapi visit_mop(mop_t *op, const tinfo_t *, bool) override {
-                if (op->t == mop_d || op->t == mop_n || op->t == mop_z) {
-                    return 0; // recurse into nested insns, skip constants/empty
-                }
+            void Collect(minsn_t &insn) {
+                CollectOp(insn.l);
+                CollectOp(insn.r);
+            }
 
-                // Variable-like operand: register, local, stack, global
-                if (op->t == mop_r || op->t == mop_l || op->t == mop_S || op->t == mop_v) {
-                    if (seen.insert(op).second) { leaves.push_back(op); }
+        private:
+            void CollectOp(mop_t &op) {
+                if (op.t == mop_d) {
+                    Collect(*op.d);
+                    return;
                 }
-                prune = true; // don't descend further into this operand
-                return 0;
+                if (op.t == mop_n || op.t == mop_z) { return; }
+
+                if (op.t == mop_r || op.t == mop_l || op.t == mop_S || op.t == mop_v) {
+                    for (const auto *existing : leaves) {
+                        if (*existing == op) { return; }
+                    }
+                    leaves.push_back(&op);
+                }
             }
         };
 
@@ -145,9 +155,8 @@ namespace ida_cobra {
             int idaapi visit_minsn() override {
                 if (!IsMba(*curins)) { return 0; }
 
-                // Collect leaves
                 LeafCollector lc;
-                curins->for_all_ops(lc);
+                lc.Collect(*curins);
 
                 if (lc.leaves.size() > kMaxVars) { return 0; }
 
@@ -158,19 +167,16 @@ namespace ida_cobra {
 
                 uint32_t n = static_cast< uint32_t >(lc.leaves.size());
 
-                // Compute boolean signature: evaluate on all 2^n inputs
-                // from {0, 1}^n
                 std::vector< uint64_t > sig;
                 sig.reserve(uint64_t{ 1 } << n);
 
                 for (uint64_t input = 0; input < (uint64_t{ 1 } << n); ++input) {
-                    absl::flat_hash_map< const mop_t *, uint64_t > vals;
-                    for (uint32_t v = 0; v < n; ++v) { vals[lc.leaves[v]] = (input >> v) & 1; }
+                    std::vector< uint64_t > vals(n);
+                    for (uint32_t v = 0; v < n; ++v) { vals[v] = (input >> v) & 1; }
 
-                    sig.push_back(EvalMinsn(*curins, vals, mask));
+                    sig.push_back(EvalMinsn(*curins, lc.leaves, vals, mask));
                 }
 
-                // Build var names
                 std::vector< std::string > names;
                 names.reserve(n);
                 for (auto *leaf : lc.leaves) { names.push_back(LeafName(*leaf)); }
@@ -232,11 +238,11 @@ namespace ida_cobra {
                         std::vector< uint64_t > sig;
                         sig.reserve(uint64_t{ 1 } << n);
                         for (uint64_t input = 0; input < (uint64_t{ 1 } << n); ++input) {
-                            absl::flat_hash_map< const mop_t *, uint64_t > vals;
+                            std::vector< uint64_t > vals(n);
                             for (uint32_t v = 0; v < n; ++v) {
-                                vals[lc.leaves[v]] = (input >> v) & 1;
+                                vals[v] = (input >> v) & 1;
                             }
-                            sig.push_back(EvalMinsn(*insn, vals, mask));
+                            sig.push_back(EvalMinsn(*insn, lc.leaves, vals, mask));
                         }
 
                         std::vector< std::string > names;
@@ -258,7 +264,7 @@ namespace ida_cobra {
 
             void MarkTree(minsn_t *insn, LeafCollector &lc) {
                 already_in_tree.insert(insn);
-                insn->for_all_ops(lc);
+                lc.Collect(*insn);
                 // Cross-block extension via graph_chains_t is deferred
                 // until the use-def chain API is validated via manual
                 // testing in IDA. For now, this falls through to

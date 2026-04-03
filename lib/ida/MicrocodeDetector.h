@@ -3,7 +3,7 @@
 // STL and absl must be included before hexrays.hpp: the IDA SDK poisons
 // stdout, stderr, fwrite, fflush, snprintf etc. via fpro.h macros, which
 // breaks any subsequent libc++/absl header that references those identifiers.
-#include <absl/container/flat_hash_map.h>
+#include <absl/container/flat_hash_set.h>
 
 #include <cstdint>
 #include <string>
@@ -28,10 +28,12 @@ namespace ida_cobra {
     bool IsMba(const minsn_t &insn);
 
     // Evaluate a minsn tree with the given variable assignments.
-    // Used for signature computation (DetectMbaCandidates) and
-    // verification (ProbablyEquivalent).
+    // Variables are matched by value equality (mop_t::operator==),
+    // not pointer identity.
     uint64_t EvalMinsn(
-        const minsn_t &insn, const absl::flat_hash_map< const mop_t *, uint64_t > &var_values,
+        const minsn_t &insn,
+        const std::vector< mop_t * > &var_keys,
+        const std::vector< uint64_t > &var_vals,
         uint64_t mask
     );
 
