@@ -106,3 +106,123 @@ TEST(EvalSignExtendDeathTest, OverSixtyFourBitsAsserts) {
     EXPECT_DEATH(EvalSignExtend(0, 65, UINT64_MAX), "");
 }
 #endif
+
+#include "cobra/core/BitWidth.h"
+#include "cobra/core/CompiledExpr.h"
+
+// ---------- Helper: evaluate a lowered Expr at a value ----------
+
+namespace {
+
+    uint64_t EvalExprAt(const Expr &expr, uint64_t input, uint32_t bitwidth) {
+        auto compiled                = CompileExpr(expr, bitwidth);
+        std::vector< uint64_t > vals = { input };
+        std::vector< uint64_t > stack(compiled.stack_size);
+        return EvalCompiledExpr(compiled, vals, stack);
+    }
+
+} // anonymous namespace
+
+// ---------- LowerZeroExtend ----------
+
+TEST(LowerZeroExtendTest, SixtyFourBitIsIdentity) {
+    auto inner  = Expr::Variable(0);
+    auto *raw   = inner.get();
+    auto result = LowerZeroExtend(std::move(inner), 64);
+    // Must return the same pointer (no wrapping).
+    EXPECT_EQ(result.get(), raw);
+}
+
+TEST(LowerZeroExtendTest, EightBitStructure) {
+    auto result = LowerZeroExtend(Expr::Variable(0), 8);
+    // Should be And(Variable(0), Constant(0xFF)).
+    ASSERT_EQ(result->kind, Expr::Kind::kAnd);
+    ASSERT_EQ(result->children.size(), 2u);
+    EXPECT_EQ(result->children[0]->kind, Expr::Kind::kVariable);
+    EXPECT_EQ(result->children[1]->kind, Expr::Kind::kConstant);
+    EXPECT_EQ(result->children[1]->constant_val, 0xFFu);
+}
+
+TEST(LowerZeroExtendTest, SemanticOneBit) {
+    auto lowered = LowerZeroExtend(Expr::Variable(0), 1);
+    // zext i1 at 64-bit width.
+    EXPECT_EQ(EvalExprAt(*lowered, 0, 64), EvalZeroExtend(0, 1, UINT64_MAX));
+    EXPECT_EQ(EvalExprAt(*lowered, 1, 64), EvalZeroExtend(1, 1, UINT64_MAX));
+    EXPECT_EQ(EvalExprAt(*lowered, 0xFF, 64), EvalZeroExtend(0xFF, 1, UINT64_MAX));
+}
+
+TEST(LowerZeroExtendTest, SemanticEightBit) {
+    auto lowered = LowerZeroExtend(Expr::Variable(0), 8);
+    for (uint64_t v : { 0ULL, 0x7FULL, 0x80ULL, 0xFFULL, 0xDEAD00FFULL }) {
+        EXPECT_EQ(EvalExprAt(*lowered, v, 64), EvalZeroExtend(v, 8, UINT64_MAX));
+    }
+}
+
+TEST(LowerZeroExtendTest, SemanticThirtyTwoBit) {
+    auto lowered = LowerZeroExtend(Expr::Variable(0), 32);
+    for (uint64_t v :
+         { 0ULL, 0x7FFFFFFFULL, 0x80000000ULL, 0xFFFFFFFFULL, 0xDEADBEEF12345678ULL })
+    {
+        EXPECT_EQ(EvalExprAt(*lowered, v, 64), EvalZeroExtend(v, 32, UINT64_MAX));
+    }
+}
+
+// ---------- LowerSignExtend ----------
+
+TEST(LowerSignExtendTest, SixtyFourBitIsIdentity) {
+    auto inner  = Expr::Variable(0);
+    auto *raw   = inner.get();
+    auto result = LowerSignExtend(std::move(inner), 64);
+    EXPECT_EQ(result.get(), raw);
+}
+
+TEST(LowerSignExtendTest, EightBitStructure) {
+    auto result = LowerSignExtend(Expr::Variable(0), 8);
+    // Should be Add(Xor(And(Variable(0), 0xFF), 0x80), Neg(0x80)).
+    ASSERT_EQ(result->kind, Expr::Kind::kAdd);
+    ASSERT_EQ(result->children.size(), 2u);
+    // Left child: Xor(And(...), sign_bit)
+    EXPECT_EQ(result->children[0]->kind, Expr::Kind::kXor);
+    // Right child: Neg(sign_bit)
+    EXPECT_EQ(result->children[1]->kind, Expr::Kind::kNeg);
+}
+
+TEST(LowerSignExtendTest, SemanticOneBit) {
+    auto lowered = LowerSignExtend(Expr::Variable(0), 1);
+    EXPECT_EQ(EvalExprAt(*lowered, 0, 64), EvalSignExtend(0, 1, UINT64_MAX));
+    // sext i1 1 -> all ones.
+    EXPECT_EQ(EvalExprAt(*lowered, 1, 64), EvalSignExtend(1, 1, UINT64_MAX));
+    EXPECT_EQ(EvalExprAt(*lowered, 1, 64), UINT64_MAX);
+}
+
+TEST(LowerSignExtendTest, SemanticEightBit) {
+    auto lowered = LowerSignExtend(Expr::Variable(0), 8);
+    for (uint64_t v : { 0ULL, 0x7FULL, 0x80ULL, 0xFFULL }) {
+        EXPECT_EQ(EvalExprAt(*lowered, v, 64), EvalSignExtend(v, 8, UINT64_MAX));
+    }
+}
+
+TEST(LowerSignExtendTest, SemanticThirtyTwoBit) {
+    auto lowered = LowerSignExtend(Expr::Variable(0), 32);
+    for (uint64_t v : { 0ULL, 0x7FFFFFFFULL, 0x80000000ULL, 0xFFFFFFFFULL }) {
+        EXPECT_EQ(EvalExprAt(*lowered, v, 64), EvalSignExtend(v, 32, UINT64_MAX));
+    }
+}
+
+#if defined(GTEST_HAS_DEATH_TEST) && !defined(NDEBUG)
+TEST(LowerZeroExtendDeathTest, ZeroBitsAsserts) {
+    EXPECT_DEATH(LowerZeroExtend(Expr::Variable(0), 0), "");
+}
+
+TEST(LowerZeroExtendDeathTest, OverSixtyFourBitsAsserts) {
+    EXPECT_DEATH(LowerZeroExtend(Expr::Variable(0), 65), "");
+}
+
+TEST(LowerSignExtendDeathTest, ZeroBitsAsserts) {
+    EXPECT_DEATH(LowerSignExtend(Expr::Variable(0), 0), "");
+}
+
+TEST(LowerSignExtendDeathTest, OverSixtyFourBitsAsserts) {
+    EXPECT_DEATH(LowerSignExtend(Expr::Variable(0), 65), "");
+}
+#endif
