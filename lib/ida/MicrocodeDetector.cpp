@@ -259,6 +259,15 @@ namespace ida_cobra {
                 minsn_t *root = MbaRoot(curins);
                 if (!root) { return 0; }
 
+                // Validate extension widths at the root itself —
+                // LeafCollector only inspects child extensions, not the
+                // root instruction.
+                if (root->opcode == m_xdu || root->opcode == m_xds) {
+                    uint32_t src = static_cast< uint32_t >(root->l.size) * 8;
+                    uint32_t dst = static_cast< uint32_t >(root->d.size) * 8;
+                    if (src < 1 || src > 64 || dst < 1 || dst > 64 || src > dst) { return 0; }
+                }
+
                 LeafCollector lc;
                 lc.Collect(*root);
 
@@ -329,6 +338,15 @@ namespace ida_cobra {
                         if (!IsMba(*insn)) { continue; }
                         minsn_t *root = MbaRoot(insn);
                         if (!root) { continue; }
+
+                        // Validate extension widths at the root itself.
+                        if (root->opcode == m_xdu || root->opcode == m_xds) {
+                            uint32_t src = static_cast< uint32_t >(root->l.size) * 8;
+                            uint32_t dst = static_cast< uint32_t >(root->d.size) * 8;
+                            if (src < 1 || src > 64 || dst < 1 || dst > 64 || src > dst) {
+                                continue;
+                            }
+                        }
 
                         LeafCollector lc;
                         MarkTree(root, lc);
