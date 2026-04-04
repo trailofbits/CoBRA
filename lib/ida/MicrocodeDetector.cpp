@@ -187,15 +187,6 @@ namespace ida_cobra {
             }
         };
 
-        // Derive the MBA bitwidth from the operand sizes of its leaves.
-        uint32_t LeafBitwidth(const std::vector< mop_t * > &leaves) {
-            int max_size = 0;
-            for (const auto *op : leaves) {
-                if (op->size > max_size) { max_size = op->size; }
-            }
-            return max_size > 0 ? static_cast< uint32_t >(max_size) * 8 : 64;
-        }
-
         // Build a human-readable name for a leaf operand.
         std::string LeafName(const mop_t &op) {
             qstring buf;

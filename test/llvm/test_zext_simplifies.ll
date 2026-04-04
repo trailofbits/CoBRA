@@ -8,7 +8,7 @@
 ; CHECK-NOT: zext
 ; CHECK-NOT: xor
 ; CHECK-NOT: and
-; CHECK: ret i64
+; CHECK: ret i64 0
 define i64 @test_zext_cancel(i8 %x, i8 %y) {
 entry:
   %xor = xor i8 %x, %y
