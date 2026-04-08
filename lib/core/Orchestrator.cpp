@@ -692,10 +692,13 @@ namespace cobra {
         // Seed the worklist for the with-AST path.
         Result< std::optional< OrchestratorResult > >
         SeedWithAst(const Expr &input_expr, OrchestratorContext &ctx, Worklist &worklist) {
-            // Create initial AST item
+            // Create initial AST item, pre-simplifying small subexpressions
+            // via pattern-table lookup. This peels off MBA obfuscation layers
+            // (e.g., (X+Y+1)+(~X|~Y) → X|Y) before classification.
+            auto rewritten_ast = SimplifyPatternSubtrees(CloneExpr(input_expr), ctx.bitwidth);
             WorkItem seed;
             seed.payload = AstPayload{
-                .expr       = CloneExpr(input_expr),
+                .expr       = std::move(rewritten_ast),
                 .provenance = Provenance::kOriginal,
             };
             seed.features.provenance = Provenance::kOriginal;

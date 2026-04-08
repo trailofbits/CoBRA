@@ -128,6 +128,15 @@ target_include_directories(test_qsynth_diagnostic PRIVATE
 target_compile_definitions(test_qsynth_diagnostic PRIVATE
     DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
 
+# Semantic poly MBA audit (manual, not auto-discovered)
+add_executable(test_semantic_poly_audit verify/test_semantic_poly_audit.cpp
+               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(test_semantic_poly_audit PRIVATE cobra-core GTest::gtest_main)
+target_include_directories(test_semantic_poly_audit PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+target_compile_definitions(test_semantic_poly_audit PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
 # ArithOverBitwise diagnostic (manual, not auto-discovered)
 add_executable(test_arith_over_bitwise_diagnostic
                verify/test_arith_over_bitwise_diagnostic.cpp
