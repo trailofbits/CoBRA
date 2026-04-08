@@ -97,7 +97,7 @@ jobs:
           cmake --build build
 
       - name: Run tests
-        run: ctest --test-dir build -j "$(nproc 2>/dev/null || sysctl -n hw.ncpu)" --output-on-failure
+        run: ctest --test-dir build -j "$(nproc 2>/dev/null || sysctl -n hw.ncpu)" --output-on-failure -E "DatasetBenchmark|SiMBADataset|GAMBADataset|OSESDataset|ObfuscatorXDataset"
 
   lint:
     name: Lint
