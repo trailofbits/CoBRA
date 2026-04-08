@@ -372,11 +372,98 @@ TEST(PatternMatcherTest, FiveVarMixed) {
     }
 }
 
-// 6+ vars: pattern matcher returns nullopt (defers to ANF/CoB)
-TEST(PatternMatcherTest, SixVarReturnsNullopt) {
+// 6-var Boolean: Shannon decomposition into two 5-var lookups
+TEST(PatternMatcherTest, SixVarAndAllMatches) {
+    // f = x & y & z & w & v & u  →  sig[63] = 1, rest 0
     std::vector< uint64_t > sig(64, 0);
     sig[63] = 1;
-    EXPECT_FALSE(MatchPattern(sig, 6, 64).has_value());
+    auto r  = MatchPattern(sig, 6, 64);
+    ASSERT_TRUE(r.has_value());
+    for (uint32_t i = 0; i < 64; ++i) {
+        uint64_t got = EvalExpr(
+                           *r.value(),
+                           { (i >> 0) & 1ULL, (i >> 1) & 1ULL, (i >> 2) & 1ULL, (i >> 3) & 1ULL,
+                             (i >> 4) & 1ULL, (i >> 5) & 1ULL },
+                           64
+                       )
+            & 1;
+        EXPECT_EQ(got, sig[i]);
+    }
+}
+
+// 6-var Boolean: sampled correctness across all Shannon decomposition paths
+TEST(PatternMatcherTest, SixVarSampledCorrectness) {
+    auto verify = [](uint64_t key) {
+        std::vector< uint64_t > sig(64);
+        for (size_t i = 0; i < 64; ++i) { sig[i] = (key >> i) & 1; }
+        auto result = MatchPattern(sig, 6, 64);
+        EXPECT_TRUE(result.has_value()) << "key=0x" << std::hex << key;
+        if (!result.has_value()) { return; }
+        for (uint32_t i = 0; i < 64; ++i) {
+            uint64_t got = EvalExpr(
+                               *result.value(),
+                               { (i >> 0) & 1ULL, (i >> 1) & 1ULL, (i >> 2) & 1ULL,
+                                 (i >> 3) & 1ULL, (i >> 4) & 1ULL, (i >> 5) & 1ULL },
+                               64
+                           )
+                & 1;
+            EXPECT_EQ(got, sig[i]) << "key=0x" << std::hex << key << " input=" << std::dec << i;
+        }
+    };
+
+    // Variable truth tables
+    constexpr uint64_t kX = 0xAAAAAAAAAAAAAAAAULL;
+    constexpr uint64_t kY = 0xCCCCCCCCCCCCCCCCULL;
+    constexpr uint64_t kZ = 0xF0F0F0F0F0F0F0F0ULL;
+    constexpr uint64_t kW = 0xFF00FF00FF00FF00ULL;
+    constexpr uint64_t kV = 0xFFFF0000FFFF0000ULL;
+    constexpr uint64_t kU = 0xFFFFFFFF00000000ULL;
+
+    // Constants
+    verify(0);
+    verify(~uint64_t{ 0 });
+
+    // Single variables and complements
+    verify(kX);
+    verify(~kX);
+    verify(kU);
+    verify(~kU);
+
+    // 2-input gates spanning the Shannon split variable (u)
+    verify(kX & kU); // f0=0, f1=x
+    verify(kX | kU); // f0=x, f1=all-1
+    verify(kW ^ kU); // complementary cofactors
+    verify(kZ & kW); // cofactors equal (doesn't depend on u)
+
+    // 6-input gates
+    verify(uint64_t{ 1 } << 63);         // x & y & z & w & v & u
+    verify(~uint64_t{ 1 });              // x | y | z | w | v | u
+    verify(kX ^ kY ^ kZ ^ kW ^ kV ^ kU); // 6-way parity
+
+    // Majority-like: at least 3 of 6
+    uint64_t maj = 0;
+    for (int i = 0; i < 64; ++i) {
+        int cnt = ((i >> 0) & 1) + ((i >> 1) & 1) + ((i >> 2) & 1) + ((i >> 3) & 1)
+            + ((i >> 4) & 1) + ((i >> 5) & 1);
+        if (cnt >= 3) { maj |= (uint64_t{ 1 } << i); }
+    }
+    verify(maj);
+
+    // Deterministic random sample (xorshift64)
+    uint64_t rng = 0xDEADBEEFCAFEBABEULL;
+    for (int trial = 0; trial < 1000; ++trial) {
+        rng ^= rng << 13;
+        rng ^= rng >> 7;
+        rng ^= rng << 17;
+        verify(rng);
+    }
+}
+
+// 7+ vars: pattern matcher returns nullopt (defers to ANF/CoB)
+TEST(PatternMatcherTest, SevenVarReturnsNullopt) {
+    std::vector< uint64_t > sig(128, 0);
+    sig[127] = 1;
+    EXPECT_FALSE(MatchPattern(sig, 7, 64).has_value());
 }
 
 // Scalar factoring: constant + scalar * boolean_pattern
