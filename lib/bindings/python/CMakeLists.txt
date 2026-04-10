@@ -16,6 +16,13 @@ if (nanobind_ROOT AND NOT nanobind_DIR)
 endif()
 find_package(nanobind CONFIG REQUIRED)
 
-nanobind_add_module(cobra_mba PythonInterface.cpp PythonInterface.hpp)
+nanobind_add_module(
+  cobra_mba
+  PythonInterface.cpp
+  PythonInterface.hpp
+  CobraPython.cpp
+  CobraPython.hpp
+)
+target_link_libraries(cobra_mba PRIVATE cobra-core)
 
 
