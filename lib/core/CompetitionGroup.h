@@ -62,11 +62,14 @@ namespace cobra {
     bool
     AcquireHandle(absl::flat_hash_map< GroupId, CompetitionGroup > &groups, GroupId group_id);
 
-    // Returns true if the group already holds a verified candidate.
-    // Used to short-circuit expensive decomposition passes when the
-    // algebraic path (CoB, pattern match) already found the answer.
+    // Returns true if the group already holds a verified candidate
+    // whose cost does not exceed max_weighted_size.  Used to
+    // short-circuit expensive decomposition passes when the
+    // algebraic path (CoB, pattern match) already found a compact
+    // answer that decomposition is unlikely to improve.
     bool HasVerifiedCandidate(
-        const absl::flat_hash_map< GroupId, CompetitionGroup > &groups, GroupId group_id
+        const absl::flat_hash_map< GroupId, CompetitionGroup > &groups, GroupId group_id,
+        uint32_t max_weighted_size = UINT32_MAX
     );
 
 } // namespace cobra

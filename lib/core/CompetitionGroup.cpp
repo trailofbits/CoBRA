@@ -53,12 +53,14 @@ namespace cobra {
     }
 
     bool HasVerifiedCandidate(
-        const absl::flat_hash_map< GroupId, CompetitionGroup > &groups, GroupId group_id
+        const absl::flat_hash_map< GroupId, CompetitionGroup > &groups, GroupId group_id,
+        uint32_t max_weighted_size
     ) {
         auto it = groups.find(group_id);
         if (it == groups.end()) { return false; }
         return it->second.best.has_value()
-            && it->second.best->verification == VerificationState::kVerified;
+            && it->second.best->verification == VerificationState::kVerified
+            && it->second.best->cost.weighted_size <= max_weighted_size;
     }
 
     std::optional< WorkItem >

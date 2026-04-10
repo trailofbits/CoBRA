@@ -1003,6 +1003,66 @@ TEST(SimplifierTest, MixedRewrite_SupportedRouteStillSimplifies) {
     EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
 }
 
+// --- RepairProductShadow unit tests ---
+
+TEST(SimplifierTest, RepairProductShadow_AndOfVars) {
+    // AND(x0, x1) → MUL(x0, x1)
+    auto expr     = Expr::BitwiseAnd(Expr::Variable(0), Expr::Variable(1));
+    auto repaired = RepairProductShadow(std::move(expr));
+    EXPECT_EQ(repaired->kind, Expr::Kind::kMul);
+    EXPECT_EQ(repaired->children[0]->kind, Expr::Kind::kVariable);
+    EXPECT_EQ(repaired->children[1]->kind, Expr::Kind::kVariable);
+}
+
+TEST(SimplifierTest, RepairProductShadow_AndOfVarAndConstant) {
+    // AND(x0, Constant(5)) → unchanged (not a pure product)
+    auto expr     = Expr::BitwiseAnd(Expr::Variable(0), Expr::Constant(5));
+    auto repaired = RepairProductShadow(std::move(expr));
+    EXPECT_EQ(repaired->kind, Expr::Kind::kAnd);
+}
+
+TEST(SimplifierTest, RepairProductShadow_NestedAndChain) {
+    // AND(AND(x0, x1), x2) → MUL(MUL(x0, x1), x2)
+    auto inner    = Expr::BitwiseAnd(Expr::Variable(0), Expr::Variable(1));
+    auto expr     = Expr::BitwiseAnd(std::move(inner), Expr::Variable(2));
+    auto repaired = RepairProductShadow(std::move(expr));
+    EXPECT_EQ(repaired->kind, Expr::Kind::kMul);
+    EXPECT_EQ(repaired->children[0]->kind, Expr::Kind::kMul);
+    EXPECT_EQ(repaired->children[1]->kind, Expr::Kind::kVariable);
+}
+
+TEST(SimplifierTest, RepairProductShadow_CompoundChildSkipped) {
+    // AND(x+y, z) → unchanged (x+y is not a pure product)
+    auto sum      = Expr::Add(Expr::Variable(0), Expr::Variable(1));
+    auto expr     = Expr::BitwiseAnd(std::move(sum), Expr::Variable(2));
+    auto repaired = RepairProductShadow(std::move(expr));
+    EXPECT_EQ(repaired->kind, Expr::Kind::kAnd);
+}
+
+// --- Dynamic masking fallback tests ---
+
+TEST(SimplifierTest, DynamicMask_ShrRejectsOptimization) {
+    // 0xFF & (x >> 1): ContainsShr rejects dynamic masking,
+    // falls through to normal pipeline.
+    auto inner  = Expr::LogicalShr(Expr::Variable(0), 1);
+    auto masked = Expr::BitwiseAnd(Expr::Constant(0xFF), std::move(inner));
+
+    std::vector< std::string > vars = { "x" };
+    auto sig                        = EvaluateBooleanSignature(*masked, 1, 64);
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
+
+    auto result = Simplify(sig, vars, masked.get(), opts);
+    ASSERT_TRUE(result.has_value());
+    // Should still produce a result via the normal pipeline.
+    // The key invariant is that the Shr rejection doesn't cause a crash
+    // or incorrect result.
+    if (result->kind == SimplifyOutcome::Kind::kSimplified) {
+        auto eval  = Evaluator::FromExpr(*masked, 64);
+        auto check = FullWidthCheckEval(eval, 1, *result->expr, 64);
+        EXPECT_TRUE(check.passed);
+    }
+}
+
 // --- ANF fast path integration tests ---
 
 TEST(SimplifierTest, AnfThreeVarOr) {

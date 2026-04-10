@@ -23,6 +23,8 @@ TEST(DynamicMaskTest, IsPowerOfTwoMinusOne_NonMasks) {
     EXPECT_EQ(IsPowerOfTwoMinusOne(10), std::nullopt);
     EXPECT_EQ(IsPowerOfTwoMinusOne(100), std::nullopt);
     EXPECT_EQ(IsPowerOfTwoMinusOne(256), std::nullopt);
+    // UINT64_MAX = 2^64 - 1: val+1 overflows to 0, correctly rejected.
+    EXPECT_EQ(IsPowerOfTwoMinusOne(UINT64_MAX), std::nullopt);
 }
 
 TEST(DynamicMaskTest, DetectRootLowBitMask_ConstantFirst) {

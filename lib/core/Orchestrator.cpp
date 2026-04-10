@@ -826,6 +826,10 @@ namespace cobra {
                 );
                 Options inner_opts   = opts;
                 inner_opts.bitwidth  = eff_bw;
+                // Clear so the recursive Simplify builds a fresh
+                // evaluator from the inner expression at reduced
+                // bitwidth.  Evaluator{} evaluates to false via
+                // explicit operator bool().
                 inner_opts.evaluator = Evaluator{};
                 auto result          = Simplify(inner_sig, vars, inner.get(), inner_opts);
                 if (result.has_value() && result->kind == SimplifyOutcome::Kind::kSimplified) {

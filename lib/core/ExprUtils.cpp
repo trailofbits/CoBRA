@@ -340,11 +340,30 @@ namespace cobra {
         return expr;
     }
 
+    namespace {
+
+        // Returns true if the expression is a pure variable product —
+        // i.e., it contains only kVariable, kAnd, and kMul nodes.
+        // Used to restrict RepairProductShadow to genuine ANF
+        // monomials, avoiding false replacements on compound
+        // bitwise expressions like AND(x+y, z).
+        bool IsPureProduct(const Expr &e) {
+            if (e.kind == Expr::Kind::kVariable) { return true; }
+            if (e.kind == Expr::Kind::kAnd || e.kind == Expr::Kind::kMul) {
+                return std::ranges::all_of(e.children, [](const auto &c) {
+                    return IsPureProduct(*c);
+                });
+            }
+            return false;
+        }
+
+    } // namespace
+
     std::unique_ptr< Expr > RepairProductShadow(std::unique_ptr< Expr > expr) {
         for (auto &child : expr->children) { child = RepairProductShadow(std::move(child)); }
 
         if (expr->kind == Expr::Kind::kAnd && expr->children.size() == 2
-            && HasVarDep(*expr->children[0]) && HasVarDep(*expr->children[1]))
+            && IsPureProduct(*expr->children[0]) && IsPureProduct(*expr->children[1]))
         {
             return Expr::Mul(std::move(expr->children[0]), std::move(expr->children[1]));
         }

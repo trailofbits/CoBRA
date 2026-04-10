@@ -393,23 +393,61 @@ namespace cobra {
             auto anf_expr = BuildAnfExpr(anf, num_vars);
 
             if (active_eval.has_value()) {
-                auto fw = FullWidthCheckEval(*active_eval, num_vars, *anf_expr, ctx.bitwidth);
-                if (fw.passed) {
-                    // Items with a solve_ctx live in a lifted
-                    // variable space that differs from the global
-                    // original_vars, so RunVerifyCandidate cannot
-                    // remap them.  We already verified at full width
-                    // via active_eval; the parent continuation
-                    // handles original-space verification.
-                    bool needs_osv = true;
+                // Items with a solve_ctx live in a lifted variable
+                // space that differs from the global original_vars,
+                // so RunVerifyCandidate cannot remap them — we
+                // already verified at full width via active_eval;
+                // the parent continuation handles original-space
+                // verification.
+                auto derive_needs_osv = [&]() -> bool {
                     if (auto *a = std::get_if< AstPayload >(&item.payload)) {
-                        if (a->solve_ctx.has_value()) { needs_osv = false; }
+                        if (a->solve_ctx.has_value()) { return false; }
+                    }
+                    return true;
+                };
+
+                // Grouped items: submit directly into the owning
+                // competition group and retain the current AST item
+                // so the remaining passes (signature state
+                // construction, decomposition, etc.) still run.
+                // Emitting via the worklist with kConsumeCurrent
+                // would kill the exploration branch if SubmitCandidate
+                // rejects the candidate on cost.
+                //
+                // Top-level items: emit as a solved candidate through
+                // the worklist for the main-loop acceptance path.
+                auto emit_fast_path =
+                    [&](std::unique_ptr< Expr > expr) -> Result< PassResult > {
+                    bool needs_osv = derive_needs_osv();
+
+                    if (item.group_id.has_value()) {
+                        auto normalized =
+                            NormalizeLateCandidateExpr(std::move(expr), ctx.bitwidth);
+                        auto cost_info = ComputeCost(*normalized);
+                        SubmitCandidate(
+                            ctx.competition_groups, *item.group_id,
+                            CandidateRecord{
+                                .expr         = std::move(normalized),
+                                .cost         = cost_info.cost,
+                                .verification = VerificationState::kVerified,
+                                .real_vars    = active_vars,
+                                .source_pass  = PassId::kBuildSignatureState,
+                                .needs_original_space_verification = needs_osv,
+                                .sig_vector                        = sig,
+                            }
+                        );
+                        return Ok(
+                            PassResult{
+                                .decision    = PassDecision::kAdvance,
+                                .disposition = ItemDisposition::kRetainCurrent,
+                            }
+                        );
                     }
 
-                    auto cost_info = ComputeCost(*anf_expr);
+                    auto cost_info = ComputeCost(*expr);
                     WorkItem cand_item;
                     cand_item.payload = CandidatePayload{
-                        .expr                              = std::move(anf_expr),
+                        .expr                              = std::move(expr),
                         .real_vars                         = active_vars,
                         .cost                              = cost_info.cost,
                         .producing_pass                    = PassId::kBuildSignatureState,
@@ -423,60 +461,26 @@ namespace cobra {
                     cand_item.rewrite_gen           = item.rewrite_gen;
                     cand_item.attempted_mask        = item.attempted_mask;
                     cand_item.history               = item.history;
-                    cand_item.group_id              = item.group_id;
 
                     PassResult result;
                     result.decision    = PassDecision::kSolvedCandidate;
-                    // Internal items: consume to avoid double-release
-                    // on the parent group (candidate's acceptance
-                    // path releases the handle).
-                    // Top-level items: retain for fallback exploration.
-                    result.disposition = item.group_id.has_value()
-                        ? ItemDisposition::kConsumeCurrent
-                        : ItemDisposition::kRetainCurrent;
+                    result.disposition = ItemDisposition::kRetainCurrent;
                     result.next.push_back(std::move(cand_item));
                     return Ok(std::move(result));
-                }
+                };
+
+                auto fw = FullWidthCheckEval(*active_eval, num_vars, *anf_expr, ctx.bitwidth);
+                if (fw.passed) { return emit_fast_path(std::move(anf_expr)); }
 
                 // Step 2c: Product-shadow repair.
                 // The ANF uses AND for products (correct on {0,1}),
                 // but full-width diverges because AND ≠ MUL.
                 // Replace AND(var,var) with MUL and re-verify.
                 // O(nodes) tree walk — no recursive Simplify.
-                {
-                    auto repaired = RepairProductShadow(CloneExpr(*anf_expr));
-                    auto repair_fw =
-                        FullWidthCheckEval(*active_eval, num_vars, *repaired, ctx.bitwidth);
-                    if (repair_fw.passed) {
-                        bool needs_osv = false;
-                        auto cost_info = ComputeCost(*repaired);
-                        WorkItem cand_item;
-                        cand_item.payload = CandidatePayload{
-                            .expr                              = std::move(repaired),
-                            .real_vars                         = active_vars,
-                            .cost                              = cost_info.cost,
-                            .producing_pass                    = PassId::kBuildSignatureState,
-                            .needs_original_space_verification = needs_osv,
-                        };
-                        cand_item.features              = item.features;
-                        cand_item.metadata              = item.metadata;
-                        cand_item.metadata.verification = VerificationState::kVerified;
-                        cand_item.metadata.sig_vector   = sig;
-                        cand_item.depth                 = item.depth;
-                        cand_item.rewrite_gen           = item.rewrite_gen;
-                        cand_item.attempted_mask        = item.attempted_mask;
-                        cand_item.history               = item.history;
-                        cand_item.group_id              = item.group_id;
-
-                        PassResult result;
-                        result.decision    = PassDecision::kSolvedCandidate;
-                        result.disposition = item.group_id.has_value()
-                            ? ItemDisposition::kConsumeCurrent
-                            : ItemDisposition::kRetainCurrent;
-                        result.next.push_back(std::move(cand_item));
-                        return Ok(std::move(result));
-                    }
-                }
+                auto repaired = RepairProductShadow(CloneExpr(*anf_expr));
+                auto repair_fw =
+                    FullWidthCheckEval(*active_eval, num_vars, *repaired, ctx.bitwidth);
+                if (repair_fw.passed) { return emit_fast_path(std::move(repaired)); }
             }
         }
 

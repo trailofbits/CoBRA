@@ -2,12 +2,15 @@
 #include "cobra/core/BitWidth.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/Profile.h"
-#include "cobra/core/SignatureEvalStats.h"
 #include <algorithm>
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+
+#ifdef COBRA_SIG_STATS
+    #include "cobra/core/SignatureEvalStats.h"
+    #include <chrono>
+#endif
 
 namespace cobra {
 
@@ -89,20 +92,24 @@ namespace cobra {
             return std::vector< uint64_t >(len, 0);
         }
 
+#ifdef COBRA_SIG_STATS
         uint32_t CountNodesLocal(const Expr &e) {
             uint32_t n = 1;
             for (const auto &c : e.children) { n += CountNodesLocal(*c); }
             return n;
         }
+#endif
 
     } // namespace
 
     std::vector< uint64_t >
     EvaluateBooleanSignature(const Expr &expr, uint32_t num_vars, uint32_t bitwidth) {
         COBRA_ZONE_N("EvaluateBooleanSignature");
-        [[maybe_unused]] auto t0 = std::chrono::high_resolution_clock::now();
-        const size_t kLen        = size_t{ 1 } << num_vars;
-        auto result              = EvalSigRecursive(expr, kLen, bitwidth);
+#ifdef COBRA_SIG_STATS
+        auto t0 = std::chrono::high_resolution_clock::now();
+#endif
+        const size_t kLen = size_t{ 1 } << num_vars;
+        auto result       = EvalSigRecursive(expr, kLen, bitwidth);
 #ifdef COBRA_SIG_STATS
         auto t1   = std::chrono::high_resolution_clock::now();
         double us = std::chrono::duration< double, std::micro >(t1 - t0).count();
@@ -113,9 +120,11 @@ namespace cobra {
 
     std::vector< uint64_t >
     EvaluateBooleanSignature(const Evaluator &eval, uint32_t num_vars, uint32_t bitwidth) {
-        [[maybe_unused]] auto t0 = std::chrono::high_resolution_clock::now();
-        const size_t kLen        = size_t{ 1 } << num_vars;
-        const uint64_t kMask     = Bitmask(bitwidth);
+#ifdef COBRA_SIG_STATS
+        auto t0 = std::chrono::high_resolution_clock::now();
+#endif
+        const size_t kLen    = size_t{ 1 } << num_vars;
+        const uint64_t kMask = Bitmask(bitwidth);
         std::vector< uint64_t > sig(kLen);
         std::vector< uint64_t > point(num_vars);
         EvaluatorWorkspace workspace;

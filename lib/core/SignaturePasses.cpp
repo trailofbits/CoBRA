@@ -1312,7 +1312,10 @@ namespace cobra {
 
         // Early-stop: skip decomposition for linear/semilinear
         // root signature states when the group already has a
-        // FW-verified candidate (e.g., from CoB or pattern match).
+        // compact FW-verified candidate (e.g., from CoB or pattern
+        // match). The cost bound (2*n+1) ensures decomposition
+        // still runs when the algebraic path found a bloated result
+        // that decomposition might improve.
         // Only at depth 0: child states inherit classification from
         // the parent but may represent different sub-problems (e.g.,
         // a polynomial residual from a semilinear parent).
@@ -1321,15 +1324,21 @@ namespace cobra {
         if (item.signature_recursion_depth == 0 && ctx.evaluator && item.group_id.has_value()
             && item.features.classification
             && (item.features.classification->semantic == SemanticClass::kLinear
-                || item.features.classification->semantic == SemanticClass::kSemilinear)
-            && HasVerifiedCandidate(ctx.competition_groups, *item.group_id))
+                || item.features.classification->semantic == SemanticClass::kSemilinear))
         {
-            return Ok(
-                PassResult{
-                    .decision    = PassDecision::kNoProgress,
-                    .disposition = ItemDisposition::kRetainCurrent,
-                }
-            );
+            const auto &early_sub = std::get< SignatureStatePayload >(item.payload).ctx;
+            auto early_nvars      = static_cast< uint32_t >(early_sub.real_vars.size());
+            if (HasVerifiedCandidate(
+                    ctx.competition_groups, *item.group_id, 2 * early_nvars + 1
+                ))
+            {
+                return Ok(
+                    PassResult{
+                        .decision    = PassDecision::kNoProgress,
+                        .disposition = ItemDisposition::kRetainCurrent,
+                    }
+                );
+            }
         }
 
         if (item.signature_recursion_depth >= 2) {
@@ -1500,18 +1509,33 @@ namespace cobra {
         }
 
         // Early-stop: skip decomposition for linear/semilinear
-        // expressions when the group already has a verified candidate.
+        // expressions when the group already has a compact verified
+        // candidate. The cost bound (2*n+1) preserves competition
+        // when the algebraic path found a bloated result.
+        // Unlike RunSignatureBitwiseDecompose, this omits the depth==0
+        // and ctx.evaluator guards because:
+        //  - Hybrid is already gated at signature_recursion_depth >= 1,
+        //    so it only runs at root level (depth guard is implicit).
+        //  - kVerified is only set after full-width verification
+        //    (SubmitCandidate path), so the check is sound even without
+        //    an evaluator guard.
         if (item.group_id.has_value() && item.features.classification
             && (item.features.classification->semantic == SemanticClass::kLinear
-                || item.features.classification->semantic == SemanticClass::kSemilinear)
-            && HasVerifiedCandidate(ctx.competition_groups, *item.group_id))
+                || item.features.classification->semantic == SemanticClass::kSemilinear))
         {
-            return Ok(
-                PassResult{
-                    .decision    = PassDecision::kNoProgress,
-                    .disposition = ItemDisposition::kRetainCurrent,
-                }
-            );
+            const auto &early_sub = std::get< SignatureStatePayload >(item.payload).ctx;
+            auto early_nvars      = static_cast< uint32_t >(early_sub.real_vars.size());
+            if (HasVerifiedCandidate(
+                    ctx.competition_groups, *item.group_id, 2 * early_nvars + 1
+                ))
+            {
+                return Ok(
+                    PassResult{
+                        .decision    = PassDecision::kNoProgress,
+                        .disposition = ItemDisposition::kRetainCurrent,
+                    }
+                );
+            }
         }
 
         if (item.signature_recursion_depth >= 1) {
