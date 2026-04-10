@@ -32,6 +32,7 @@ Pass these to the `cmake -S dependencies` step:
 | `USE_EXTERNAL_LLVM` | ON | Use system LLVM (OFF = build from source) |
 | `USE_EXTERNAL_ABSEIL` | OFF | Use system abseil (OFF = build from source) |
 | `USE_EXTERNAL_HIGHWAY` | OFF | Use system highway (OFF = build from source) |
+| `USE_EXTERNAL_NANOBIND` | OFF | Use system nanobind (OFF = build from source) |
 | `COBRA_BUILD_TESTS` | OFF | Build GoogleTest for tests |
 | `USE_EXTERNAL_GOOGLETEST` | OFF | Use system GoogleTest (OFF = build from source) |
 | `COBRA_ENABLE_Z3` | OFF | Enable Z3 support (requires lib/verify implementation) |
@@ -45,6 +46,7 @@ Pass these to the `cmake -S .` step:
 |--------|---------|-------------|
 | `COBRA_BUILD_LLVM_PASS` | OFF | Build the LLVM pass plugin (requires LLVM 19-22) |
 | `COBRA_BUILD_TESTS` | OFF | Build tests (requires GoogleTest in prefix) |
+| `COBRA_BUILD_PYTHON_BINDINGS` | OFF | Builds the Python module (requires nanobind) |
 
 ## With LLVM Pass Plugin
 

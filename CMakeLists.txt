@@ -6,6 +6,17 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+if (CMAKE_EXPORT_COMPILE_COMMANDS AND UNIX)
+    set(_cobra_cc_src "${CMAKE_SOURCE_DIR}/compile_commands.json")
+    set(_cobra_cc_bin "${CMAKE_BINARY_DIR}/compile_commands.json")
+    if (NOT EXISTS "${_cobra_cc_src}")
+        execute_process(
+            COMMAND ${CMAKE_COMMAND} -E create_symlink "${_cobra_cc_bin}" "${_cobra_cc_src}"
+            OUTPUT_QUIET ERROR_QUIET
+        )
+    endif()
+endif()
+
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
@@ -57,6 +68,7 @@ add_link_options(
 
 option(COBRA_BUILD_LLVM_PASS "Build the LLVM pass plugin (requires LLVM 19-22)" OFF)
 option(COBRA_BUILD_TESTS "Build tests (requires GoogleTest in prefix)" OFF)
+option(COBRA_BUILD_PYTHON_BINDINGS "Build Python bindings (nanobind)" OFF)
 option(COBRA_ENABLE_TRACE "Enable detailed pipeline tracing to stderr (debug builds)" OFF)
 option(COBRA_ENABLE_TRACY "Enable Tracy profiler instrumentation" OFF)
 
@@ -91,6 +103,10 @@ endif()
 
 if(COBRA_BUILD_LLVM_PASS)
     add_subdirectory(lib/llvm)
+endif()
+
+if(COBRA_BUILD_PYTHON_BINDINGS)
+    add_subdirectory(lib/bindings/python)
 endif()
 
 if(COBRA_BUILD_TESTS)
