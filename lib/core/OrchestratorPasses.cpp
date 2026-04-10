@@ -7,6 +7,7 @@
 #include "SemilinearPasses.h"
 #include "SignaturePasses.h"
 #include "SimplifierInternal.h"
+#include "cobra/core/AnfTransform.h"
 #include "cobra/core/AuxVarEliminator.h"
 #include "cobra/core/BitWidth.h"
 #include "cobra/core/Classifier.h"
@@ -16,7 +17,9 @@
 #include "cobra/core/MixedProductRewriter.h"
 #include "cobra/core/PatternMatcher.h"
 #include "cobra/core/Profile.h"
+#include "cobra/core/SignatureChecker.h"
 #include "cobra/core/SignatureEval.h"
+#include "cobra/core/SignatureSimplifier.h"
 
 #include <functional>
 #include <numeric>
@@ -371,6 +374,109 @@ namespace cobra {
                 result.disposition = ItemDisposition::kRetainCurrent;
                 result.next.push_back(std::move(cand_item));
                 return Ok(std::move(result));
+            }
+        }
+
+        // Step 2b: Semantic bitwise fast path.
+        // If the boolean signature is in {0,1}, compute ANF directly
+        // and verify at full width.  If verified, emit as a solved
+        // candidate — this short-circuits the full signature pipeline
+        // and prevents expensive exploration passes from starting.
+        //
+        // For internal items (with an existing group_id) the item is
+        // CONSUMED to prevent a double-release: the candidate inherits
+        // the group_id and the main-loop acceptance path will release
+        // the handle.  For top-level items the AST is retained as a
+        // fallback in case verification fails downstream.
+        if (IsBooleanValued(sig) && num_vars <= ctx.opts.max_vars) {
+            auto anf      = ComputeAnf(sig, num_vars);
+            auto anf_expr = BuildAnfExpr(anf, num_vars);
+
+            if (active_eval.has_value()) {
+                auto fw = FullWidthCheckEval(*active_eval, num_vars, *anf_expr, ctx.bitwidth);
+                if (fw.passed) {
+                    // Items with a solve_ctx live in a lifted
+                    // variable space that differs from the global
+                    // original_vars, so RunVerifyCandidate cannot
+                    // remap them.  We already verified at full width
+                    // via active_eval; the parent continuation
+                    // handles original-space verification.
+                    bool needs_osv = true;
+                    if (auto *a = std::get_if< AstPayload >(&item.payload)) {
+                        if (a->solve_ctx.has_value()) { needs_osv = false; }
+                    }
+
+                    auto cost_info = ComputeCost(*anf_expr);
+                    WorkItem cand_item;
+                    cand_item.payload = CandidatePayload{
+                        .expr                              = std::move(anf_expr),
+                        .real_vars                         = active_vars,
+                        .cost                              = cost_info.cost,
+                        .producing_pass                    = PassId::kBuildSignatureState,
+                        .needs_original_space_verification = needs_osv,
+                    };
+                    cand_item.features              = item.features;
+                    cand_item.metadata              = item.metadata;
+                    cand_item.metadata.verification = VerificationState::kVerified;
+                    cand_item.metadata.sig_vector   = sig;
+                    cand_item.depth                 = item.depth;
+                    cand_item.rewrite_gen           = item.rewrite_gen;
+                    cand_item.attempted_mask        = item.attempted_mask;
+                    cand_item.history               = item.history;
+                    cand_item.group_id              = item.group_id;
+
+                    PassResult result;
+                    result.decision    = PassDecision::kSolvedCandidate;
+                    // Internal items: consume to avoid double-release
+                    // on the parent group (candidate's acceptance
+                    // path releases the handle).
+                    // Top-level items: retain for fallback exploration.
+                    result.disposition = item.group_id.has_value()
+                        ? ItemDisposition::kConsumeCurrent
+                        : ItemDisposition::kRetainCurrent;
+                    result.next.push_back(std::move(cand_item));
+                    return Ok(std::move(result));
+                }
+
+                // Step 2c: Product-shadow repair.
+                // The ANF uses AND for products (correct on {0,1}),
+                // but full-width diverges because AND ≠ MUL.
+                // Replace AND(var,var) with MUL and re-verify.
+                // O(nodes) tree walk — no recursive Simplify.
+                {
+                    auto repaired = RepairProductShadow(CloneExpr(*anf_expr));
+                    auto repair_fw =
+                        FullWidthCheckEval(*active_eval, num_vars, *repaired, ctx.bitwidth);
+                    if (repair_fw.passed) {
+                        bool needs_osv = false;
+                        auto cost_info = ComputeCost(*repaired);
+                        WorkItem cand_item;
+                        cand_item.payload = CandidatePayload{
+                            .expr                              = std::move(repaired),
+                            .real_vars                         = active_vars,
+                            .cost                              = cost_info.cost,
+                            .producing_pass                    = PassId::kBuildSignatureState,
+                            .needs_original_space_verification = needs_osv,
+                        };
+                        cand_item.features              = item.features;
+                        cand_item.metadata              = item.metadata;
+                        cand_item.metadata.verification = VerificationState::kVerified;
+                        cand_item.metadata.sig_vector   = sig;
+                        cand_item.depth                 = item.depth;
+                        cand_item.rewrite_gen           = item.rewrite_gen;
+                        cand_item.attempted_mask        = item.attempted_mask;
+                        cand_item.history               = item.history;
+                        cand_item.group_id              = item.group_id;
+
+                        PassResult result;
+                        result.decision    = PassDecision::kSolvedCandidate;
+                        result.disposition = item.group_id.has_value()
+                            ? ItemDisposition::kConsumeCurrent
+                            : ItemDisposition::kRetainCurrent;
+                        result.next.push_back(std::move(cand_item));
+                        return Ok(std::move(result));
+                    }
+                }
             }
         }
 
@@ -833,7 +939,13 @@ namespace cobra {
         }
         group.continuation = std::move(cont);
 
-        auto cls = ClassifyStructural(*skel->outer_expr);
+        // Pre-simplify collapsible subtrees in the outer expression.
+        // Lifting often exposes small identity shells (e.g., r0 + r1 + 1 +
+        // (~r0 | ~r1) → r0 | r1) that pattern matching can collapse before
+        // classification computes structural flags.
+        auto outer = SimplifyPatternSubtrees(CloneExpr(*skel->outer_expr), ctx.bitwidth);
+
+        auto cls = ClassifyStructural(*outer);
 
         // Build a proper outer evaluator so downstream families
         // (decomposition, signature) can verify against the
@@ -841,11 +953,11 @@ namespace cobra {
         auto solve_ctx = skel->outer_ctx; // copy before moving outer_expr
         auto outer_bw  = ctx.bitwidth;
         solve_ctx.evaluator =
-            Evaluator::FromExpr(*skel->outer_expr, outer_bw, EvaluatorTraceKind::kLiftedOuter);
+            Evaluator::FromExpr(*outer, outer_bw, EvaluatorTraceKind::kLiftedOuter);
 
         WorkItem child;
         child.payload = AstPayload{
-            .expr           = CloneExpr(*skel->outer_expr),
+            .expr           = std::move(outer),
             .classification = cls,
             .provenance     = Provenance::kRewritten,
             .solve_ctx      = std::move(solve_ctx),

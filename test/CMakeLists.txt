@@ -39,6 +39,7 @@ cobra_add_test(test_math_utils core/test_math_utils.cpp)
 cobra_add_test(test_singleton_power_recovery core/test_singleton_power_recovery.cpp)
 cobra_add_test(test_singleton_power_expr_builder core/test_singleton_power_expr_builder.cpp)
 cobra_add_test(test_signature_eval core/test_signature_eval.cpp)
+cobra_add_test(test_dynamic_mask core/test_dynamic_mask.cpp)
 cobra_add_test(test_mixed_product_rewriter core/test_mixed_product_rewriter.cpp)
 cobra_add_test(test_expr_cost core/test_expr_cost.cpp)
 cobra_add_test(test_multivar_poly_recovery core/test_multivar_poly_recovery.cpp)
@@ -314,6 +315,42 @@ target_include_directories(test_linear_exhausted_audit PRIVATE
 target_compile_definitions(test_linear_exhausted_audit PRIVATE
     DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
 
+# GAMBA shortcut mining audit (manual, not auto-discovered)
+add_executable(test_gamba_shortcut_audit EXCLUDE_FROM_ALL verify/test_gamba_shortcut_audit.cpp
+               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(test_gamba_shortcut_audit PRIVATE cobra-core GTest::gtest_main)
+target_include_directories(test_gamba_shortcut_audit PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+target_compile_definitions(test_gamba_shortcut_audit PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
+# NeuReduce profiling (manual, not auto-discovered)
+add_executable(test_neureduce_profile EXCLUDE_FROM_ALL verify/test_neureduce_profile.cpp
+               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(test_neureduce_profile PRIVATE cobra-core GTest::gtest_main)
+target_include_directories(test_neureduce_profile PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+target_compile_definitions(test_neureduce_profile PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
+# Fastpath delta taxonomy (manual, not auto-discovered)
+add_executable(test_fastpath_delta_taxonomy EXCLUDE_FROM_ALL verify/test_fastpath_delta_taxonomy.cpp
+               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(test_fastpath_delta_taxonomy PRIVATE cobra-core GTest::gtest_main)
+target_include_directories(test_fastpath_delta_taxonomy PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+target_compile_definitions(test_fastpath_delta_taxonomy PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
+# Linear AoB pipeline audit (manual, not auto-discovered)
+add_executable(test_linear_aob_pipeline_audit EXCLUDE_FROM_ALL verify/test_linear_aob_pipeline_audit.cpp
+               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(test_linear_aob_pipeline_audit PRIVATE cobra-core GTest::gtest_main)
+target_include_directories(test_linear_aob_pipeline_audit PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+target_compile_definitions(test_linear_aob_pipeline_audit PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
 # MSiMBA ground truth diagnostic (manual, not auto-discovered)
 add_executable(test_msimba_groundtruth verify/test_msimba_groundtruth.cpp
                ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
@@ -344,6 +381,38 @@ target_include_directories(test_extended_semantics_tier2 PRIVATE
     ${PROJECT_SOURCE_DIR}/tools/cobra-cli
     ${PROJECT_SOURCE_DIR}/test/verify)
 target_compile_definitions(test_extended_semantics_tier2 PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
+# Semantic bitwise audit (manual, not auto-discovered)
+add_executable(bench_semantic_bitwise_audit bench/bench_semantic_bitwise_audit.cpp
+               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(bench_semantic_bitwise_audit PRIVATE cobra-core GTest::gtest_main)
+target_include_directories(bench_semantic_bitwise_audit PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+target_compile_definitions(bench_semantic_bitwise_audit PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
+# Mask pattern audit (manual, not auto-discovered)
+add_executable(bench_mask_audit bench/bench_mask_audit.cpp
+               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(bench_mask_audit PRIVATE cobra-core GTest::gtest_main)
+target_include_directories(bench_mask_audit PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+target_compile_definitions(bench_mask_audit PRIVATE
+    DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
+
+# Signature eval microbenchmark (manual, not auto-discovered)
+add_executable(bench_signature_eval bench/bench_signature_eval.cpp)
+target_link_libraries(bench_signature_eval PRIVATE cobra-core GTest::gtest_main)
+
+# Signature pipeline profiling (manual, not auto-discovered)
+# Requires COBRA_SIG_STATS — rebuild cobra-core with it for counters.
+add_executable(bench_signature_pipeline bench/bench_signature_pipeline.cpp
+               ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
+target_link_libraries(bench_signature_pipeline PRIVATE cobra-core GTest::gtest_main)
+target_include_directories(bench_signature_pipeline PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+target_compile_definitions(bench_signature_pipeline PRIVATE
     DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
 
 # LLVM pass FileCheck tests (only when pass is built)

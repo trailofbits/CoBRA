@@ -851,12 +851,21 @@ namespace cobra {
         if (mapped_eval) {
             auto fw = FullWidthCheckEval(*mapped_eval, num_vars, *anf_expr, ctx.bitwidth);
             if (!fw.passed) {
-                return Ok(
-                    PassResult{
-                        .decision    = PassDecision::kNoProgress,
-                        .disposition = ItemDisposition::kRetainCurrent,
-                    }
-                );
+                // Product-shadow repair: AND = MUL on {0,1} but not
+                // at full width. Try replacing AND(var,var) with MUL.
+                auto repaired = RepairProductShadow(CloneExpr(*anf_expr));
+                auto repair_fw =
+                    FullWidthCheckEval(*mapped_eval, num_vars, *repaired, ctx.bitwidth);
+                if (repair_fw.passed) {
+                    anf_expr = std::move(repaired);
+                } else {
+                    return Ok(
+                        PassResult{
+                            .decision    = PassDecision::kNoProgress,
+                            .disposition = ItemDisposition::kRetainCurrent,
+                        }
+                    );
+                }
             }
         }
 
@@ -1301,6 +1310,28 @@ namespace cobra {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
 
+        // Early-stop: skip decomposition for linear/semilinear
+        // root signature states when the group already has a
+        // FW-verified candidate (e.g., from CoB or pattern match).
+        // Only at depth 0: child states inherit classification from
+        // the parent but may represent different sub-problems (e.g.,
+        // a polynomial residual from a semilinear parent).
+        // Only when an evaluator exists: kVerified without an
+        // evaluator means signature-checked only, not FW-verified.
+        if (item.signature_recursion_depth == 0 && ctx.evaluator && item.group_id.has_value()
+            && item.features.classification
+            && (item.features.classification->semantic == SemanticClass::kLinear
+                || item.features.classification->semantic == SemanticClass::kSemilinear)
+            && HasVerifiedCandidate(ctx.competition_groups, *item.group_id))
+        {
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kNoProgress,
+                    .disposition = ItemDisposition::kRetainCurrent,
+                }
+            );
+        }
+
         if (item.signature_recursion_depth >= 2) {
             return Ok(
                 PassResult{
@@ -1466,6 +1497,21 @@ namespace cobra {
     RunSignatureHybridDecompose(const WorkItem &item, OrchestratorContext &ctx) {
         if (!std::holds_alternative< SignatureStatePayload >(item.payload)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
+        }
+
+        // Early-stop: skip decomposition for linear/semilinear
+        // expressions when the group already has a verified candidate.
+        if (item.group_id.has_value() && item.features.classification
+            && (item.features.classification->semantic == SemanticClass::kLinear
+                || item.features.classification->semantic == SemanticClass::kSemilinear)
+            && HasVerifiedCandidate(ctx.competition_groups, *item.group_id))
+        {
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kNoProgress,
+                    .disposition = ItemDisposition::kRetainCurrent,
+                }
+            );
         }
 
         if (item.signature_recursion_depth >= 1) {

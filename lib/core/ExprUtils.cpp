@@ -340,4 +340,16 @@ namespace cobra {
         return expr;
     }
 
+    std::unique_ptr< Expr > RepairProductShadow(std::unique_ptr< Expr > expr) {
+        for (auto &child : expr->children) { child = RepairProductShadow(std::move(child)); }
+
+        if (expr->kind == Expr::Kind::kAnd && expr->children.size() == 2
+            && HasVarDep(*expr->children[0]) && HasVarDep(*expr->children[1]))
+        {
+            return Expr::Mul(std::move(expr->children[0]), std::move(expr->children[1]));
+        }
+
+        return expr;
+    }
+
 } // namespace cobra

@@ -1666,3 +1666,61 @@ TEST(SimplifierTest, Issue9_CarryPropagation) {
                                << " but fails full-width check";
     }
 }
+
+// ---------------------------------------------------------------
+// Dynamic masking: root-level (2^m - 1) & g
+// ---------------------------------------------------------------
+
+TEST(SimplifierTest, DynamicMask_8bit_XPlusY) {
+    // 0xFF & (x + y + (~x | ~y) + 1)  →  at 8-bit this is  x | y
+    // The identity  x + y + (~x | ~y) + 1 = x | y  holds at any width.
+    auto inner = Expr::Add(
+        Expr::Add(
+            Expr::Add(Expr::Variable(0), Expr::Variable(1)),
+            Expr::BitwiseOr(
+                Expr::BitwiseNot(Expr::Variable(0)), Expr::BitwiseNot(Expr::Variable(1))
+            )
+        ),
+        Expr::Constant(1)
+    );
+    auto masked = Expr::BitwiseAnd(Expr::Constant(0xFF), std::move(inner));
+
+    std::vector< std::string > vars = { "x", "y" };
+    auto sig                        = EvaluateBooleanSignature(*masked, 2, 64);
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
+
+    auto result = Simplify(sig, vars, masked.get(), opts);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->kind, SimplifyOutcome::Kind::kSimplified);
+
+    // Verify the result is correct at full 64-bit width.
+    auto eval  = Evaluator::FromExpr(*masked, 64);
+    auto check = FullWidthCheckEval(eval, 2, *result->expr, 64);
+    EXPECT_TRUE(check.passed);
+
+    // The simplified result should be cheaper than the input.
+    EXPECT_LT(
+        ComputeCost(*result->expr).cost.weighted_size, ComputeCost(*masked).cost.weighted_size
+    );
+}
+
+TEST(SimplifierTest, DynamicMask_4bit_Constant) {
+    // 0xF & (x + ~x + 1)  →  0xF & 0 = 0
+    // x + ~x + 1 = 0 at any width (two's complement identity).
+    auto inner = Expr::Add(
+        Expr::Add(Expr::Variable(0), Expr::BitwiseNot(Expr::Variable(0))), Expr::Constant(1)
+    );
+    auto masked = Expr::BitwiseAnd(std::move(inner), Expr::Constant(0xF));
+
+    std::vector< std::string > vars = { "x" };
+    auto sig                        = EvaluateBooleanSignature(*masked, 1, 64);
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
+
+    auto result = Simplify(sig, vars, masked.get(), opts);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->kind, SimplifyOutcome::Kind::kSimplified);
+
+    auto eval  = Evaluator::FromExpr(*masked, 64);
+    auto check = FullWidthCheckEval(eval, 1, *result->expr, 64);
+    EXPECT_TRUE(check.passed);
+}

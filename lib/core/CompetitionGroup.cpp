@@ -52,6 +52,15 @@ namespace cobra {
         return true;
     }
 
+    bool HasVerifiedCandidate(
+        const absl::flat_hash_map< GroupId, CompetitionGroup > &groups, GroupId group_id
+    ) {
+        auto it = groups.find(group_id);
+        if (it == groups.end()) { return false; }
+        return it->second.best.has_value()
+            && it->second.best->verification == VerificationState::kVerified;
+    }
+
     std::optional< WorkItem >
     ReleaseHandle(absl::flat_hash_map< GroupId, CompetitionGroup > &groups, GroupId group_id) {
         auto it = groups.find(group_id);

@@ -3,11 +3,15 @@
 #include "SemilinearPasses.h"
 #include "SimplifierInternal.h"
 #include "cobra/core/AuxVarEliminator.h"
+#include "cobra/core/BitWidth.h"
+#include "cobra/core/DynamicMask.h"
 #include "cobra/core/ExprCost.h"
 #include "cobra/core/ExprUtils.h"
 #include "cobra/core/PatternMatcher.h"
 #include "cobra/core/Profile.h"
+#include "cobra/core/SignatureChecker.h"
 #include "cobra/core/SignatureEval.h"
+#include "cobra/core/SignatureSimplifier.h"
 #include "cobra/core/Simplifier.h"
 #include "cobra/core/SimplifyOutcome.h"
 #include "cobra/core/Trace.h"
@@ -807,6 +811,40 @@ namespace cobra {
     ) {
         COBRA_ZONE_N("Simplify");
         COBRA_ZONE_VALUE(static_cast< int64_t >(vars.size()));
+
+        // Dynamic masking: if the root is (2^m - 1) & g and g contains
+        // no right shifts, try solving g under bitwidth=m. Modular
+        // arithmetic for {+, -, *, &, |, ^, ~} is homomorphic, so
+        // (2^m - 1) & f(x)|_{bw=64} = f(x)|_{bw=m}.
+        if (input_expr != nullptr) {
+            auto mask = DetectRootLowBitMask(*input_expr, opts.bitwidth);
+            if (mask.has_value() && !ContainsShr(*mask->inner)) {
+                auto inner      = CloneExpr(*mask->inner);
+                uint32_t eff_bw = mask->effective_width;
+                auto inner_sig  = EvaluateBooleanSignature(
+                    *inner, static_cast< uint32_t >(vars.size()), eff_bw
+                );
+                Options inner_opts   = opts;
+                inner_opts.bitwidth  = eff_bw;
+                inner_opts.evaluator = Evaluator{};
+                auto result          = Simplify(inner_sig, vars, inner.get(), inner_opts);
+                if (result.has_value() && result->kind == SimplifyOutcome::Kind::kSimplified) {
+                    auto wrapped = Expr::BitwiseAnd(
+                        std::move(result->expr), Expr::Constant(Bitmask(eff_bw))
+                    );
+                    auto eval  = Evaluator::FromExpr(*input_expr, opts.bitwidth);
+                    auto check = FullWidthCheckEval(
+                        eval, static_cast< uint32_t >(vars.size()), *wrapped, opts.bitwidth
+                    );
+                    if (check.passed) {
+                        result->expr = std::move(wrapped);
+                        return result;
+                    }
+                }
+                // Mask reduction failed — fall through to full-width solve.
+            }
+        }
+
         Options effective_opts = opts;
         if (input_expr != nullptr && !opts.evaluator) {
             effective_opts.evaluator = Evaluator::FromExpr(*input_expr, opts.bitwidth);

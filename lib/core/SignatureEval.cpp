@@ -2,7 +2,9 @@
 #include "cobra/core/BitWidth.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/Profile.h"
+#include "cobra/core/SignatureEvalStats.h"
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -87,19 +89,33 @@ namespace cobra {
             return std::vector< uint64_t >(len, 0);
         }
 
+        uint32_t CountNodesLocal(const Expr &e) {
+            uint32_t n = 1;
+            for (const auto &c : e.children) { n += CountNodesLocal(*c); }
+            return n;
+        }
+
     } // namespace
 
     std::vector< uint64_t >
     EvaluateBooleanSignature(const Expr &expr, uint32_t num_vars, uint32_t bitwidth) {
         COBRA_ZONE_N("EvaluateBooleanSignature");
-        const size_t kLen = size_t{ 1 } << num_vars;
-        return EvalSigRecursive(expr, kLen, bitwidth);
+        [[maybe_unused]] auto t0 = std::chrono::high_resolution_clock::now();
+        const size_t kLen        = size_t{ 1 } << num_vars;
+        auto result              = EvalSigRecursive(expr, kLen, bitwidth);
+#ifdef COBRA_SIG_STATS
+        auto t1   = std::chrono::high_resolution_clock::now();
+        double us = std::chrono::duration< double, std::micro >(t1 - t0).count();
+        SigStatsRecordExpr(num_vars, CountNodesLocal(expr), us);
+#endif
+        return result;
     }
 
     std::vector< uint64_t >
     EvaluateBooleanSignature(const Evaluator &eval, uint32_t num_vars, uint32_t bitwidth) {
-        const size_t kLen    = size_t{ 1 } << num_vars;
-        const uint64_t kMask = Bitmask(bitwidth);
+        [[maybe_unused]] auto t0 = std::chrono::high_resolution_clock::now();
+        const size_t kLen        = size_t{ 1 } << num_vars;
+        const uint64_t kMask     = Bitmask(bitwidth);
         std::vector< uint64_t > sig(kLen);
         std::vector< uint64_t > point(num_vars);
         EvaluatorWorkspace workspace;
@@ -109,7 +125,43 @@ namespace cobra {
                                              : eval(point))
                 & kMask;
         }
+#ifdef COBRA_SIG_STATS
+        auto t1   = std::chrono::high_resolution_clock::now();
+        double us = std::chrono::duration< double, std::micro >(t1 - t0).count();
+        SigStatsRecordEval(num_vars, us);
+#endif
         return sig;
     }
+
+    // ---------------------------------------------------------------
+    // Stats implementation (only when COBRA_SIG_STATS is defined)
+    // ---------------------------------------------------------------
+
+#ifdef COBRA_SIG_STATS
+
+    namespace {
+        thread_local SigEvalStats tl_stats{};
+    }
+
+    void SigStatsRecordExpr(uint32_t num_vars, uint32_t node_count, double elapsed_us) {
+        tl_stats.calls++;
+        tl_stats.expr_calls++;
+        tl_stats.total_points += size_t{ 1 } << num_vars;
+        tl_stats.total_nodes  += node_count;
+        tl_stats.total_us     += elapsed_us;
+    }
+
+    void SigStatsRecordEval(uint32_t num_vars, double elapsed_us) {
+        tl_stats.calls++;
+        tl_stats.eval_calls++;
+        tl_stats.total_points += size_t{ 1 } << num_vars;
+        tl_stats.total_us     += elapsed_us;
+    }
+
+    SigEvalStats SigStatsSnapshot() { return tl_stats; }
+
+    void SigStatsReset() { tl_stats = SigEvalStats{}; }
+
+#endif
 
 } // namespace cobra

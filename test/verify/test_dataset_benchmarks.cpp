@@ -388,8 +388,8 @@ TEST(GAMBADataset, QSynthEA) {
     // Every unsupported result carries a structured reason code.
     EXPECT_EQ(stats.has_structured_reason, stats.unsupported);
     EXPECT_EQ(stats.by_category[ReasonCategory::kVerifyFailed], 7);
-    EXPECT_EQ(stats.by_category[ReasonCategory::kGuardFailed], 9);
-    EXPECT_EQ(stats.by_category[ReasonCategory::kSearchExhausted], 18);
+    EXPECT_EQ(stats.by_category[ReasonCategory::kGuardFailed], 7);
+    EXPECT_EQ(stats.by_category[ReasonCategory::kSearchExhausted], 20);
 
     // Decomposition cause frames propagated into cause_chain.
     // MixedRewrite unsupported outcomes should carry delegated
@@ -404,6 +404,18 @@ TEST(GAMBADataset, LokiTiny) {
     EXPECT_EQ(stats.parsed, 25000);
     // All are linear 2-var (x+y, x&y, x|y, x-y, x^y)
     EXPECT_EQ(stats.simplified, 25000);
+    EXPECT_EQ(stats.unsupported, 0);
+    EXPECT_EQ(stats.failed_simplify, 0);
+}
+
+TEST(GAMBADataset, MbaFlatten) {
+    auto stats = run_dataset(DATASET_DIR "/gamba/mba_flatten.txt");
+    EXPECT_EQ(stats.total, 3008);
+    // 8 headers + 899 sub-expression lines (3-field CSV) +
+    // 41 "cannot be solved by MBA-Solver" (multi-var parse failures)
+    EXPECT_EQ(stats.skipped_parse, 948);
+    EXPECT_EQ(stats.parsed, 2060);
+    EXPECT_EQ(stats.simplified, 2060);
     EXPECT_EQ(stats.unsupported, 0);
     EXPECT_EQ(stats.failed_simplify, 0);
 }
