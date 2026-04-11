@@ -41,6 +41,8 @@ namespace cobra::py {
         std::unique_ptr< Expr > ToExpr() const { return root.ToExpr(); }
 
         void UpdateExpr(const Expr &expr) { root = PyExpr::FromExprNode(expr); }
+
+        void Simplify(bool validate);
     };
 
 } // namespace cobra::py

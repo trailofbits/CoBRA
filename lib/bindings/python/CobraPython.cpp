@@ -1,9 +1,26 @@
 #include "CobraPython.hpp"
 #include "ExprParser.h"
 #include "cobra/core/Classifier.h"
+#include "cobra/core/ExprUtils.h"
+#include "cobra/core/SignatureChecker.h"
+#include "cobra/core/Simplifier.h"
 
 #include <stdexcept>
 #include <string>
+
+namespace {
+    std::vector< uint64_t >
+    EvaluateToSignature(const cobra::Expr &ast, uint32_t num_vars, uint32_t bitwidth) {
+        const size_t kLen = size_t{ 1 } << num_vars;
+        std::vector< uint64_t > sig(kLen);
+        for (size_t i = 0; i < kLen; ++i) {
+            std::vector< uint64_t > var_values(num_vars);
+            for (uint32_t v = 0; v < num_vars; ++v) { var_values[v] = (i >> v) & 1; }
+            sig[i] = cobra::EvalExpr(ast, var_values, bitwidth);
+        }
+        return sig;
+    }
+} // namespace
 
 namespace cobra::py {
 
@@ -109,4 +126,41 @@ namespace cobra::py {
         auto expr = root.ToExpr();
         return cobra::Render(*expr, vars, bitwidth);
     }
+
+    void PyExprTree::Simplify(bool validate = false) {
+        auto expr     = root.ToExpr();
+        auto num_vars = static_cast< uint32_t >(vars.size());
+        auto sig      = EvaluateToSignature(*expr, num_vars, bitwidth);
+
+        cobra::Options opts{ .bitwidth = bitwidth, .max_vars = num_vars, .spot_check = true };
+        opts.evaluator = cobra::Evaluator::FromExpr(
+            *expr, bitwidth, cobra::EvaluatorTraceKind::kCliOriginalAst
+        );
+
+        auto result = cobra::Simplify(sig, vars, expr.get(), opts);
+        if (!result.has_value()) { throw std::runtime_error(result.error().message); }
+
+        auto &outcome = result.value();
+        if (outcome.kind == cobra::SimplifyOutcome::Kind::kError) {
+            throw std::runtime_error(outcome.diag.reason);
+        }
+        if (outcome.kind == cobra::SimplifyOutcome::Kind::kUnchangedUnsupported) { return; }
+
+        if (validate) {
+            std::vector< uint32_t > var_map;
+            if (outcome.real_vars.size() < vars.size()) {
+                var_map = cobra::BuildVarSupport(vars, outcome.real_vars);
+            }
+            auto fw = cobra::FullWidthCheck(*expr, num_vars, *outcome.expr, var_map, bitwidth);
+            if (!fw.passed) {
+                throw std::runtime_error(
+                    "CoB result is only correct on {0,1} inputs (polynomial target)"
+                );
+            }
+        }
+
+        this->root = PyExpr::FromExprNode(*outcome.expr);
+        this->vars = std::move(outcome.real_vars);
+    }
+
 } // namespace cobra::py

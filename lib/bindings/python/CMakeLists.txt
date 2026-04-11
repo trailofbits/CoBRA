@@ -19,7 +19,6 @@ find_package(nanobind CONFIG REQUIRED)
 nanobind_add_module(
   cobra_mba
   PythonInterface.cpp
-  PythonInterface.hpp
   CobraPython.cpp
   CobraPython.hpp
   ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp

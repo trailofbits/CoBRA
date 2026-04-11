@@ -1,3 +1,6 @@
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored \
+    "-Wsign-conversion" // TODO: fix the bindings to have runtime erros for
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
@@ -10,7 +13,7 @@ using namespace nb::literals;
 NB_MODULE(cobra_mba, m) {
     nb::enum_< cobra::Expr::Kind >(m, "ExprKind")
         .value("Constant", cobra::Expr::Kind::kConstant)
-        .value("Variablee", cobra::Expr::Kind::kVariable)
+        .value("Variable", cobra::Expr::Kind::kVariable)
         .value("Add", cobra::Expr::Kind::kAdd)
         .value("Mul", cobra::Expr::Kind::kMul)
         .value("And", cobra::Expr::Kind::kAnd)
@@ -56,7 +59,13 @@ NB_MODULE(cobra_mba, m) {
     )
 
     .def("__str__", &cobra::py::PyExprTree::ToString)
+    .def(
+        "simplify", &cobra::py::PyExprTree::Simplify, "validate"_a = false,
+        "Simplify the expression in place. When validate=true, run full-width checks"
+    )
     .def_rw("variables", &cobra::py::PyExprTree::vars, "List of variable names in the expression")
     .def_rw("root", &cobra::py::PyExprTree::root, "Root expression node")
     .def_rw("bitwidth", &cobra::py::PyExprTree::bitwidth, "Bitwidth of the expression");
 }
+
+#pragma GCC diagnostic pop
