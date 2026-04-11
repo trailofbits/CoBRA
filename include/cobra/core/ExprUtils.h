@@ -44,4 +44,9 @@ namespace cobra {
     /// (And/Or/Xor/Not with variable dependence).
     bool HasNonleafBitwise(const Expr &expr);
 
+    /// Replace AND(var-dep, var-dep) with MUL in an expression tree.
+    /// Corrects the product-shadow divergence where AND = MUL on {0,1}
+    /// but not at full width.
+    std::unique_ptr< Expr > RepairProductShadow(std::unique_ptr< Expr > expr);
+
 } // namespace cobra

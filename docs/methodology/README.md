@@ -107,6 +107,7 @@ The full list of academic references that influenced CoBRA's design:
 | Simplification of General Mixed Boolean-Arithmetic Expressions (GAMBA) | Reichenwallner, Meerwald-Stadler | IEEE EuroS&PW 2023 | [arXiv:2305.06763](https://arxiv.org/abs/2305.06763) |
 | Efficient Normalized Reduction and Generation of Equivalent Multivariate Binary Polynomials | Gamez-Montolio, Florit, Brain, Howe | BAR / NDSS 2024 | [NDSS](https://www.ndss-symposium.org/ndss-paper/auto-draft-436/) · [Open Access PDF](https://openaccess.city.ac.uk/id/eprint/32695/) |
 | Simplifying Mixed Boolean-Arithmetic Obfuscation by Program Synthesis and Term Rewriting (ProMBA) | Lee, Lee | ACM CCS 2023 | [ACM DL](https://dl.acm.org/doi/10.1145/3576915.3623186) |
+| A Mathematical Framework for MBA Simplification (RUMBA) | Royer, Tronel, Vinçont | 2026 | [HAL](https://hal.science/hal-05578742) |
 
 ### Classical Techniques
 

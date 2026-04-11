@@ -32,6 +32,7 @@ target_sources(cobra-core PRIVATE
     SingletonPowerExprBuilder.cpp
     MultivarPolyRecovery.cpp
     SignatureEval.cpp
+    DynamicMask.cpp
     MixedProductRewriter.cpp
     ExprCost.cpp
     SignatureSimplifier.cpp

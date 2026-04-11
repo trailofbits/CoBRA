@@ -1,8 +1,8 @@
 # Dataset Benchmark Report
 
-CoBRA is validated against **73,136 lines** drawn from **34 dataset files** spanning 7 independent sources. Every expression is parsed, simplified, and spot-checked at runtime. The numbers below are enforced by automated test assertions in [`test/verify/test_dataset_benchmarks.cpp`](test/verify/test_dataset_benchmarks.cpp) and verified on every CI run. OSES Fast is currently disabled (OOM on deeply nested expressions); its numbers are from the last successful run on master.
+CoBRA is validated against **76,144 lines** drawn from **35 dataset files** spanning 7 independent sources. Every expression is parsed, simplified, and spot-checked at runtime. The numbers below are enforced by automated test assertions in [`test/verify/test_dataset_benchmarks.cpp`](test/verify/test_dataset_benchmarks.cpp) and verified on every CI run. OSES Fast is currently disabled (OOM on deeply nested expressions); its numbers are from the last successful run on master.
 
-**Overall: 72,960 / 73,066 parsed expressions simplified (99.86%).**
+**Overall: 75,023 / 75,126 parsed expressions simplified (99.86%).**
 
 ---
 
@@ -89,12 +89,14 @@ Source: [GAMBA](https://github.com/DenuvoSoftwareSolutions/GAMBA)
 | `mba_obf_linear.txt` | GAMBA | 1,001 | 1,000 | **1,000** | 0 | **100%** |
 | `mba_obf_nonlinear.txt` | GAMBA | 1,002 | 1,000 | **1,000** | 0 | **100%** |
 | `syntia.txt` | Syntia | 501 | 500 | **500** | 0 | **100%** |
-| `qsynth_ea.txt` | QSynth | 501 | 500 | **463** | 37 | **92.6%** |
+| `qsynth_ea.txt` | QSynth | 501 | 500 | **466** | 34 | **93.2%** |
+| `mba_flatten.txt` | MBA-Flatten | 3,008 | 2,060 | **2,060** | 0 | **100%** |
 
 - **loki_tiny**: 25 sections covering add, subtract, AND, OR, XOR at depths 1-5. All 25,000 are 2-variable linear MBAs.
 - **mba_obf_nonlinear**: 500 polynomial + 500 linear expressions, all with linear ground-truth targets. All 1,000 pass full-width verification.
 - **syntia**: All 500 expressions simplify via the orchestrator's decomposition and lifting passes.
-- **qsynth_ea**: The most challenging dataset. 463 of 500 expressions simplify. The 37 unsupported expressions break down into 8 guard-failed and 29 search-exhausted. All remaining unsupported are mixed bitwise-arithmetic expressions where CoB is boolean-correct but diverges at full width, and polynomial recovery (d=1..4) also fails — a genuine representation gap in carry-sensitive boolean-null residuals.
+- **qsynth_ea**: The most challenging dataset. 466 of 500 expressions simplify. The 34 unsupported expressions are mixed bitwise-arithmetic expressions where CoB is boolean-correct but diverges at full width, and polynomial recovery (d=1..4) also fails — a genuine representation gap in carry-sensitive boolean-null residuals.
+- **mba_flatten**: 3,008 lines across 7 sections (2-4 variable linear, sub-expression, and unsolvable-by-other-tools categories). 948 lines skipped (section headers, 3-field sub-expression rows, and expressions that fail parse). All 2,060 parseable expressions simplify at 100%.
 
 ### OSES Dataset
 
@@ -122,11 +124,11 @@ Source: [oracle-synthesis-meets-equality-saturation](https://github.com/fvrmatte
 
 | Metric | Count |
 |--------|------:|
-| Total dataset lines | 73,136 |
-| Comment/header lines skipped | 70 |
-| **Parsed expressions** | **73,066** |
-| **Simplified** | **72,960** |
-| Unsupported | 106 |
+| Total dataset lines | 76,144 |
+| Comment/header lines skipped | 1,018 |
+| **Parsed expressions** | **75,126** |
+| **Simplified** | **75,023** |
+| Unsupported | 103 |
 | Errors / failures | **0** |
 
 | MBA Class | Expressions | Simplified | Rate |
@@ -145,7 +147,7 @@ All simplified results are validated via spot-check (random-input evaluation) at
 | Source | URL | Datasets |
 |--------|-----|----------|
 | SiMBA | https://github.com/pgarba/SiMBA- | E-series, PLDI, BLAST, test_data |
-| GAMBA | https://github.com/DenuvoSoftwareSolutions/GAMBA | loki_tiny, neureduce, mba_obf_*, syntia, qsynth_ea |
+| GAMBA | https://github.com/DenuvoSoftwareSolutions/GAMBA | loki_tiny, neureduce, mba_obf_*, mba_flatten, syntia, qsynth_ea |
 | QSynth | (via GAMBA) | qsynth_ea |
 | NeuReduce | (via GAMBA) | neureduce |
 | Syntia | (via GAMBA) | syntia |

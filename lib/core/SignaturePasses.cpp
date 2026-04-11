@@ -94,6 +94,36 @@ namespace cobra {
             );
         }
 
+        // Heuristic compactness bound for skipping decomposition when the
+        // algebraic path already found a small verified answer.
+        constexpr uint32_t VerifiedCandidateDecompositionCostBound(uint32_t num_vars) {
+            return 2 * num_vars + 1;
+        }
+
+        bool HasDecompositionShortcutClass(const WorkItem &item) {
+            return item.features.classification
+                && (item.features.classification->semantic == SemanticClass::kLinear
+                    || item.features.classification->semantic == SemanticClass::kSemilinear);
+        }
+
+        bool ShouldSkipDecomposition(
+            const WorkItem &item, const OrchestratorContext &ctx, bool require_root_depth,
+            bool require_global_evaluator
+        ) {
+            if (!item.group_id.has_value() || !HasDecompositionShortcutClass(item)) {
+                return false;
+            }
+            if (require_root_depth && item.signature_recursion_depth != 0) { return false; }
+            if (require_global_evaluator && !ctx.evaluator) { return false; }
+
+            const auto &sub_ctx = std::get< SignatureStatePayload >(item.payload).ctx;
+            auto num_vars       = static_cast< uint32_t >(sub_ctx.real_vars.size());
+            return HasVerifiedCandidate(
+                ctx.competition_groups, *item.group_id,
+                VerifiedCandidateDecompositionCostBound(num_vars)
+            );
+        }
+
         template< typename JoinT >
         std::optional< AstSolveContext > RebuildSolveContext(const JoinT &join) {
             if (!join.has_solve_ctx) { return std::nullopt; }
@@ -851,12 +881,21 @@ namespace cobra {
         if (mapped_eval) {
             auto fw = FullWidthCheckEval(*mapped_eval, num_vars, *anf_expr, ctx.bitwidth);
             if (!fw.passed) {
-                return Ok(
-                    PassResult{
-                        .decision    = PassDecision::kNoProgress,
-                        .disposition = ItemDisposition::kRetainCurrent,
-                    }
-                );
+                // Product-shadow repair: AND = MUL on {0,1} but not
+                // at full width. Try replacing AND(var,var) with MUL.
+                auto repaired = RepairProductShadow(CloneExpr(*anf_expr));
+                auto repair_fw =
+                    FullWidthCheckEval(*mapped_eval, num_vars, *repaired, ctx.bitwidth);
+                if (repair_fw.passed) {
+                    anf_expr = std::move(repaired);
+                } else {
+                    return Ok(
+                        PassResult{
+                            .decision    = PassDecision::kNoProgress,
+                            .disposition = ItemDisposition::kRetainCurrent,
+                        }
+                    );
+                }
             }
         }
 
@@ -1301,6 +1340,21 @@ namespace cobra {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
 
+        // Only at depth 0: child states inherit classification from the parent
+        // but may represent different sub-problems. Only with a global
+        // evaluator: otherwise kVerified may be signature-level only.
+        if (ShouldSkipDecomposition(
+                item, ctx, /*require_root_depth=*/true, /*require_global_evaluator=*/true
+            ))
+        {
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kNoProgress,
+                    .disposition = ItemDisposition::kRetainCurrent,
+                }
+            );
+        }
+
         if (item.signature_recursion_depth >= 2) {
             return Ok(
                 PassResult{
@@ -1466,6 +1520,21 @@ namespace cobra {
     RunSignatureHybridDecompose(const WorkItem &item, OrchestratorContext &ctx) {
         if (!std::holds_alternative< SignatureStatePayload >(item.payload)) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
+        }
+
+        // Hybrid already stops at root level via the recursion-depth guard below.
+        // Unlike bitwise decomposition, kVerified here is only produced after a
+        // full-width-checked submission path, so no extra evaluator guard is needed.
+        if (ShouldSkipDecomposition(
+                item, ctx, /*require_root_depth=*/false, /*require_global_evaluator=*/false
+            ))
+        {
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kNoProgress,
+                    .disposition = ItemDisposition::kRetainCurrent,
+                }
+            );
         }
 
         if (item.signature_recursion_depth >= 1) {
