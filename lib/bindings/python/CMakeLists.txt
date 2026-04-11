@@ -22,7 +22,9 @@ nanobind_add_module(
   PythonInterface.hpp
   CobraPython.cpp
   CobraPython.hpp
+  ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp
 )
 target_link_libraries(cobra_mba PRIVATE cobra-core)
+target_include_directories(cobra_mba PRIVATE ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
 
 

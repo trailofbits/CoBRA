@@ -23,7 +23,20 @@ namespace cobra::py {
     {
         PyExpr root;
         std::vector< std::string > vars;
+        uint32_t bitwidth = 64;
 
-        explicit PyExprTree(const std::string &s, uint32_t max_vars = 16, uint32_t bitwidth = 64);
+        explicit PyExprTree(
+            const PyExpr &expr, std::vector< std::string > vars, uint32_t bitwidth = 64
+        )
+            : root(expr), vars(std::move(vars)), bitwidth(bitwidth) {}
+        explicit PyExprTree(
+            const std::string &s, uint32_t max_vars = 16, uint32_t bitwidth = 64
+        );
+        std::string ToString() const;
+        std::unique_ptr< Expr > ToExpr() const { return root.ToExpr(); }
+        void UpdateExpr(const Expr &expr) { root = PyExpr::FromExprNode(expr); }
+
     };
+
+    
 } // namespace cobra::py

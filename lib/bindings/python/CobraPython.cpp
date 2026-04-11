@@ -1,4 +1,6 @@
 #include "CobraPython.hpp"
+#include "ExprParser.h"
+#include "cobra/core/Classifier.h"
 
 #include <stdexcept>
 #include <string>
@@ -61,10 +63,29 @@ std::unique_ptr< Expr > PyExpr::ToExprNode(const PyExpr &node) {
 }
 
 PyExprTree::PyExprTree(const std::string &s, uint32_t max_vars, uint32_t bitwidth) {
-    (void)s;
-    (void)max_vars;
-    (void)bitwidth;
-    throw std::runtime_error("PyExprTree is not implemented yet");
+    auto parsed = cobra::ParseToAst(s, bitwidth);
+    if (!parsed.has_value()) {
+        throw std::runtime_error(parsed.error().message);
+    }
+
+    auto &ast = parsed.value();
+    if (ast.vars.size() > max_vars) {
+        throw std::runtime_error(
+            "expression has " + std::to_string(ast.vars.size())
+            + " variables (max " + std::to_string(max_vars) + ")"
+        );
+    }
+
+    this->bitwidth = bitwidth;
+
+    auto folded = cobra::FoldConstantBitwise(std::move(ast.expr), bitwidth);
+    root = PyExpr::FromExprNode(*folded);
+    vars = std::move(ast.vars);
+}
+
+std::string PyExprTree::ToString() const {
+    auto expr = root.ToExpr();
+    return cobra::Render(*expr, vars, bitwidth);
 }
 
 } // namespace cobra::py
