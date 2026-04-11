@@ -5,6 +5,7 @@
 #include "cobra/core/PassContract.h"
 #include "cobra/core/Profile.h"
 #include "cobra/core/Simplifier.h"
+#include "dataset_audit_utils.h"
 #include <fstream>
 #include <gtest/gtest.h>
 #include <iostream>
@@ -13,34 +14,10 @@
 #include <tuple>
 
 using namespace cobra;
+using cobra::test_support::find_separator;
+using cobra::test_support::trim;
 
 namespace {
-
-    size_t find_separator(const std::string &line) {
-        // Prefer tab separator (unambiguous), fall back to last
-        // top-level comma for legacy datasets.
-        int depth         = 0;
-        size_t last_comma = std::string::npos;
-        for (size_t i = 0; i < line.size(); ++i) {
-            if (line[i] == '(') {
-                ++depth;
-            } else if (line[i] == ')') {
-                --depth;
-            } else if (line[i] == '\t' && depth == 0) {
-                return i;
-            } else if (line[i] == ',' && depth == 0) {
-                last_comma = i;
-            }
-        }
-        return last_comma;
-    }
-
-    std::string trim(const std::string &s) {
-        size_t start = s.find_first_not_of(" \t\r\n");
-        if (start == std::string::npos) { return ""; }
-        size_t end = s.find_last_not_of(" \t\r\n");
-        return s.substr(start, end - start + 1);
-    }
 
     struct DatasetStats
     {

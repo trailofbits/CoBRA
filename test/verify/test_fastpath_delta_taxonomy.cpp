@@ -29,7 +29,9 @@
 #include "cobra/core/SignatureSimplifier.h"
 #include "cobra/core/Simplifier.h"
 #include "cobra/core/SimplifyOutcome.h"
+#include "dataset_audit_utils.h"
 #include <algorithm>
+#include <bit>
 #include <chrono>
 #include <cstdint>
 #include <fstream>
@@ -42,70 +44,22 @@
 #include <vector>
 
 using namespace cobra;
+using cobra::test_support::find_separator;
+using cobra::test_support::flags_str;
+using cobra::test_support::semantic_str;
+using cobra::test_support::trim;
 
 namespace {
 
     constexpr uint32_t kBw = 64;
 
-    size_t find_separator(const std::string &line) {
-        int depth         = 0;
-        size_t last_comma = std::string::npos;
-        for (size_t i = 0; i < line.size(); ++i) {
-            if (line[i] == '(') {
-                ++depth;
-            } else if (line[i] == ')') {
-                --depth;
-            } else if (line[i] == '\t' && depth == 0) {
-                return i;
-            } else if (line[i] == ',' && depth == 0) {
-                last_comma = i;
-            }
-        }
-        return last_comma;
+    uint64_t abs_signed_delta(uint64_t d) {
+        auto signed_d = static_cast< int64_t >(d);
+        if (signed_d >= 0) { return d; }
+        return static_cast< uint64_t >(~d) + 1U;
     }
 
-    std::string trim(const std::string &s) {
-        size_t start = s.find_first_not_of(" \t\r\n");
-        if (start == std::string::npos) { return ""; }
-        size_t end = s.find_last_not_of(" \t\r\n");
-        return s.substr(start, end - start + 1);
-    }
-
-    std::string semantic_str(SemanticClass sc) {
-        switch (sc) {
-            case SemanticClass::kLinear:
-                return "linear";
-            case SemanticClass::kSemilinear:
-                return "semilinear";
-            case SemanticClass::kPolynomial:
-                return "polynomial";
-            case SemanticClass::kNonPolynomial:
-                return "non-polynomial";
-        }
-        return "?";
-    }
-
-    std::string flags_str(StructuralFlag flags) {
-        std::string s;
-        auto append = [&](StructuralFlag f, const char *name) {
-            if (HasFlag(flags, f)) {
-                if (!s.empty()) { s += "|"; }
-                s += name;
-            }
-        };
-        append(kSfHasBitwise, "BW");
-        append(kSfHasArithmetic, "Arith");
-        append(kSfHasMul, "Mul");
-        append(kSfHasMultilinearProduct, "MultilinProd");
-        append(kSfHasSingletonPower, "SingPow");
-        append(kSfHasSingletonPowerGt2, "SingPow>2");
-        append(kSfHasMixedProduct, "MixedProd");
-        append(kSfHasBitwiseOverArith, "BoA");
-        append(kSfHasArithOverBitwise, "AoB");
-        append(kSfHasMultivarHighPower, "MultivarHiPow");
-        append(kSfHasUnknownShape, "Unknown");
-        return s.empty() ? "none" : s;
-    }
+    uint32_t active_bit_width(uint64_t d) { return static_cast< uint32_t >(std::bit_width(d)); }
 
     // ── Delta classification ──
 
@@ -161,7 +115,7 @@ namespace {
         // Delta properties
         bool delta_zero_on_boolean  = true; // sanity: Δ=0 on {0,1}^n
         uint64_t delta_max_abs      = 0;    // max |Δ| at random FW points
-        uint32_t delta_nonzero_bits = 0;    // how many bits of Δ are active
+        uint32_t delta_nonzero_bits = 0;    // max observed active bit-width of Δ
 
         // Delta classification
         SemanticClass delta_class  = SemanticClass::kLinear;
@@ -313,10 +267,10 @@ namespace {
             // ── Evaluate Δ at random full-width points ──
             {
                 std::mt19937_64 rng(42 + static_cast< uint64_t >(line_num));
-                uint64_t max_abs      = 0;
-                uint32_t nonzero_bits = 0;
-                bool all_same         = true;
-                uint64_t first_val    = 0;
+                uint64_t max_abs         = 0;
+                uint32_t max_active_bits = 0;
+                bool all_same            = true;
+                uint64_t first_val       = 0;
 
                 for (int sample = 0; sample < 32; ++sample) {
                     std::vector< uint64_t > vals(num_vars);
@@ -329,15 +283,13 @@ namespace {
                     }
 
                     // Track magnitude (interpret as signed)
-                    auto signed_d = static_cast< int64_t >(d);
-                    auto abs_d = static_cast< uint64_t >(signed_d < 0 ? -signed_d : signed_d);
-                    max_abs    = std::max(max_abs, abs_d);
+                    max_abs = std::max(max_abs, abs_signed_delta(d));
 
                     // Track active bits
-                    nonzero_bits |= static_cast< uint32_t >(64 - __builtin_clzll(d | 1));
+                    max_active_bits = std::max(max_active_bits, active_bit_width(d));
                 }
                 rec.delta_max_abs      = max_abs;
-                rec.delta_nonzero_bits = nonzero_bits;
+                rec.delta_nonzero_bits = max_active_bits;
                 rec.is_constant_delta  = all_same;
             }
 

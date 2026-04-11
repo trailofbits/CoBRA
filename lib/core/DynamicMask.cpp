@@ -7,7 +7,9 @@ namespace cobra {
     std::optional< uint32_t > IsPowerOfTwoMinusOne(uint64_t val) {
         if (val == 0) { return std::nullopt; }
         uint64_t next = val + 1;
-        // val = 2^m - 1  iff  val+1 is a power of 2
+        // Unsigned wraparound makes UINT64_MAX + 1 become 0, so the
+        // full-width all-ones mask is rejected here. Otherwise,
+        // val = 2^m - 1 iff val + 1 is a power of 2.
         if (!std::has_single_bit(next)) { return std::nullopt; }
         auto m = static_cast< uint32_t >(std::countr_zero(next));
         if (m == 0 || m >= 64) { return std::nullopt; }

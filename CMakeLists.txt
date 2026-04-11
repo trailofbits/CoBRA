@@ -58,6 +58,7 @@ add_link_options(
 option(COBRA_BUILD_LLVM_PASS "Build the LLVM pass plugin (requires LLVM 19-22)" OFF)
 option(COBRA_BUILD_TESTS "Build tests (requires GoogleTest in prefix)" OFF)
 option(COBRA_ENABLE_TRACE "Enable detailed pipeline tracing to stderr (debug builds)" OFF)
+option(COBRA_ENABLE_SIG_STATS "Enable signature evaluation counters for profiling builds" OFF)
 option(COBRA_ENABLE_TRACY "Enable Tracy profiler instrumentation" OFF)
 
 if(COBRA_BUILD_LLVM_PASS)
@@ -77,6 +78,10 @@ add_subdirectory(tools/cobra-cli)
 
 if(COBRA_ENABLE_TRACE)
     target_compile_definitions(cobra-core PUBLIC COBRA_ENABLE_TRACE)
+endif()
+
+if(COBRA_ENABLE_SIG_STATS)
+    target_compile_definitions(cobra-core PUBLIC COBRA_SIG_STATS=1)
 endif()
 
 if(COBRA_ENABLE_TRACY)

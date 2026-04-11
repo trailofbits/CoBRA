@@ -5,7 +5,11 @@
 // aggregate statistics on signature evaluation frequency and cost.
 //
 // Usage: ./bench_signature_pipeline (manual, not in CI)
-// Requires: -DCOBRA_SIG_STATS=1 at compile time
+// Requires: configuring with -DCOBRA_ENABLE_SIG_STATS=ON
+
+#ifndef COBRA_SIG_STATS
+    #error "bench_signature_pipeline requires configuring with -DCOBRA_ENABLE_SIG_STATS=ON"
+#endif
 
 #include "ExprParser.h"
 #include "cobra/core/Expr.h"

@@ -31,6 +31,7 @@
 #include "cobra/core/SignatureSimplifier.h"
 #include "cobra/core/Simplifier.h"
 #include "cobra/core/SimplifyOutcome.h"
+#include "dataset_audit_utils.h"
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -45,74 +46,14 @@
 #include <vector>
 
 using namespace cobra;
+using cobra::test_support::find_separator;
+using cobra::test_support::flags_str;
+using cobra::test_support::semantic_str;
+using cobra::test_support::trim;
 
 namespace {
 
     constexpr uint32_t kBw = 64;
-
-    // ── Dataset parsing (shared with other audits) ──
-
-    size_t find_separator(const std::string &line) {
-        int depth         = 0;
-        size_t last_comma = std::string::npos;
-        for (size_t i = 0; i < line.size(); ++i) {
-            if (line[i] == '(') {
-                ++depth;
-            } else if (line[i] == ')') {
-                --depth;
-            } else if (line[i] == '\t' && depth == 0) {
-                return i;
-            } else if (line[i] == ',' && depth == 0) {
-                last_comma = i;
-            }
-        }
-        return last_comma;
-    }
-
-    std::string trim(const std::string &s) {
-        size_t start = s.find_first_not_of(" \t\r\n");
-        if (start == std::string::npos) { return ""; }
-        size_t end = s.find_last_not_of(" \t\r\n");
-        return s.substr(start, end - start + 1);
-    }
-
-    // ── Classification helpers ──
-
-    std::string semantic_str(SemanticClass sc) {
-        switch (sc) {
-            case SemanticClass::kLinear:
-                return "linear";
-            case SemanticClass::kSemilinear:
-                return "semilinear";
-            case SemanticClass::kPolynomial:
-                return "polynomial";
-            case SemanticClass::kNonPolynomial:
-                return "non-polynomial";
-        }
-        return "?";
-    }
-
-    std::string flags_str(StructuralFlag flags) {
-        std::string s;
-        auto append = [&](StructuralFlag f, const char *name) {
-            if (HasFlag(flags, f)) {
-                if (!s.empty()) { s += "|"; }
-                s += name;
-            }
-        };
-        append(kSfHasBitwise, "BW");
-        append(kSfHasArithmetic, "Arith");
-        append(kSfHasMul, "Mul");
-        append(kSfHasMultilinearProduct, "MultilinProd");
-        append(kSfHasSingletonPower, "SingPow");
-        append(kSfHasSingletonPowerGt2, "SingPow>2");
-        append(kSfHasMixedProduct, "MixedProd");
-        append(kSfHasBitwiseOverArith, "BoA");
-        append(kSfHasArithOverBitwise, "AoB");
-        append(kSfHasMultivarHighPower, "MultivarHiPow");
-        append(kSfHasUnknownShape, "Unknown");
-        return s.empty() ? "none" : s;
-    }
 
     // ── AST traversal helpers ──
 

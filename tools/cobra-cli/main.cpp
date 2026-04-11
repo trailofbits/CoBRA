@@ -9,7 +9,6 @@
 #include <cstdint>
 #include <utility>
 #ifdef COBRA_HAS_Z3
-    #include "cobra/core/CoeffInterpolator.h"
     #include "cobra/verify/Z3Verifier.h"
 #endif
 #include <cstdlib>
@@ -197,12 +196,11 @@ namespace {
 
 #ifdef COBRA_HAS_Z3
         if (verify) {
-            auto rv = static_cast< uint32_t >(result.value().real_vars.size());
-            auto cob_coeffs =
-                cobra::InterpolateCoefficients(result.value().sig_vector, rv, bitwidth);
-            auto z3r = cobra::Z3Verify(
-                cob_coeffs, *result.value().expr, result.value().real_vars, rv, bitwidth
-            );
+            auto z3_expr = cobra::CloneExpr(*result.value().expr);
+            auto idx_map = cobra::BuildVarSupport(vars, result.value().real_vars);
+            if (!idx_map.empty()) { cobra::RemapVarIndices(*z3_expr, idx_map); }
+
+            auto z3r = cobra::Z3VerifyExprs(ast, *z3_expr, vars, bitwidth);
             if (z3r.equivalent) {
                 std::cerr << "[Z3] Verified: equivalent\n";
             } else {

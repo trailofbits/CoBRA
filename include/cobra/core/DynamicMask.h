@@ -17,7 +17,7 @@ namespace cobra {
     struct MaskInfo
     {
         uint32_t effective_width; // m where mask = 2^m - 1
-        const Expr *inner;        // pointer into the original AST
+        const Expr *inner;        // borrows from the input expression's AST
     };
 
     // Returns m if val == 2^m - 1 for some m in [1, 63].

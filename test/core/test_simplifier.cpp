@@ -1,3 +1,4 @@
+#include "SimplifierInternal.h"
 #include "cobra/core/AuxVarEliminator.h"
 #include "cobra/core/Classification.h"
 #include "cobra/core/Classifier.h"
@@ -1056,11 +1057,10 @@ TEST(SimplifierTest, DynamicMask_ShrRejectsOptimization) {
     // Should still produce a result via the normal pipeline.
     // The key invariant is that the Shr rejection doesn't cause a crash
     // or incorrect result.
-    if (result->kind == SimplifyOutcome::Kind::kSimplified) {
-        auto eval  = Evaluator::FromExpr(*masked, 64);
-        auto check = FullWidthCheckEval(eval, 1, *result->expr, 64);
-        EXPECT_TRUE(check.passed);
-    }
+    ASSERT_EQ(result->kind, SimplifyOutcome::Kind::kSimplified);
+    auto eval  = Evaluator::FromExpr(*masked, 64);
+    auto check = FullWidthCheckEval(eval, 1, *result->expr, 64);
+    EXPECT_TRUE(check.passed);
 }
 
 // --- ANF fast path integration tests ---
@@ -1762,6 +1762,24 @@ TEST(SimplifierTest, DynamicMask_8bit_XPlusY) {
     EXPECT_LT(
         ComputeCost(*result->expr).cost.weighted_size, ComputeCost(*masked).cost.weighted_size
     );
+}
+
+TEST(SimplifierTest, DynamicMask_OriginalSpaceVerificationRemapsReducedVars) {
+    auto original =
+        Expr::BitwiseAnd(Expr::Add(Expr::Variable(2), Expr::Variable(3)), Expr::Constant(0xFF));
+    auto reduced_candidate =
+        Expr::BitwiseAnd(Expr::Add(Expr::Variable(0), Expr::Variable(1)), Expr::Constant(0xFF));
+
+    std::vector< std::string > all_vars  = { "a0", "a1", "x", "y" };
+    std::vector< std::string > real_vars = { "x", "y" };
+
+    auto eval        = Evaluator::FromExpr(*original, 64);
+    auto wrong_space = FullWidthCheckEval(eval, 4, *reduced_candidate, 64);
+    EXPECT_FALSE(wrong_space.passed);
+
+    auto original_space =
+        internal::VerifyInOriginalSpace(eval, all_vars, real_vars, *reduced_candidate, 64);
+    EXPECT_TRUE(original_space.passed);
 }
 
 TEST(SimplifierTest, DynamicMask_4bit_Constant) {

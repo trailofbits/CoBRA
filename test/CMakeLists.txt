@@ -19,6 +19,7 @@ cobra_add_test(test_anf_cleanup core/test_anf_cleanup.cpp)
 cobra_add_test(test_pattern_matcher core/test_pattern_matcher.cpp)
 cobra_add_test(test_coeff_interpolator core/test_coeff_interpolator.cpp)
 cobra_add_test(test_simplifier core/test_simplifier.cpp)
+target_include_directories(test_simplifier PRIVATE ${PROJECT_SOURCE_DIR}/lib/core)
 cobra_add_test(test_cob_expr_builder core/test_cob_expr_builder.cpp)
 cobra_add_test(test_signature_checker core/test_signature_checker.cpp)
 cobra_add_test(test_semilinear_ir core/test_semilinear_ir.cpp)
@@ -384,7 +385,8 @@ target_compile_definitions(test_extended_semantics_tier2 PRIVATE
     DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
 
 # Semantic bitwise audit (manual, not auto-discovered)
-add_executable(bench_semantic_bitwise_audit bench/bench_semantic_bitwise_audit.cpp
+add_executable(bench_semantic_bitwise_audit EXCLUDE_FROM_ALL
+               bench/bench_semantic_bitwise_audit.cpp
                ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
 target_link_libraries(bench_semantic_bitwise_audit PRIVATE cobra-core GTest::gtest_main)
 target_include_directories(bench_semantic_bitwise_audit PRIVATE
@@ -393,7 +395,7 @@ target_compile_definitions(bench_semantic_bitwise_audit PRIVATE
     DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
 
 # Mask pattern audit (manual, not auto-discovered)
-add_executable(bench_mask_audit bench/bench_mask_audit.cpp
+add_executable(bench_mask_audit EXCLUDE_FROM_ALL bench/bench_mask_audit.cpp
                ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
 target_link_libraries(bench_mask_audit PRIVATE cobra-core GTest::gtest_main)
 target_include_directories(bench_mask_audit PRIVATE
@@ -402,12 +404,13 @@ target_compile_definitions(bench_mask_audit PRIVATE
     DATASET_DIR="${PROJECT_SOURCE_DIR}/test/datasets")
 
 # Signature eval microbenchmark (manual, not auto-discovered)
-add_executable(bench_signature_eval bench/bench_signature_eval.cpp)
+add_executable(bench_signature_eval EXCLUDE_FROM_ALL bench/bench_signature_eval.cpp)
 target_link_libraries(bench_signature_eval PRIVATE cobra-core GTest::gtest_main)
 
 # Signature pipeline profiling (manual, not auto-discovered)
-# Requires COBRA_SIG_STATS — rebuild cobra-core with it for counters.
-add_executable(bench_signature_pipeline bench/bench_signature_pipeline.cpp
+# Requires -DCOBRA_ENABLE_SIG_STATS=ON so cobra-core and this target
+# see the same COBRA_SIG_STATS setting.
+add_executable(bench_signature_pipeline EXCLUDE_FROM_ALL bench/bench_signature_pipeline.cpp
                ${PROJECT_SOURCE_DIR}/tools/cobra-cli/ExprParser.cpp)
 target_link_libraries(bench_signature_pipeline PRIVATE cobra-core GTest::gtest_main)
 target_include_directories(bench_signature_pipeline PRIVATE

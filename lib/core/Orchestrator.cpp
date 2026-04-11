@@ -816,6 +816,9 @@ namespace cobra {
         // no right shifts, try solving g under bitwidth=m. Modular
         // arithmetic for {+, -, *, &, |, ^, ~} is homomorphic, so
         // (2^m - 1) & f(x)|_{bw=64} = f(x)|_{bw=m}.
+        // The recursion is bounded because each accepted mask has
+        // effective_width < current bitwidth, so a 64-bit root can
+        // recurse only a handful of times before reaching 1 bit.
         if (input_expr != nullptr) {
             auto mask = DetectRootLowBitMask(*input_expr, opts.bitwidth);
             if (mask.has_value() && !ContainsShr(*mask->inner)) {
@@ -837,11 +840,16 @@ namespace cobra {
                         std::move(result->expr), Expr::Constant(Bitmask(eff_bw))
                     );
                     auto eval  = Evaluator::FromExpr(*input_expr, opts.bitwidth);
-                    auto check = FullWidthCheckEval(
-                        eval, static_cast< uint32_t >(vars.size()), *wrapped, opts.bitwidth
+                    auto check = internal::VerifyInOriginalSpace(
+                        eval, vars, result->real_vars, *wrapped, opts.bitwidth
                     );
                     if (check.passed) {
-                        result->expr = std::move(wrapped);
+                        result->expr       = std::move(wrapped);
+                        result->sig_vector = EvaluateBooleanSignature(
+                            *result->expr, static_cast< uint32_t >(result->real_vars.size()),
+                            opts.bitwidth
+                        );
+                        result->verified = true;
                         return result;
                     }
                 }
