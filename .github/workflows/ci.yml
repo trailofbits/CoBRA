@@ -37,16 +37,16 @@ jobs:
             release_only: true
 
     name: ${{ matrix.name }}
-    if: ${{ !matrix.release_only || startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        if: ${{ !matrix.release_only || startsWith(github.ref, 'refs/tags/v') }}
         with:
           persist-credentials: false
 
       - name: Install dependencies (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && (!matrix.release_only || startsWith(github.ref, 'refs/tags/v'))
         run: |
           wget -qO llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
@@ -55,7 +55,7 @@ jobs:
           echo "LLVM_DIR=/usr/lib/llvm-22/lib/cmake/llvm" >> "$GITHUB_ENV"
 
       - name: Install dependencies (macOS)
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && (!matrix.release_only || startsWith(github.ref, 'refs/tags/v'))
         run: |
           brew install llvm z3 ninja
           LLVM_PREFIX="$(brew --prefix llvm)"
@@ -68,18 +68,21 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Log tool versions
+        if: ${{ !matrix.release_only || startsWith(github.ref, 'refs/tags/v') }}
         run: |
           "${CC:-${{ matrix.cc }}}" --version
           cmake --version
           ninja --version
 
       - name: Cache dependencies
+        if: ${{ !matrix.release_only || startsWith(github.ref, 'refs/tags/v') }}
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: build-deps/install
           key: deps-${{ matrix.os }}-${{ matrix.cc }}-${{ hashFiles('dependencies/*.cmake') }}
 
       - name: Build dependencies
+        if: ${{ !matrix.release_only || startsWith(github.ref, 'refs/tags/v') }}
         run: |
           cmake -S dependencies -B build-deps -G Ninja \
             -DCMAKE_C_COMPILER="${CC:-${{ matrix.cc }}}" \
@@ -90,6 +93,7 @@ jobs:
           cmake --build build-deps
 
       - name: Build CoBRA
+        if: ${{ !matrix.release_only || startsWith(github.ref, 'refs/tags/v') }}
         run: |
           cmake -S . -B build -G Ninja \
             -DCMAKE_C_COMPILER="${CC:-${{ matrix.cc }}}" \
@@ -102,6 +106,7 @@ jobs:
           cmake --build build
 
       - name: Run tests
+        if: ${{ !matrix.release_only || startsWith(github.ref, 'refs/tags/v') }}
         run: ctest --test-dir build -j "$(nproc 2>/dev/null || sysctl -n hw.ncpu)" --output-on-failure -E "DatasetBenchmark|SiMBADataset|GAMBADataset|OSESDataset|ObfuscatorXDataset"
 
   lint:
