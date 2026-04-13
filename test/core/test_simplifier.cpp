@@ -1,3 +1,4 @@
+#include "SimplifierInternal.h"
 #include "cobra/core/AuxVarEliminator.h"
 #include "cobra/core/Classification.h"
 #include "cobra/core/Classifier.h"
@@ -1003,6 +1004,65 @@ TEST(SimplifierTest, MixedRewrite_SupportedRouteStillSimplifies) {
     EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
 }
 
+// --- RepairProductShadow unit tests ---
+
+TEST(SimplifierTest, RepairProductShadow_AndOfVars) {
+    // AND(x0, x1) → MUL(x0, x1)
+    auto expr     = Expr::BitwiseAnd(Expr::Variable(0), Expr::Variable(1));
+    auto repaired = RepairProductShadow(std::move(expr));
+    EXPECT_EQ(repaired->kind, Expr::Kind::kMul);
+    EXPECT_EQ(repaired->children[0]->kind, Expr::Kind::kVariable);
+    EXPECT_EQ(repaired->children[1]->kind, Expr::Kind::kVariable);
+}
+
+TEST(SimplifierTest, RepairProductShadow_AndOfVarAndConstant) {
+    // AND(x0, Constant(5)) → unchanged (not a pure product)
+    auto expr     = Expr::BitwiseAnd(Expr::Variable(0), Expr::Constant(5));
+    auto repaired = RepairProductShadow(std::move(expr));
+    EXPECT_EQ(repaired->kind, Expr::Kind::kAnd);
+}
+
+TEST(SimplifierTest, RepairProductShadow_NestedAndChain) {
+    // AND(AND(x0, x1), x2) → MUL(MUL(x0, x1), x2)
+    auto inner    = Expr::BitwiseAnd(Expr::Variable(0), Expr::Variable(1));
+    auto expr     = Expr::BitwiseAnd(std::move(inner), Expr::Variable(2));
+    auto repaired = RepairProductShadow(std::move(expr));
+    EXPECT_EQ(repaired->kind, Expr::Kind::kMul);
+    EXPECT_EQ(repaired->children[0]->kind, Expr::Kind::kMul);
+    EXPECT_EQ(repaired->children[1]->kind, Expr::Kind::kVariable);
+}
+
+TEST(SimplifierTest, RepairProductShadow_CompoundChildSkipped) {
+    // AND(x+y, z) → unchanged (x+y is not a pure product)
+    auto sum      = Expr::Add(Expr::Variable(0), Expr::Variable(1));
+    auto expr     = Expr::BitwiseAnd(std::move(sum), Expr::Variable(2));
+    auto repaired = RepairProductShadow(std::move(expr));
+    EXPECT_EQ(repaired->kind, Expr::Kind::kAnd);
+}
+
+// --- Dynamic masking fallback tests ---
+
+TEST(SimplifierTest, DynamicMask_ShrRejectsOptimization) {
+    // 0xFF & (x >> 1): ContainsShr rejects dynamic masking,
+    // falls through to normal pipeline.
+    auto inner  = Expr::LogicalShr(Expr::Variable(0), 1);
+    auto masked = Expr::BitwiseAnd(Expr::Constant(0xFF), std::move(inner));
+
+    std::vector< std::string > vars = { "x" };
+    auto sig                        = EvaluateBooleanSignature(*masked, 1, 64);
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
+
+    auto result = Simplify(sig, vars, masked.get(), opts);
+    ASSERT_TRUE(result.has_value());
+    // Should still produce a result via the normal pipeline.
+    // The key invariant is that the Shr rejection doesn't cause a crash
+    // or incorrect result.
+    ASSERT_EQ(result->kind, SimplifyOutcome::Kind::kSimplified);
+    auto eval  = Evaluator::FromExpr(*masked, 64);
+    auto check = FullWidthCheckEval(eval, 1, *result->expr, 64);
+    EXPECT_TRUE(check.passed);
+}
+
 // --- ANF fast path integration tests ---
 
 TEST(SimplifierTest, AnfThreeVarOr) {
@@ -1665,4 +1725,80 @@ TEST(SimplifierTest, Issue9_CarryPropagation) {
                                << Render(*result.value().expr, result.value().real_vars)
                                << " but fails full-width check";
     }
+}
+
+// ---------------------------------------------------------------
+// Dynamic masking: root-level (2^m - 1) & g
+// ---------------------------------------------------------------
+
+TEST(SimplifierTest, DynamicMask_8bit_XPlusY) {
+    // 0xFF & (x + y + (~x | ~y) + 1)  →  at 8-bit this is  x | y
+    // The identity  x + y + (~x | ~y) + 1 = x | y  holds at any width.
+    auto inner = Expr::Add(
+        Expr::Add(
+            Expr::Add(Expr::Variable(0), Expr::Variable(1)),
+            Expr::BitwiseOr(
+                Expr::BitwiseNot(Expr::Variable(0)), Expr::BitwiseNot(Expr::Variable(1))
+            )
+        ),
+        Expr::Constant(1)
+    );
+    auto masked = Expr::BitwiseAnd(Expr::Constant(0xFF), std::move(inner));
+
+    std::vector< std::string > vars = { "x", "y" };
+    auto sig                        = EvaluateBooleanSignature(*masked, 2, 64);
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
+
+    auto result = Simplify(sig, vars, masked.get(), opts);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->kind, SimplifyOutcome::Kind::kSimplified);
+
+    // Verify the result is correct at full 64-bit width.
+    auto eval  = Evaluator::FromExpr(*masked, 64);
+    auto check = FullWidthCheckEval(eval, 2, *result->expr, 64);
+    EXPECT_TRUE(check.passed);
+
+    // The simplified result should be cheaper than the input.
+    EXPECT_LT(
+        ComputeCost(*result->expr).cost.weighted_size, ComputeCost(*masked).cost.weighted_size
+    );
+}
+
+TEST(SimplifierTest, DynamicMask_OriginalSpaceVerificationRemapsReducedVars) {
+    auto original =
+        Expr::BitwiseAnd(Expr::Add(Expr::Variable(2), Expr::Variable(3)), Expr::Constant(0xFF));
+    auto reduced_candidate =
+        Expr::BitwiseAnd(Expr::Add(Expr::Variable(0), Expr::Variable(1)), Expr::Constant(0xFF));
+
+    std::vector< std::string > all_vars  = { "a0", "a1", "x", "y" };
+    std::vector< std::string > real_vars = { "x", "y" };
+
+    auto eval        = Evaluator::FromExpr(*original, 64);
+    auto wrong_space = FullWidthCheckEval(eval, 4, *reduced_candidate, 64);
+    EXPECT_FALSE(wrong_space.passed);
+
+    auto original_space =
+        internal::VerifyInOriginalSpace(eval, all_vars, real_vars, *reduced_candidate, 64);
+    EXPECT_TRUE(original_space.passed);
+}
+
+TEST(SimplifierTest, DynamicMask_4bit_Constant) {
+    // 0xF & (x + ~x + 1)  →  0xF & 0 = 0
+    // x + ~x + 1 = 0 at any width (two's complement identity).
+    auto inner = Expr::Add(
+        Expr::Add(Expr::Variable(0), Expr::BitwiseNot(Expr::Variable(0))), Expr::Constant(1)
+    );
+    auto masked = Expr::BitwiseAnd(std::move(inner), Expr::Constant(0xF));
+
+    std::vector< std::string > vars = { "x" };
+    auto sig                        = EvaluateBooleanSignature(*masked, 1, 64);
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
+
+    auto result = Simplify(sig, vars, masked.get(), opts);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->kind, SimplifyOutcome::Kind::kSimplified);
+
+    auto eval  = Evaluator::FromExpr(*masked, 64);
+    auto check = FullWidthCheckEval(eval, 1, *result->expr, 64);
+    EXPECT_TRUE(check.passed);
 }

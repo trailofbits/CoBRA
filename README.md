@@ -4,7 +4,7 @@
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)](https://en.cppreference.com/w/cpp/23)
-[![Tests](https://img.shields.io/badge/tests-1193-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-1195-brightgreen.svg)](#testing)
 
 CoBRA deobfuscates expressions that interleave arithmetic (`+`, `-`, `*`) with bitwise (`&`, `|`, `^`, `~`) and shift (`<<`, `>>`) operators — a technique commonly used in software obfuscation.
 
@@ -209,12 +209,12 @@ lib/llvm/                LLVM pass plugin (CobraPass, MBADetector, IRReconstruct
 lib/verify/              Z3-based equivalence verification
 include/cobra/           Public headers
 tools/cobra-cli/         CLI frontend and expression parser
-test/                    1193 tests across ~63 test files
+test/                    1195 tests across ~63 test files
 ```
 
 ## Testing
 
-CoBRA has 1193 tests covering unit, integration, and dataset benchmarks:
+CoBRA has 1195 tests covering unit, integration, and dataset benchmarks:
 
 ```bash
 # Run all tests
@@ -227,7 +227,7 @@ ctest --test-dir build -R test_simplifier --output-on-failure
 ctest --test-dir build -V
 ```
 
-Dataset benchmarks validate against real-world obfuscated expressions from multiple independent sources. See [DATASETS.md](DATASETS.md) for the full benchmark report — 70,059 expressions across 33 dataset files from 7 independent sources.
+Dataset benchmarks validate against real-world obfuscated expressions from multiple independent sources. See [DATASETS.md](DATASETS.md) for the full benchmark report — 75,126 expressions across 35 dataset files from 7 independent sources.
 
 ## Known Limitations
 
@@ -239,7 +239,7 @@ Dataset benchmarks validate against real-world obfuscated expressions from multi
 
 Thanks to [Bas Zweers](https://github.com/AnalogCyberNuke) and the [Back Engineering](https://github.com/backengineering) team for the inspiration and guidance that helped shape this project. Recommended viewing: their re//verse 2026 talk [Deobfuscation of a Real World Binary Obfuscator](https://www.youtube.com/watch?v=3LtwqJM3Qjg).
 
-Additional thanks to [Matteo Favaro](https://github.com/fvrmatteo) and other anonymous contributors for the continual review and testing
+Additional thanks to [Jack Royer](https://github.com/Garfield1002), [Matteo Favaro](https://github.com/fvrmatteo), and other anonymous contributors for the continual review and testing
 
 ## License
 

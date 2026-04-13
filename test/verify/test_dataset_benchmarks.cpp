@@ -5,6 +5,7 @@
 #include "cobra/core/PassContract.h"
 #include "cobra/core/Profile.h"
 #include "cobra/core/Simplifier.h"
+#include "dataset_audit_utils.h"
 #include <fstream>
 #include <gtest/gtest.h>
 #include <iostream>
@@ -13,34 +14,10 @@
 #include <tuple>
 
 using namespace cobra;
+using cobra::test_support::find_separator;
+using cobra::test_support::trim;
 
 namespace {
-
-    size_t find_separator(const std::string &line) {
-        // Prefer tab separator (unambiguous), fall back to last
-        // top-level comma for legacy datasets.
-        int depth         = 0;
-        size_t last_comma = std::string::npos;
-        for (size_t i = 0; i < line.size(); ++i) {
-            if (line[i] == '(') {
-                ++depth;
-            } else if (line[i] == ')') {
-                --depth;
-            } else if (line[i] == '\t' && depth == 0) {
-                return i;
-            } else if (line[i] == ',' && depth == 0) {
-                last_comma = i;
-            }
-        }
-        return last_comma;
-    }
-
-    std::string trim(const std::string &s) {
-        size_t start = s.find_first_not_of(" \t\r\n");
-        if (start == std::string::npos) { return ""; }
-        size_t end = s.find_last_not_of(" \t\r\n");
-        return s.substr(start, end - start + 1);
-    }
 
     struct DatasetStats
     {
@@ -388,8 +365,8 @@ TEST(GAMBADataset, QSynthEA) {
     // Every unsupported result carries a structured reason code.
     EXPECT_EQ(stats.has_structured_reason, stats.unsupported);
     EXPECT_EQ(stats.by_category[ReasonCategory::kVerifyFailed], 7);
-    EXPECT_EQ(stats.by_category[ReasonCategory::kGuardFailed], 9);
-    EXPECT_EQ(stats.by_category[ReasonCategory::kSearchExhausted], 18);
+    EXPECT_EQ(stats.by_category[ReasonCategory::kGuardFailed], 7);
+    EXPECT_EQ(stats.by_category[ReasonCategory::kSearchExhausted], 20);
 
     // Decomposition cause frames propagated into cause_chain.
     // MixedRewrite unsupported outcomes should carry delegated
@@ -404,6 +381,18 @@ TEST(GAMBADataset, LokiTiny) {
     EXPECT_EQ(stats.parsed, 25000);
     // All are linear 2-var (x+y, x&y, x|y, x-y, x^y)
     EXPECT_EQ(stats.simplified, 25000);
+    EXPECT_EQ(stats.unsupported, 0);
+    EXPECT_EQ(stats.failed_simplify, 0);
+}
+
+TEST(GAMBADataset, MbaFlatten) {
+    auto stats = run_dataset(DATASET_DIR "/gamba/mba_flatten.txt");
+    EXPECT_EQ(stats.total, 3008);
+    // 8 headers + 899 sub-expression lines (3-field CSV) +
+    // 41 "cannot be solved by MBA-Solver" (multi-var parse failures)
+    EXPECT_EQ(stats.skipped_parse, 948);
+    EXPECT_EQ(stats.parsed, 2060);
+    EXPECT_EQ(stats.simplified, 2060);
     EXPECT_EQ(stats.unsupported, 0);
     EXPECT_EQ(stats.failed_simplify, 0);
 }

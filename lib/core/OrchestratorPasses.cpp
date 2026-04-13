@@ -7,6 +7,7 @@
 #include "SemilinearPasses.h"
 #include "SignaturePasses.h"
 #include "SimplifierInternal.h"
+#include "cobra/core/AnfTransform.h"
 #include "cobra/core/AuxVarEliminator.h"
 #include "cobra/core/BitWidth.h"
 #include "cobra/core/Classifier.h"
@@ -16,7 +17,9 @@
 #include "cobra/core/MixedProductRewriter.h"
 #include "cobra/core/PatternMatcher.h"
 #include "cobra/core/Profile.h"
+#include "cobra/core/SignatureChecker.h"
 #include "cobra/core/SignatureEval.h"
+#include "cobra/core/SignatureSimplifier.h"
 
 #include <functional>
 #include <numeric>
@@ -42,6 +45,129 @@ namespace cobra {
 
         bool IsCandidateKind(const WorkItem &item) {
             return std::holds_alternative< CandidatePayload >(item.payload);
+        }
+
+        std::optional< PassResult > TryConstantSignatureCandidate(
+            const WorkItem &item, const std::optional< Evaluator > &active_eval,
+            const std::vector< uint64_t > &sig, uint32_t num_vars, uint32_t bitwidth
+        ) {
+            auto pm = MatchPattern(sig, num_vars, bitwidth);
+            if (!pm || (*pm)->kind != Expr::Kind::kConstant) { return std::nullopt; }
+
+            bool needs_verify = active_eval.has_value();
+            WorkItem cand_item;
+            cand_item.payload = CandidatePayload{
+                .expr                              = std::move(*pm),
+                .real_vars                         = {},
+                .cost                              = ExprCost{ .weighted_size = 1 },
+                .producing_pass                    = PassId::kBuildSignatureState,
+                .needs_original_space_verification = needs_verify,
+            };
+            cand_item.features            = item.features;
+            cand_item.metadata            = item.metadata;
+            cand_item.metadata.sig_vector = sig;
+            cand_item.metadata.verification =
+                needs_verify ? VerificationState::kUnverified : VerificationState::kVerified;
+            cand_item.depth          = item.depth;
+            cand_item.rewrite_gen    = item.rewrite_gen;
+            cand_item.attempted_mask = item.attempted_mask;
+            cand_item.history        = item.history;
+            cand_item.group_id       = item.group_id;
+
+            PassResult result;
+            result.decision    = PassDecision::kSolvedCandidate;
+            result.disposition = ItemDisposition::kRetainCurrent;
+            result.next.push_back(std::move(cand_item));
+            return result;
+        }
+
+        bool NeedsOriginalSpaceVerification(const WorkItem &item) {
+            if (auto *ast = std::get_if< AstPayload >(&item.payload)) {
+                if (ast->solve_ctx.has_value()) { return false; }
+            }
+            return true;
+        }
+
+        PassResult EmitBooleanAnfFastPath(
+            const WorkItem &item, OrchestratorContext &ctx,
+            const std::vector< std::string > &active_vars, const std::vector< uint64_t > &sig,
+            std::unique_ptr< Expr > expr
+        ) {
+            bool needs_osv = NeedsOriginalSpaceVerification(item);
+
+            // Grouped items submit directly into the competition group and
+            // retain the current AST item so the rest of the exploration
+            // branch can continue if the candidate loses on cost.
+            if (item.group_id.has_value()) {
+                auto normalized = NormalizeLateCandidateExpr(std::move(expr), ctx.bitwidth);
+                auto cost_info  = ComputeCost(*normalized);
+                SubmitCandidate(
+                    ctx.competition_groups, *item.group_id,
+                    CandidateRecord{
+                        .expr                              = std::move(normalized),
+                        .cost                              = cost_info.cost,
+                        .verification                      = VerificationState::kVerified,
+                        .real_vars                         = active_vars,
+                        .source_pass                       = PassId::kBuildSignatureState,
+                        .needs_original_space_verification = needs_osv,
+                        .sig_vector                        = sig,
+                    }
+                );
+                return PassResult{
+                    .decision    = PassDecision::kAdvance,
+                    .disposition = ItemDisposition::kRetainCurrent,
+                };
+            }
+
+            auto cost_info = ComputeCost(*expr);
+            WorkItem cand_item;
+            cand_item.payload = CandidatePayload{
+                .expr                              = std::move(expr),
+                .real_vars                         = active_vars,
+                .cost                              = cost_info.cost,
+                .producing_pass                    = PassId::kBuildSignatureState,
+                .needs_original_space_verification = needs_osv,
+            };
+            cand_item.features              = item.features;
+            cand_item.metadata              = item.metadata;
+            cand_item.metadata.verification = VerificationState::kVerified;
+            cand_item.metadata.sig_vector   = sig;
+            cand_item.depth                 = item.depth;
+            cand_item.rewrite_gen           = item.rewrite_gen;
+            cand_item.attempted_mask        = item.attempted_mask;
+            cand_item.history               = item.history;
+
+            PassResult result;
+            result.decision    = PassDecision::kSolvedCandidate;
+            result.disposition = ItemDisposition::kRetainCurrent;
+            result.next.push_back(std::move(cand_item));
+            return result;
+        }
+
+        std::optional< PassResult > TryBooleanAnfFastPath(
+            const WorkItem &item, OrchestratorContext &ctx,
+            const std::vector< std::string > &active_vars,
+            const std::optional< Evaluator > &active_eval, const std::vector< uint64_t > &sig
+        ) {
+            const auto num_vars = static_cast< uint32_t >(active_vars.size());
+            if (!IsBooleanValued(sig) || num_vars > ctx.opts.max_vars || !active_eval) {
+                return std::nullopt;
+            }
+
+            auto anf      = ComputeAnf(sig, num_vars);
+            auto anf_expr = BuildAnfExpr(anf, num_vars);
+            auto fw       = FullWidthCheckEval(*active_eval, num_vars, *anf_expr, ctx.bitwidth);
+            if (fw.passed) {
+                return EmitBooleanAnfFastPath(item, ctx, active_vars, sig, std::move(anf_expr));
+            }
+
+            // Product-shadow repair: AND = MUL on {0,1} but not at full width.
+            auto repaired = RepairProductShadow(CloneExpr(*anf_expr));
+            auto repair_fw =
+                FullWidthCheckEval(*active_eval, num_vars, *repaired, ctx.bitwidth);
+            if (!repair_fw.passed) { return std::nullopt; }
+
+            return EmitBooleanAnfFastPath(item, ctx, active_vars, sig, std::move(repaired));
         }
 
         struct OperandSite
@@ -343,42 +469,25 @@ namespace cobra {
                                  : EvaluateBooleanSignature(*ast.expr, num_vars, ctx.bitwidth);
 
         // Step 2: Constant match
+        if (auto constant =
+                TryConstantSignatureCandidate(item, active_eval, sig, num_vars, ctx.bitwidth))
         {
-            auto pm = MatchPattern(sig, num_vars, ctx.bitwidth);
-            if (pm && (*pm)->kind == Expr::Kind::kConstant) {
-                bool needs_verify = active_eval.has_value();
-                WorkItem cand_item;
-                cand_item.payload = CandidatePayload{
-                    .expr                              = std::move(*pm),
-                    .real_vars                         = {},
-                    .cost                              = ExprCost{ .weighted_size = 1 },
-                    .producing_pass                    = PassId::kBuildSignatureState,
-                    .needs_original_space_verification = needs_verify,
-                };
-                cand_item.features              = item.features;
-                cand_item.metadata              = item.metadata;
-                cand_item.metadata.sig_vector   = sig;
-                cand_item.metadata.verification = needs_verify ? VerificationState::kUnverified
-                                                               : VerificationState::kVerified;
-                cand_item.depth                 = item.depth;
-                cand_item.rewrite_gen           = item.rewrite_gen;
-                cand_item.attempted_mask        = item.attempted_mask;
-                cand_item.history               = item.history;
-                cand_item.group_id              = item.group_id;
-
-                PassResult result;
-                result.decision    = PassDecision::kSolvedCandidate;
-                result.disposition = ItemDisposition::kRetainCurrent;
-                result.next.push_back(std::move(cand_item));
-                return Ok(std::move(result));
-            }
+            return Ok(std::move(*constant));
         }
 
-        // Step 3: Eliminate auxiliary variables
+        // Step 3: Boolean ANF fast path with product-shadow repair.
+        // If the boolean signature is in {0,1}, compute ANF directly
+        // and verify at full width.  Falls back to product-shadow
+        // repair (AND→MUL) when ANF verification fails.
+        if (auto fast_path = TryBooleanAnfFastPath(item, ctx, active_vars, active_eval, sig)) {
+            return Ok(std::move(*fast_path));
+        }
+
+        // Step 4: Eliminate auxiliary variables
         auto elim                 = EliminateAuxVars(sig, active_vars);
         const auto real_var_count = static_cast< uint32_t >(elim.real_vars.size());
 
-        // Step 4: Check max_vars
+        // Step 5: Check max_vars
         if (real_var_count > ctx.opts.max_vars) {
             return Err< PassResult >(
                 CobraError::kTooManyVariables,
@@ -387,13 +496,13 @@ namespace cobra {
             );
         }
 
-        // Step 5: Build original_indices
+        // Step 6: Build original_indices
         auto original_indices = BuildVarSupport(active_vars, elim.real_vars);
 
-        // Step 6: Determine verification needs
+        // Step 7: Determine verification needs
         bool needs_verification = active_eval.has_value();
 
-        // Step 7: Reuse incoming group or create a fresh one
+        // Step 8: Reuse incoming group or create a fresh one
         GroupId group_id;
         if (item.group_id.has_value()) {
             group_id = *item.group_id;
@@ -402,7 +511,7 @@ namespace cobra {
             group_id = CreateGroup(ctx.competition_groups, ctx.next_group_id);
         }
 
-        // Step 8: Emit SignatureStatePayload
+        // Step 9: Emit SignatureStatePayload
         WorkItem sig_item;
         sig_item.payload = SignatureStatePayload{
             .ctx = {
@@ -833,7 +942,13 @@ namespace cobra {
         }
         group.continuation = std::move(cont);
 
-        auto cls = ClassifyStructural(*skel->outer_expr);
+        // Pre-simplify collapsible subtrees in the outer expression.
+        // Lifting often exposes small identity shells (e.g., r0 + r1 + 1 +
+        // (~r0 | ~r1) → r0 | r1) that pattern matching can collapse before
+        // classification computes structural flags.
+        auto outer = SimplifyPatternSubtrees(CloneExpr(*skel->outer_expr), ctx.bitwidth);
+
+        auto cls = ClassifyStructural(*outer);
 
         // Build a proper outer evaluator so downstream families
         // (decomposition, signature) can verify against the
@@ -841,11 +956,11 @@ namespace cobra {
         auto solve_ctx = skel->outer_ctx; // copy before moving outer_expr
         auto outer_bw  = ctx.bitwidth;
         solve_ctx.evaluator =
-            Evaluator::FromExpr(*skel->outer_expr, outer_bw, EvaluatorTraceKind::kLiftedOuter);
+            Evaluator::FromExpr(*outer, outer_bw, EvaluatorTraceKind::kLiftedOuter);
 
         WorkItem child;
         child.payload = AstPayload{
-            .expr           = CloneExpr(*skel->outer_expr),
+            .expr           = std::move(outer),
             .classification = cls,
             .provenance     = Provenance::kRewritten,
             .solve_ctx      = std::move(solve_ctx),
