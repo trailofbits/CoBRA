@@ -64,4 +64,4 @@ target_include_directories(cobra-core PUBLIC
 
 find_package(absl REQUIRED)
 find_package(hwy REQUIRED CONFIG)
-target_link_libraries(cobra-core PUBLIC absl::flat_hash_map PRIVATE hwy::hwy)
+target_link_libraries(cobra-core PUBLIC absl::flat_hash_map hwy::hwy)

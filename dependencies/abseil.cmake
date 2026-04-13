@@ -22,6 +22,7 @@ else()
         CMAKE_ARGS
             ${COBRA_COMMON_CMAKE_ARGS}
             -DABSL_BUILD_TESTING=OFF
+            -DABSL_ENABLE_INSTALL=ON
             -DABSL_PROPAGATE_CXX_STD=ON
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON
     )

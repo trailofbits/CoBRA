@@ -7,6 +7,7 @@
 #
 # Options:
 #   USE_EXTERNAL_LLVM         (default ON)  - Use system LLVM vs build from source
+#   COBRA_BUILD_LLVM_PASS      (default ON)  - Prepare LLVM dependency for pass plugin
 #   USE_EXTERNAL_ABSEIL       (default OFF) - Use system abseil vs build from source
 #   USE_EXTERNAL_HIGHWAY      (default OFF) - Use system highway vs build from source
 #   COBRA_BUILD_PYTHON_BINDINGS (default OFF) - Build nanobind for Python bindings
@@ -20,6 +21,7 @@ cmake_minimum_required(VERSION 3.20)
 project(cobra-dependencies LANGUAGES C CXX)
 
 option(USE_EXTERNAL_LLVM "Use system LLVM instead of building from source" ON)
+option(COBRA_BUILD_LLVM_PASS "Prepare LLVM dependency for the pass plugin" ON)
 option(USE_EXTERNAL_ABSEIL "Use system abseil instead of building from source" OFF)
 option(USE_EXTERNAL_HIGHWAY "Use system highway instead of building from source" OFF)
 option(COBRA_BUILD_PYTHON_BINDINGS "Build nanobind for Python bindings" OFF)
@@ -33,7 +35,9 @@ include(superbuild.cmake)
 
 include(abseil.cmake)
 include(highway.cmake)
-include(llvm.cmake)
+if(COBRA_BUILD_LLVM_PASS)
+    include(llvm.cmake)
+endif()
 
 if(COBRA_BUILD_PYTHON_BINDINGS)
     include(nanobind.cmake)

@@ -6,6 +6,16 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Prefer local dependency prefix if present (helps wheel builds find absl/hwy)
+if(DEFINED COBRA_DEPENDENCY_PREFIX)
+    list(PREPEND CMAKE_PREFIX_PATH "${COBRA_DEPENDENCY_PREFIX}")
+else()
+    set(_cobra_default_dep_prefix "${CMAKE_SOURCE_DIR}/build-deps/install")
+    if(EXISTS "${_cobra_default_dep_prefix}")
+        list(PREPEND CMAKE_PREFIX_PATH "${_cobra_default_dep_prefix}")
+    endif()
+endif()
+
 if (CMAKE_EXPORT_COMPILE_COMMANDS AND UNIX)
     set(_cobra_cc_src "${CMAKE_SOURCE_DIR}/compile_commands.json")
     set(_cobra_cc_bin "${CMAKE_BINARY_DIR}/compile_commands.json")
@@ -124,7 +134,11 @@ install(DIRECTORY include/cobra
 
 # Collect installed targets for the package config export set
 set(_cobra_install_targets cobra-core cobra-cli)
-if(Z3_FOUND)
+if(DEFINED SKBUILD_PLATLIB_DIR)
+    # Wheel builds only need the extension module; skip installing the CLI.
+    set(_cobra_install_targets cobra-core)
+endif()
+if(Z3_FOUND AND NOT DEFINED SKBUILD_PLATLIB_DIR)
     list(APPEND _cobra_install_targets cobra-verify)
 endif()
 

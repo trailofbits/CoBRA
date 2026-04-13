@@ -1,4 +1,7 @@
-find_package(Python 3.10 COMPONENTS Interpreter Development REQUIRED)
+find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
+if(Python_VERSION VERSION_LESS 3.10)
+  message(FATAL_ERROR "Python 3.10+ is required for cobra_mba")
+endif()
 
 if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build." FORCE)
@@ -25,5 +28,12 @@ nanobind_add_module(
 )
 target_link_libraries(cobra_mba PRIVATE cobra-core)
 target_include_directories(cobra_mba PRIVATE ${PROJECT_SOURCE_DIR}/tools/cobra-cli)
+
+if (DEFINED SKBUILD_PLATLIB_DIR)
+  install(TARGETS cobra_mba
+    LIBRARY DESTINATION "${SKBUILD_PLATLIB_DIR}"
+    RUNTIME DESTINATION "${SKBUILD_PLATLIB_DIR}"
+  )
+endif()
 
 
