@@ -151,6 +151,45 @@ TEST(SignaturePass, SchedulerCoeffStateTable) {
     EXPECT_FALSE(p2.has_value());
 }
 
+TEST(SignaturePass, ReducedPolynomialFastPath_UnivariateReturnsCandidate) {
+    auto expr = Expr::Mul(Expr::Variable(0), Expr::Variable(0));
+    auto sig  = EvaluateBooleanSignature(*expr, 1, 64);
+
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
+    opts.evaluator                  = Evaluator::FromExpr(*expr, 64);
+    std::vector< std::string > vars = { "x" };
+    auto ctx                        = MakeCtx(opts, vars);
+
+    WorkItem item  = MakeSignatureItem(sig, vars, ctx);
+    auto candidate = TryReducedPolynomialFastPath(item, ctx);
+    ASSERT_TRUE(candidate.has_value());
+    EXPECT_EQ(candidate->source_pass, PassId::kSignatureSingletonPolyRecovery);
+    EXPECT_EQ(candidate->verification, VerificationState::kVerified);
+}
+
+TEST(SignaturePass, ReducedPolynomialFastPath_MultivarReturnsCandidate) {
+    auto expr = Expr::Add(
+        Expr::Mul(Expr::Variable(0), Expr::Variable(0)),
+        Expr::Mul(Expr::Variable(0), Expr::Variable(1))
+    );
+    auto sig = EvaluateBooleanSignature(*expr, 2, 64);
+
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
+    opts.evaluator                  = Evaluator::FromExpr(*expr, 64);
+    std::vector< std::string > vars = { "x", "y" };
+    auto ctx                        = MakeCtx(opts, vars);
+
+    auto cls = Classification{
+        .semantic = SemanticClass::kPolynomial,
+        .flags    = kSfHasMul | kSfHasMultivarHighPower,
+    };
+    WorkItem item  = MakeSignatureItem(sig, vars, ctx, cls);
+    auto candidate = TryReducedPolynomialFastPath(item, ctx);
+    ASSERT_TRUE(candidate.has_value());
+    EXPECT_EQ(candidate->source_pass, PassId::kSignatureMultivarPolyRecovery);
+    EXPECT_EQ(candidate->verification, VerificationState::kVerified);
+}
+
 // --- PatternMatch tests ---
 
 TEST(SignaturePass, PatternMatchKnownPattern) {
@@ -466,6 +505,44 @@ TEST(SignaturePass, BuildSignatureStateNoSolveCtxUsesOriginal) {
     // Signature should have 4 entries (2^2 vars)
     EXPECT_EQ(sig_payload.ctx.sig.size(), 4);
     EXPECT_EQ(sig_payload.ctx.real_vars.size(), 2);
+}
+
+TEST(SignaturePass, BuildSignatureStatePolynomialFastPathReturnsCandidate) {
+    auto expr = Expr::Mul(Expr::Mul(Expr::Variable(0), Expr::Variable(0)), Expr::Variable(0));
+
+    std::vector< std::string > vars = { "x" };
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
+    opts.evaluator = Evaluator::FromExpr(*expr, 64);
+    auto ctx       = MakeCtx(opts, vars);
+    ctx.input_sig  = EvaluateBooleanSignature(*expr, 1, 64);
+
+    auto cls = Classification{
+        .semantic = SemanticClass::kPolynomial,
+        .flags    = kSfHasMul | kSfHasSingletonPower | kSfHasSingletonPowerGt2,
+    };
+
+    WorkItem ast_item;
+    ast_item.payload = AstPayload{
+        .expr           = CloneExpr(*expr),
+        .classification = cls,
+        .provenance     = Provenance::kLowered,
+    };
+    ast_item.features.classification = cls;
+    ast_item.features.provenance     = Provenance::kLowered;
+
+    auto result = RunBuildSignatureState(ast_item, ctx);
+    ASSERT_TRUE(result.has_value());
+    auto &pr = result.value();
+    EXPECT_EQ(pr.decision, PassDecision::kSolvedCandidate);
+    ASSERT_EQ(pr.next.size(), 1);
+    EXPECT_EQ(GetStateKind(pr.next[0].payload), StateKind::kCandidateExpr);
+    EXPECT_EQ(ctx.next_group_id, 0);
+    EXPECT_TRUE(ctx.competition_groups.empty());
+
+    auto *cand = std::get_if< CandidatePayload >(&pr.next[0].payload);
+    ASSERT_NE(cand, nullptr);
+    EXPECT_EQ(cand->producing_pass, PassId::kSignatureSingletonPolyRecovery);
+    EXPECT_FALSE(cand->needs_original_space_verification);
 }
 
 // --- SingletonPolyRecovery guard ---

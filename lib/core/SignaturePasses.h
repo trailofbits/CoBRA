@@ -5,6 +5,13 @@
 
 namespace cobra {
 
+    // Optional narrow shortcut for reduced polynomial subproblems.
+    // Returns a verified direct candidate when the existing polynomial
+    // passes can solve the reduced problem inline without entering the
+    // signature competition worklist.
+    std::optional< CandidateRecord >
+    TryReducedPolynomialFastPath(const WorkItem &item, OrchestratorContext &ctx);
+
     Result< PassResult > RunResolveCompetition(const WorkItem &item, OrchestratorContext &ctx);
 
     Result< PassResult >

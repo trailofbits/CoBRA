@@ -170,6 +170,51 @@ namespace cobra {
             return EmitBooleanAnfFastPath(item, ctx, active_vars, sig, std::move(repaired));
         }
 
+        std::optional< PassResult > TryReducedPolynomialSeedCandidate(
+            const WorkItem &item, OrchestratorContext &ctx,
+            const std::vector< std::string > &active_vars,
+            const std::optional< Evaluator > &active_eval, const WorkItem &sig_seed
+        ) {
+            auto fast_candidate = TryReducedPolynomialFastPath(sig_seed, ctx);
+            if (!fast_candidate.has_value()) { return std::nullopt; }
+
+            if (fast_candidate->needs_original_space_verification && active_eval.has_value()) {
+                auto check = internal::VerifyInOriginalSpace(
+                    *active_eval, active_vars, fast_candidate->real_vars, *fast_candidate->expr,
+                    ctx.bitwidth
+                );
+                if (!check.passed) { return std::nullopt; }
+
+                fast_candidate->verification = VerificationState::kVerified;
+                fast_candidate->needs_original_space_verification = false;
+            }
+
+            WorkItem cand_item;
+            cand_item.payload = CandidatePayload{
+                .expr           = std::move(fast_candidate->expr),
+                .real_vars      = fast_candidate->real_vars,
+                .cost           = fast_candidate->cost,
+                .producing_pass = fast_candidate->source_pass,
+                .needs_original_space_verification =
+                    fast_candidate->needs_original_space_verification,
+            };
+            cand_item.features              = item.features;
+            cand_item.metadata              = item.metadata;
+            cand_item.metadata.sig_vector   = fast_candidate->sig_vector;
+            cand_item.metadata.verification = fast_candidate->verification;
+            cand_item.depth                 = item.depth;
+            cand_item.rewrite_gen           = item.rewrite_gen;
+            cand_item.attempted_mask        = item.attempted_mask;
+            cand_item.group_id              = item.group_id;
+            cand_item.history               = item.history;
+
+            PassResult result;
+            result.decision    = PassDecision::kSolvedCandidate;
+            result.disposition = ItemDisposition::kRetainCurrent;
+            result.next.push_back(std::move(cand_item));
+            return result;
+        }
+
         struct OperandSite
         {
             const Expr *mul;
@@ -502,7 +547,41 @@ namespace cobra {
         // Step 7: Determine verification needs
         bool needs_verification = active_eval.has_value();
 
-        // Step 8: Reuse incoming group or create a fresh one
+        WorkItem sig_seed;
+        sig_seed.payload = SignatureStatePayload{
+            .ctx = {
+                .sig                               = sig,
+                .real_vars                         = elim.real_vars,
+                .elimination                       = std::move(elim),
+                .original_indices                  = std::move(original_indices),
+                .needs_original_space_verification = needs_verification,
+            },
+        };
+        sig_seed.features       = item.features;
+        sig_seed.metadata       = item.metadata;
+        sig_seed.depth          = item.depth;
+        sig_seed.rewrite_gen    = item.rewrite_gen;
+        sig_seed.attempted_mask = item.attempted_mask;
+        sig_seed.history        = item.history;
+
+        // Thread subproblem-local evaluator so BuildMappedEvaluator
+        // verifies against the reduced outer function, not the
+        // top-level ctx.evaluator.
+        if (ast.solve_ctx.has_value() && ast.solve_ctx->evaluator.has_value()) {
+            sig_seed.evaluator_override = *ast.solve_ctx->evaluator;
+            sig_seed.evaluator_override_arity =
+                static_cast< uint32_t >(ast.solve_ctx->vars.size());
+        }
+
+        // Step 8: Direct reduced polynomial shortcut.
+        if (auto fast_path = TryReducedPolynomialSeedCandidate(
+                item, ctx, active_vars, active_eval, sig_seed
+            ))
+        {
+            return Ok(std::move(*fast_path));
+        }
+
+        // Step 9: Reuse incoming group or create a fresh one
         GroupId group_id;
         if (item.group_id.has_value()) {
             group_id = *item.group_id;
@@ -511,35 +590,9 @@ namespace cobra {
             group_id = CreateGroup(ctx.competition_groups, ctx.next_group_id);
         }
 
-        // Step 9: Emit SignatureStatePayload
-        WorkItem sig_item;
-        sig_item.payload = SignatureStatePayload{
-            .ctx = {
-                .sig                               = std::move(sig),
-                .real_vars                         = elim.real_vars,
-                .elimination                       = std::move(elim),
-                .original_indices                  = std::move(original_indices),
-                .needs_original_space_verification = needs_verification,
-            },
-        };
-        sig_item.features       = item.features;
-        sig_item.metadata       = item.metadata;
-        sig_item.depth          = item.depth;
-        sig_item.rewrite_gen    = item.rewrite_gen;
-        sig_item.attempted_mask = item.attempted_mask;
-        sig_item.group_id       = group_id;
-        sig_item.history        = item.history;
-
-        // Thread subproblem-local evaluator so BuildMappedEvaluator
-        // verifies against the reduced outer function, not the
-        // top-level ctx.evaluator.
-        if (auto *a = std::get_if< AstPayload >(&item.payload)) {
-            if (a->solve_ctx.has_value() && a->solve_ctx->evaluator.has_value()) {
-                sig_item.evaluator_override = *a->solve_ctx->evaluator;
-                sig_item.evaluator_override_arity =
-                    static_cast< uint32_t >(a->solve_ctx->vars.size());
-            }
-        }
+        // Step 10: Emit SignatureStatePayload
+        auto sig_item     = std::move(sig_seed);
+        sig_item.group_id = group_id;
 
         PassResult result;
         result.decision    = PassDecision::kAdvance;

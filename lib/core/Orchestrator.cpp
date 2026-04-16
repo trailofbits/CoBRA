@@ -1,6 +1,7 @@
 #include "Orchestrator.h"
 #include "OrchestratorPasses.h"
 #include "SemilinearPasses.h"
+#include "SignaturePasses.h"
 #include "SimplifierInternal.h"
 #include "cobra/core/AuxVarEliminator.h"
 #include "cobra/core/BitWidth.h"
@@ -635,6 +636,38 @@ namespace cobra {
             RunMetadata run_metadata;
         };
 
+        std::optional< OrchestratorResult >
+        TryReducedPolynomialSeedOutcome(const WorkItem &sig_seed, OrchestratorContext &ctx) {
+            auto fast_candidate = TryReducedPolynomialFastPath(sig_seed, ctx);
+            if (!fast_candidate.has_value()) { return std::nullopt; }
+
+            if (fast_candidate->needs_original_space_verification) {
+                if (!ctx.evaluator) { return std::nullopt; }
+
+                auto check = internal::VerifyInOriginalSpace(
+                    *ctx.evaluator, ctx.original_vars, fast_candidate->real_vars,
+                    *fast_candidate->expr, ctx.bitwidth
+                );
+                if (!check.passed) { return std::nullopt; }
+
+                fast_candidate->verification = VerificationState::kVerified;
+                fast_candidate->needs_original_space_verification = false;
+            }
+
+            ItemMetadata meta;
+            meta.sig_vector   = fast_candidate->sig_vector;
+            meta.verification = fast_candidate->verification;
+
+            return OrchestratorResult{
+                .outcome = PassOutcome::Success(
+                    std::move(fast_candidate->expr), fast_candidate->real_vars,
+                    fast_candidate->verification
+                ),
+                .metadata     = std::move(meta),
+                .run_metadata = ctx.run_metadata,
+            };
+        }
+
         // Seed the worklist for the no-AST path (signature only).
         Result< std::optional< OrchestratorResult > > SeedNoAst(
             const std::vector< uint64_t > &sig, const std::vector< std::string > &vars,
@@ -674,10 +707,8 @@ namespace cobra {
 
             auto original_indices = BuildVarSupport(vars, elim.real_vars);
 
-            auto group_id = CreateGroup(ctx.competition_groups, ctx.next_group_id);
-
-            WorkItem sig_item;
-            sig_item.payload = SignatureStatePayload{
+            WorkItem sig_seed;
+            sig_seed.payload = SignatureStatePayload{
                 .ctx = {
                     .sig                               = sig,
                     .real_vars                         = elim.real_vars,
@@ -686,8 +717,16 @@ namespace cobra {
                     .needs_original_space_verification = false,
                 },
             };
-            sig_item.features.provenance = Provenance::kOriginal;
-            sig_item.group_id            = group_id;
+            sig_seed.features.provenance = Provenance::kOriginal;
+
+            if (auto fast_path = TryReducedPolynomialSeedOutcome(sig_seed, ctx)) {
+                return Ok(std::optional< OrchestratorResult >(std::move(*fast_path)));
+            }
+
+            auto group_id = CreateGroup(ctx.competition_groups, ctx.next_group_id);
+
+            auto sig_item     = std::move(sig_seed);
+            sig_item.group_id = group_id;
             worklist.Push(std::move(sig_item));
 
             return Ok(std::optional< OrchestratorResult >(std::nullopt));

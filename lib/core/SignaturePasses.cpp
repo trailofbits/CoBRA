@@ -50,6 +50,24 @@ namespace cobra {
             return record;
         }
 
+        WorkItem MakeInlineSignatureItem(
+            const WorkItem &item, const SignatureSubproblemContext &sub_ctx, GroupId group_id
+        ) {
+            WorkItem inline_item;
+            inline_item.payload                   = SignatureStatePayload{ .ctx = sub_ctx };
+            inline_item.features                  = item.features;
+            inline_item.metadata                  = item.metadata;
+            inline_item.depth                     = item.depth;
+            inline_item.rewrite_gen               = item.rewrite_gen;
+            inline_item.attempted_mask            = item.attempted_mask;
+            inline_item.signature_recursion_depth = item.signature_recursion_depth;
+            inline_item.group_id                  = group_id;
+            inline_item.evaluator_override        = item.evaluator_override;
+            inline_item.evaluator_override_arity  = item.evaluator_override_arity;
+            inline_item.history                   = item.history;
+            return inline_item;
+        }
+
         bool SubmitNormalizedCandidate(
             absl::flat_hash_map< GroupId, CompetitionGroup > &groups, GroupId group_id,
             CandidateRecord record, uint32_t bitwidth
@@ -91,6 +109,89 @@ namespace cobra {
             return ctx.evaluator->Remap(
                 sub_ctx.original_indices, static_cast< uint32_t >(ctx.original_vars.size()),
                 EvaluatorTraceKind::kMappedGlobal
+            );
+        }
+
+        struct InlineGroupFrame
+        {
+            explicit InlineGroupFrame(OrchestratorContext &ctx_)
+                : ctx(ctx_)
+                , saved_next_group_id(ctx.next_group_id)
+                , group_id(CreateGroup(ctx.competition_groups, ctx.next_group_id)) {}
+
+            ~InlineGroupFrame() {
+                ctx.competition_groups.erase(group_id);
+                ctx.next_group_id = saved_next_group_id;
+            }
+
+            std::optional< CandidateRecord > TakeWinner() {
+                auto group_it = ctx.competition_groups.find(group_id);
+                if (group_it == ctx.competition_groups.end()
+                    || !group_it->second.best.has_value())
+                {
+                    return std::nullopt;
+                }
+                return NormalizeCandidateRecord(
+                    std::move(*group_it->second.best), ctx.bitwidth
+                );
+            }
+
+            OrchestratorContext &ctx;
+            GroupId saved_next_group_id;
+            GroupId group_id;
+        };
+
+        template< typename Runner >
+        std::optional< CandidateRecord > TryInlinePolynomialTechnique(
+            const WorkItem &item, OrchestratorContext &ctx, Runner &&run
+        ) {
+            const auto &sub_ctx = std::get< SignatureStatePayload >(item.payload).ctx;
+            InlineGroupFrame frame(ctx);
+            auto inline_item = MakeInlineSignatureItem(item, sub_ctx, frame.group_id);
+            if (!run(inline_item, ctx)) { return std::nullopt; }
+            return frame.TakeWinner();
+        }
+
+        bool IsMultivarPolynomialFastPathCandidate(
+            const WorkItem &item, const SignatureSubproblemContext &sub_ctx
+        ) {
+            const auto num_vars = sub_ctx.real_vars.size();
+            if (num_vars < 2 || num_vars > 4 || !item.features.classification) { return false; }
+
+            const auto &cls = *item.features.classification;
+            return cls.semantic == SemanticClass::kPolynomial
+                && HasFlag(cls.flags, kSfHasMultivarHighPower);
+        }
+
+        std::optional< CandidateRecord >
+        TryInlineUnivariatePolynomialFastPath(const WorkItem &item, OrchestratorContext &ctx) {
+            const auto &sub_ctx = std::get< SignatureStatePayload >(item.payload).ctx;
+            if (sub_ctx.real_vars.size() != 1) { return std::nullopt; }
+            if (!BuildMappedEvaluator(ctx, sub_ctx, item)) { return std::nullopt; }
+
+            return TryInlinePolynomialTechnique(
+                item, ctx, [](WorkItem &inline_item, OrchestratorContext &ctx) {
+                    auto prep_result = RunPrepareCoeffModel(inline_item, ctx);
+                    if (!prep_result.has_value() || prep_result->next.empty()) { return false; }
+
+                    auto singleton_result =
+                        RunSignatureSingletonPolyRecovery(prep_result->next.front(), ctx);
+                    return singleton_result.has_value();
+                }
+            );
+        }
+
+        std::optional< CandidateRecord >
+        TryInlineMultivarPolynomialFastPath(const WorkItem &item, OrchestratorContext &ctx) {
+            const auto &sub_ctx = std::get< SignatureStatePayload >(item.payload).ctx;
+            if (!IsMultivarPolynomialFastPathCandidate(item, sub_ctx)) { return std::nullopt; }
+            if (!BuildMappedEvaluator(ctx, sub_ctx, item)) { return std::nullopt; }
+
+            return TryInlinePolynomialTechnique(
+                item, ctx, [](WorkItem &inline_item, OrchestratorContext &ctx) {
+                    auto recovery_result = RunSignatureMultivarPolyRecovery(inline_item, ctx);
+                    return recovery_result.has_value();
+                }
             );
         }
 
@@ -656,6 +757,22 @@ namespace cobra {
         }
 
     } // namespace
+
+    std::optional< CandidateRecord >
+    TryReducedPolynomialFastPath(const WorkItem &item, OrchestratorContext &ctx) {
+        if (!std::holds_alternative< SignatureStatePayload >(item.payload)) {
+            return std::nullopt;
+        }
+
+        const auto &sub_ctx = std::get< SignatureStatePayload >(item.payload).ctx;
+        const auto num_vars = sub_ctx.real_vars.size();
+
+        if (num_vars == 1) { return TryInlineUnivariatePolynomialFastPath(item, ctx); }
+        if (num_vars >= 2 && num_vars <= 4) {
+            return TryInlineMultivarPolynomialFastPath(item, ctx);
+        }
+        return std::nullopt;
+    }
 
     // ---------------------------------------------------------------
     // RunResolveCompetition (existing)

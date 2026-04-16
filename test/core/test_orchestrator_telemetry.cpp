@@ -46,3 +46,17 @@ TEST(Telemetry, NonTrivialExprHasExpansions) {
     ASSERT_TRUE(result.has_value());
     EXPECT_GT(result.value().telemetry.total_expansions, 0u);
 }
+
+TEST(Telemetry, SignatureOnlyUnivariatePolynomialFastPathIsImmediate) {
+    auto expr = Expr::Mul(Expr::Mul(Expr::Variable(0), Expr::Variable(0)), Expr::Variable(0));
+    auto sig  = EvaluateBooleanSignature(*expr, 1, 64);
+
+    Options opts{ .bitwidth = 64, .max_vars = 16, .spot_check = true };
+    opts.evaluator = Evaluator::FromExpr(*expr, 64);
+
+    auto result = Simplify(sig, { "x" }, nullptr, opts);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result.value().kind, SimplifyOutcome::Kind::kSimplified);
+    EXPECT_EQ(result.value().telemetry.total_expansions, 0u);
+    EXPECT_TRUE(result.value().verified);
+}
