@@ -1,3 +1,5 @@
+# Source: https://github.com/DenuvoSoftwareSolutions/GAMBA (GPL-3.0-only)
+# Origin: https://github.com/werew/qsynth-artifacts (no license specified)
 #mbaexpression, originalexpression
 ((c-b)-((c|~b)+(c|~b)))-2, (c^b)
 ~(((e&c)*(e|c)+(e&~c)*(~e&c))-1), (-(e*c))

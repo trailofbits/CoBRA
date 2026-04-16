@@ -1,3 +1,5 @@
+# Source: https://github.com/DenuvoSoftwareSolutions/GAMBA (GPL-3.0-only)
+# Origin: https://github.com/RUB-SysSec/loki (AGPL-3.0-only)
 # add, depth 1
 (~ ((~ x) + (- (x ^ (x ^ y))))), x + y
 ((~ (x ^ (~ (y & (~ y))))) + y), x + y

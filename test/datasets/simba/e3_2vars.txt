@@ -1,3 +1,5 @@
+# Source: https://github.com/pgarba/SiMBA- (GPL-3.0-only)
+# Origin: https://github.com/DenuvoSoftwareSolutions/SiMBA (GPL-3.0-only)
 # 49374 + 3735936685*x
 49374*(x&~y) + 18446744073709502242*~(x&y) + 3735887311*x, 49374 + 3735936685*x
 10297660450418051044*(x&~y) + 10297660446682114359*~x + 10297660450418051044*(x&y) + 10297660446682163733, 49374 + 3735936685*x

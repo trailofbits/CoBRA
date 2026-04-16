@@ -1,3 +1,5 @@
+# Source: https://github.com/fvrmatteo/oracle-synthesis-meets-equality-saturation
+# License: not specified
 # expression	ground_truth
 ~(x+y+(~(x+y+x+y))+-z)	(x+y+z)
 (x&~y)+(-(~y))+(~x)+(-y)	-(x&y)

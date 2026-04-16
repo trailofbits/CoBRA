@@ -1,3 +1,5 @@
+# Source: https://github.com/pgarba/SiMBA- (GPL-3.0-only)
+# Origin: https://github.com/DenuvoSoftwareSolutions/SiMBA (GPL-3.0-only)
 # x + y
 2*~(x|~y) - (x^y) + 2*x, x + y
 -~(x|y) + ~(x^y) + (x|y), x + y

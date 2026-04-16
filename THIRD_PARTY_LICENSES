@@ -1,0 +1,152 @@
+# Third-Party Dataset Licenses
+
+The CoBRA library is licensed under Apache-2.0 (see LICENSE). The test
+datasets in test/datasets/ are redistributed from third-party research
+projects under their original licenses, which may differ from the
+library license. This file documents the provenance and license of each
+dataset.
+
+Users who redistribute CoBRA's test datasets must comply with the
+license terms listed below.
+
+## Summary
+
+The "Effective License" column shows the most restrictive license in
+the redistribution chain. Where the original project has no license
+but was redistributed through a GPLv3 repository (SiMBA++ or GAMBA),
+the GPLv3 terms of the redistributor apply.
+
+| Directory / File        | Taken From  | Originally By   | Original License | Effective License |
+|-------------------------|-------------|-----------------|------------------|-------------------|
+| univariate64.txt        | Simplifier  | Simplifier      | GPLv3            | GPL-3.0-only      |
+| multivariate64.txt      | Simplifier  | Simplifier      | GPLv3            | GPL-3.0-only      |
+| permutation64.txt       | Simplifier  | Simplifier      | GPLv3            | GPL-3.0-only      |
+| msimba.txt              | Simplifier  | Simplifier      | GPLv3            | GPL-3.0-only      |
+| simba/e*_*vars.txt      | SiMBA++     | SiMBA (Denuvo)  | GPLv3            | GPL-3.0-only      |
+| simba/pldi_*.txt        | SiMBA++     | MBA-Solver      | GPLv3            | GPL-3.0-only      |
+| simba/blast_dataset*.txt| SiMBA++     | MBA-Blast       | Not specified    | GPL-3.0-only      |
+| simba/test_data.txt     | SiMBA++     | NeuReduce       | Not specified    | GPL-3.0-only      |
+| gamba/loki_tiny.txt     | GAMBA       | Loki            | AGPLv3           | AGPL-3.0-only     |
+| gamba/neureduce.txt     | GAMBA       | NeuReduce       | Not specified    | GPL-3.0-only      |
+| gamba/mba_obf_*.txt     | GAMBA       | MBA-Obfuscator  | MIT              | GPL-3.0-only      |
+| gamba/syntia.txt        | GAMBA       | QSynth          | Not specified    | GPL-3.0-only      |
+| gamba/qsynth_ea.txt     | GAMBA       | QSynth          | Not specified    | GPL-3.0-only      |
+| gamba/mba_flatten.txt   | GAMBA       | MBA-Flatten     | Not specified    | GPL-3.0-only      |
+| oses/oses_*.txt         | OSES        | OSES            | Not specified    | Not specified     |
+| obfuscatorx.txt         | —           | ObfuscatorX     | Unknown          | Unknown           |
+
+Note: `simba/test_data.txt` and `gamba/neureduce.txt` are both the
+NeuReduce dataset with minor variable renaming (`b` vs `t`).
+
+## Immediate Sources
+
+### Simplifier (GPL-3.0-only)
+
+Repository: https://github.com/mazeworks-security/Simplifier
+License:    GPL-3.0-only
+
+Source of univariate64.txt, multivariate64.txt, permutation64.txt,
+and msimba.txt.
+
+### SiMBA++ (GPL-3.0-only)
+
+Repository: https://github.com/pgarba/SiMBA-
+License:    GPL-3.0-only
+
+The simba/ directory was sourced from the SiMBA++ repository. SiMBA++
+itself aggregates datasets from several earlier projects (MBA-Solver,
+MBA-Blast, NeuReduce). The SiMBA++ repository is licensed under GPLv3;
+the original projects' licenses are listed below.
+
+### GAMBA (GPL-3.0-only)
+
+Repository: https://github.com/DenuvoSoftwareSolutions/GAMBA
+License:    GPL-3.0-only
+
+The gamba/ directory was sourced from the GAMBA repository. GAMBA
+aggregates datasets from Loki, NeuReduce, MBA-Obfuscator, QSynth,
+Syntia, and MBA-Flatten. The GAMBA repository is licensed under GPLv3;
+the original projects' licenses are listed below.
+
+## Original Sources
+
+### SiMBA (GPL-3.0-only)
+
+Repository:  https://github.com/DenuvoSoftwareSolutions/SiMBA
+License:     GPL-3.0-only
+Publication: SiMBA: Black-box Semantics-aware MBA Deobfuscation
+
+Origin of the E-series expression templates (e1-e5, 2-5 variables).
+
+### MBA-Solver (GPL-3.0-only)
+
+Repository:  https://github.com/softsec-unh/MBA-Solver
+License:     GPL-3.0-only
+Publication: Boosting SMT Solver Performance on Mixed Bitwise-Arithmetic
+             Expressions (PLDI'21)
+
+Origin of the PLDI linear, polynomial, and nonpolynomial datasets.
+
+### MBA-Blast (no license specified)
+
+Repository:  https://github.com/softsec-unh/MBA-Blast
+License:     No LICENSE file in repository
+Publication: USENIX Security'21
+
+Origin of blast_dataset1.txt and blast_dataset2.txt.
+
+### NeuReduce (no license specified)
+
+Repository:  https://github.com/fvrmatteo/NeuReduce
+License:     No LICENSE file in repository
+Publication: Semantics-Aware Machine Learning for Function Recognition
+             in Binary Executables (EMNLP'20)
+
+Origin of neureduce.txt and test_data.txt.
+
+### Loki (AGPL-3.0-only)
+
+Repository:  https://github.com/RUB-SysSec/loki
+License:     AGPL-3.0-only
+Publication: Loki: Hardening Code Obfuscation Against Automated Attacks
+             (USENIX Security'22)
+
+Origin of loki_tiny.txt.
+
+### MBA-Obfuscator (MIT)
+
+Repository:  https://github.com/nhpcc502/MBA-Obfuscator
+License:     MIT
+Publication: ICICS'21
+
+Origin of mba_obf_linear.txt and mba_obf_nonlinear.txt.
+
+### QSynth artifacts (no license specified)
+
+Repository:  https://github.com/werew/qsynth-artifacts
+License:     No LICENSE file in repository
+Publication: QSynth: A Program Synthesis based Approach for Binary Code
+             Deobfuscation (BAR'20)
+
+Origin of qsynth_ea.txt and syntia.txt.
+
+### MBA-Flatten (no license specified)
+
+Repository:  https://tinyurl.com/y5l948pu
+License:     No license identified
+Publication: Security and Communication Networks'22
+
+Origin of mba_flatten.txt.
+
+### OSES (no license specified)
+
+Repository:  https://github.com/fvrmatteo/oracle-synthesis-meets-equality-saturation
+License:     No LICENSE file in repository
+
+Origin of oses_fast.txt, oses_slow.txt, oses_all.txt.
+
+### ObfuscatorX (unknown)
+
+License:     Unknown (expressions extracted from a commercial binary)
+
+Origin of obfuscatorx.txt.

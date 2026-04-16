@@ -1,3 +1,5 @@
+# Source: https://github.com/pgarba/SiMBA- (GPL-3.0-only)
+# Origin: https://github.com/DenuvoSoftwareSolutions/SiMBA (GPL-3.0-only)
 # 49374 + 3735936685*(x^y)
 11045209123311650142*~y + 3735936685*(x^y) + 11045209123311650142*y + 11045209123311699516, 49374 + 3735936685*(x^y)
 3735936685*(x^y) + 49374, 49374 + 3735936685*(x^y)

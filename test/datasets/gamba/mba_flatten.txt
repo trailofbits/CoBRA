@@ -1,3 +1,5 @@
+# Source: https://github.com/DenuvoSoftwareSolutions/GAMBA (GPL-3.0-only)
+# Origin: MBA-Flatten (no license specified)
 #complex,groundtruth
 #2-variable linear MBA expression
 -x-1,~x

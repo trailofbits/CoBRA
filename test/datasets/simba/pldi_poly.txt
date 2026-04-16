@@ -1,3 +1,5 @@
+# Source: https://github.com/pgarba/SiMBA- (GPL-3.0-only)
+# Origin: https://github.com/softsec-unh/MBA-Solver (GPL-3.0-only)
 #complex, groundtruth
 (x&y)*(x|y)+(x&~y)*(~x&y),x*y
 (x&x)*(x|x)+(x&~x)*(~x&x),x*x

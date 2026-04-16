@@ -169,8 +169,8 @@ namespace {
 
 TEST(DatasetBenchmark, Univariate64) {
     auto stats = run_dataset(DATASET_DIR "/univariate64.txt");
-    EXPECT_EQ(stats.total, 1000);
-    EXPECT_EQ(stats.skipped_parse, 0);
+    EXPECT_EQ(stats.total, 1001);
+    EXPECT_EQ(stats.skipped_parse, 1);
     EXPECT_EQ(stats.parsed, 1000);
     // All 1000 are polynomial (x0*x0 terms) but simplify to
     // linear targets (c*x0). Full-width verified.
@@ -181,8 +181,8 @@ TEST(DatasetBenchmark, Univariate64) {
 
 TEST(DatasetBenchmark, Multivariate64) {
     auto stats = run_dataset(DATASET_DIR "/multivariate64.txt");
-    EXPECT_EQ(stats.total, 1000);
-    EXPECT_EQ(stats.skipped_parse, 0);
+    EXPECT_EQ(stats.total, 1001);
+    EXPECT_EQ(stats.skipped_parse, 1);
     EXPECT_EQ(stats.parsed, 1000);
     // 994 polynomial (x0*x1 terms) simplify to linear targets.
     // All 1000 pass full-width verification.
@@ -193,8 +193,8 @@ TEST(DatasetBenchmark, Multivariate64) {
 
 TEST(DatasetBenchmark, Permutation64) {
     auto stats = run_dataset(DATASET_DIR "/permutation64.txt");
-    EXPECT_EQ(stats.total, 13);
-    EXPECT_EQ(stats.skipped_parse, 0);
+    EXPECT_EQ(stats.total, 14);
+    EXPECT_EQ(stats.skipped_parse, 1);
     EXPECT_EQ(stats.parsed, 13);
     EXPECT_EQ(stats.simplified, 13);
     EXPECT_EQ(stats.unsupported, 0);
@@ -203,8 +203,8 @@ TEST(DatasetBenchmark, Permutation64) {
 
 TEST(DatasetBenchmark, MSiMBA) {
     auto stats = run_dataset(DATASET_DIR "/msimba.txt");
-    EXPECT_EQ(stats.total, 1000);
-    EXPECT_EQ(stats.skipped_parse, 0);
+    EXPECT_EQ(stats.total, 1001);
+    EXPECT_EQ(stats.skipped_parse, 1);
     EXPECT_EQ(stats.parsed, 1000);
     EXPECT_EQ(stats.simplified, 1000);
     EXPECT_EQ(stats.unsupported, 0);
@@ -226,8 +226,8 @@ class SiMBAExprDataset : public ::testing::TestWithParam< SiMBAParam >
 
 TEST_P(SiMBAExprDataset, SimplifiesAll) {
     auto stats = run_dataset(DATASET_DIR "/simba/" + GetParam().file);
-    EXPECT_EQ(stats.total, 1001);
-    EXPECT_EQ(stats.skipped_parse, 1);
+    EXPECT_EQ(stats.total, 1003);
+    EXPECT_EQ(stats.skipped_parse, 3);
     EXPECT_EQ(stats.parsed, 1000);
     EXPECT_EQ(stats.simplified, 1000);
     EXPECT_EQ(stats.unsupported, 0);
@@ -251,9 +251,9 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST(SiMBADataset, PLDILinear) {
     auto stats = run_dataset(DATASET_DIR "/simba/pldi_linear.txt");
-    // 4 comment lines (#complex,groundtruth, #N-variable headers)
-    EXPECT_EQ(stats.total, 1012);
-    EXPECT_EQ(stats.skipped_parse, 4);
+    // 6 comment lines (2 license + #complex,groundtruth + #N-variable headers)
+    EXPECT_EQ(stats.total, 1014);
+    EXPECT_EQ(stats.skipped_parse, 6);
     EXPECT_EQ(stats.parsed, 1008);
     EXPECT_EQ(stats.simplified, 1008);
     EXPECT_EQ(stats.unsupported, 0);
@@ -262,8 +262,8 @@ TEST(SiMBADataset, PLDILinear) {
 
 TEST(SiMBADataset, PLDIPoly) {
     auto stats = run_dataset(DATASET_DIR "/simba/pldi_poly.txt");
-    EXPECT_EQ(stats.total, 1009);
-    EXPECT_EQ(stats.skipped_parse, 1);
+    EXPECT_EQ(stats.total, 1011);
+    EXPECT_EQ(stats.skipped_parse, 3);
     EXPECT_EQ(stats.parsed, 1008);
     EXPECT_EQ(stats.simplified, 1008);
     EXPECT_EQ(stats.unsupported, 0);
@@ -272,8 +272,8 @@ TEST(SiMBADataset, PLDIPoly) {
 
 TEST(SiMBADataset, PLDINonPoly) {
     auto stats = run_dataset(DATASET_DIR "/simba/pldi_nonpoly.txt");
-    EXPECT_EQ(stats.total, 1004);
-    EXPECT_EQ(stats.skipped_parse, 1); // #complex,groundtruth header
+    EXPECT_EQ(stats.total, 1006);
+    EXPECT_EQ(stats.skipped_parse, 3);
     EXPECT_EQ(stats.parsed, 1003);
     EXPECT_EQ(stats.simplified, 1003);
     EXPECT_EQ(stats.unsupported, 0);
@@ -282,8 +282,8 @@ TEST(SiMBADataset, PLDINonPoly) {
 
 TEST(SiMBADataset, TestData) {
     auto stats = run_dataset(DATASET_DIR "/simba/test_data.txt");
-    EXPECT_EQ(stats.total, 10000);
-    EXPECT_EQ(stats.skipped_parse, 0);
+    EXPECT_EQ(stats.total, 10002);
+    EXPECT_EQ(stats.skipped_parse, 2);
     EXPECT_EQ(stats.parsed, 10000);
     EXPECT_EQ(stats.simplified, 10000);
     EXPECT_EQ(stats.unsupported, 0);
@@ -292,8 +292,8 @@ TEST(SiMBADataset, TestData) {
 
 TEST(SiMBADataset, BlastDataset1) {
     auto stats = run_dataset(DATASET_DIR "/simba/blast_dataset1.txt");
-    EXPECT_EQ(stats.total, 63);
-    EXPECT_EQ(stats.skipped_parse, 1);
+    EXPECT_EQ(stats.total, 65);
+    EXPECT_EQ(stats.skipped_parse, 3);
     EXPECT_EQ(stats.parsed, 62);
     EXPECT_EQ(stats.simplified, 62);
     EXPECT_EQ(stats.unsupported, 0);
@@ -302,8 +302,8 @@ TEST(SiMBADataset, BlastDataset1) {
 
 TEST(SiMBADataset, BlastDataset2) {
     auto stats = run_dataset(DATASET_DIR "/simba/blast_dataset2.txt");
-    EXPECT_EQ(stats.total, 2501);
-    EXPECT_EQ(stats.skipped_parse, 1);
+    EXPECT_EQ(stats.total, 2503);
+    EXPECT_EQ(stats.skipped_parse, 3);
     EXPECT_EQ(stats.parsed, 2500);
     EXPECT_EQ(stats.simplified, 2500);
     EXPECT_EQ(stats.unsupported, 0);
@@ -314,8 +314,8 @@ TEST(SiMBADataset, BlastDataset2) {
 
 TEST(GAMBADataset, NeuReduce) {
     auto stats = run_dataset(DATASET_DIR "/gamba/neureduce.txt");
-    EXPECT_EQ(stats.total, 10000);
-    EXPECT_EQ(stats.skipped_parse, 0);
+    EXPECT_EQ(stats.total, 10002);
+    EXPECT_EQ(stats.skipped_parse, 2);
     EXPECT_EQ(stats.parsed, 10000);
     EXPECT_EQ(stats.simplified, 10000);
     EXPECT_EQ(stats.unsupported, 0);
@@ -324,8 +324,8 @@ TEST(GAMBADataset, NeuReduce) {
 
 TEST(GAMBADataset, MbaObfLinear) {
     auto stats = run_dataset(DATASET_DIR "/gamba/mba_obf_linear.txt");
-    EXPECT_EQ(stats.total, 1001);
-    EXPECT_EQ(stats.skipped_parse, 1); // #linear,groundtruth header
+    EXPECT_EQ(stats.total, 1003);
+    EXPECT_EQ(stats.skipped_parse, 3);
     EXPECT_EQ(stats.parsed, 1000);
     EXPECT_EQ(stats.simplified, 1000);
     EXPECT_EQ(stats.unsupported, 0);
@@ -334,8 +334,8 @@ TEST(GAMBADataset, MbaObfLinear) {
 
 TEST(GAMBADataset, MbaObfNonlinear) {
     auto stats = run_dataset(DATASET_DIR "/gamba/mba_obf_nonlinear.txt");
-    EXPECT_EQ(stats.total, 1002);
-    EXPECT_EQ(stats.skipped_parse, 2); // #poly + #nonpoly headers
+    EXPECT_EQ(stats.total, 1004);
+    EXPECT_EQ(stats.skipped_parse, 4);
     EXPECT_EQ(stats.parsed, 1000);
     EXPECT_EQ(stats.simplified, 1000);
     EXPECT_EQ(stats.unsupported, 0);
@@ -344,8 +344,8 @@ TEST(GAMBADataset, MbaObfNonlinear) {
 
 TEST(GAMBADataset, Syntia) {
     auto stats = run_dataset(DATASET_DIR "/gamba/syntia.txt");
-    EXPECT_EQ(stats.total, 501);
-    EXPECT_EQ(stats.skipped_parse, 1); // header
+    EXPECT_EQ(stats.total, 503);
+    EXPECT_EQ(stats.skipped_parse, 3);
     EXPECT_EQ(stats.parsed, 500);
     // Technique-level DAG: extractors scheduled individually, expanding coverage
     EXPECT_EQ(stats.simplified, 500);
@@ -355,8 +355,8 @@ TEST(GAMBADataset, Syntia) {
 
 TEST(GAMBADataset, QSynthEA) {
     auto stats = run_dataset(DATASET_DIR "/gamba/qsynth_ea.txt");
-    EXPECT_EQ(stats.total, 501);
-    EXPECT_EQ(stats.skipped_parse, 1); // header only
+    EXPECT_EQ(stats.total, 503);
+    EXPECT_EQ(stats.skipped_parse, 3);
     EXPECT_EQ(stats.parsed, 500);
     EXPECT_EQ(stats.simplified, 466);
     EXPECT_EQ(stats.unsupported, 34);
@@ -376,8 +376,8 @@ TEST(GAMBADataset, QSynthEA) {
 
 TEST(GAMBADataset, LokiTiny) {
     auto stats = run_dataset(DATASET_DIR "/gamba/loki_tiny.txt");
-    EXPECT_EQ(stats.total, 25025);
-    EXPECT_EQ(stats.skipped_parse, 25); // 25 section headers
+    EXPECT_EQ(stats.total, 25027);
+    EXPECT_EQ(stats.skipped_parse, 27);
     EXPECT_EQ(stats.parsed, 25000);
     // All are linear 2-var (x+y, x&y, x|y, x-y, x^y)
     EXPECT_EQ(stats.simplified, 25000);
@@ -387,10 +387,10 @@ TEST(GAMBADataset, LokiTiny) {
 
 TEST(GAMBADataset, MbaFlatten) {
     auto stats = run_dataset(DATASET_DIR "/gamba/mba_flatten.txt");
-    EXPECT_EQ(stats.total, 3008);
-    // 8 headers + 899 sub-expression lines (3-field CSV) +
+    EXPECT_EQ(stats.total, 3010);
+    // 2 license + 8 headers + 899 sub-expression lines (3-field CSV) +
     // 41 "cannot be solved by MBA-Solver" (multi-var parse failures)
-    EXPECT_EQ(stats.skipped_parse, 948);
+    EXPECT_EQ(stats.skipped_parse, 950);
     EXPECT_EQ(stats.parsed, 2060);
     EXPECT_EQ(stats.simplified, 2060);
     EXPECT_EQ(stats.unsupported, 0);
@@ -406,8 +406,8 @@ TEST(GAMBADataset, MbaFlatten) {
 // Needs iterative EvalExpr or expression depth limit.
 TEST(OSESDataset, DISABLED_Fast) {
     auto stats = run_dataset(DATASET_DIR "/oses/oses_fast.txt");
-    EXPECT_EQ(stats.total, 473);
-    EXPECT_EQ(stats.skipped_parse, 15);
+    EXPECT_EQ(stats.total, 475);
+    EXPECT_EQ(stats.skipped_parse, 17);
     EXPECT_EQ(stats.parsed, 458);
     EXPECT_GE(stats.simplified, 385);
     EXPECT_LE(stats.simplified, 392);
@@ -423,8 +423,8 @@ TEST(OSESDataset, DISABLED_Fast) {
 
 TEST(ObfuscatorXDataset, All) {
     auto stats = run_dataset(DATASET_DIR "/obfuscatorx.txt");
-    EXPECT_EQ(stats.total, 8);
-    EXPECT_EQ(stats.skipped_parse, 1); // header
+    EXPECT_EQ(stats.total, 10);
+    EXPECT_EQ(stats.skipped_parse, 3);
     EXPECT_EQ(stats.parsed, 7);
     EXPECT_EQ(stats.simplified, 7);
     EXPECT_EQ(stats.unsupported, 0);
@@ -433,8 +433,8 @@ TEST(ObfuscatorXDataset, All) {
 
 TEST(OSESDataset, DISABLED_Slow) {
     auto stats = run_dataset(DATASET_DIR "/oses/oses_slow.txt");
-    EXPECT_EQ(stats.total, 7);
-    EXPECT_EQ(stats.skipped_parse, 0);
+    EXPECT_EQ(stats.total, 9);
+    EXPECT_EQ(stats.skipped_parse, 2);
     EXPECT_EQ(stats.parsed, 7);
     EXPECT_EQ(stats.simplified, 6);
     EXPECT_EQ(stats.unsupported, 1);

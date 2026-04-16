@@ -243,4 +243,4 @@ Additional thanks to [Jack Royer](https://github.com/Garfield1002), [Matteo Fava
 
 ## License
 
-[Apache-2.0](LICENSE)
+[Apache-2.0](LICENSE). Test datasets in `test/datasets/` are redistributed from third-party research projects under their original licenses (primarily GPL-3.0). See [THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES) for details.

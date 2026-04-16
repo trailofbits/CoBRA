@@ -1,6 +1,6 @@
 # Dataset Benchmark Report
 
-CoBRA is validated against **76,144 lines** drawn from **35 dataset files** spanning 7 independent sources. Every expression is parsed, simplified, and spot-checked at runtime. The numbers below are enforced by automated test assertions in [`test/verify/test_dataset_benchmarks.cpp`](test/verify/test_dataset_benchmarks.cpp) and verified on every CI run. OSES Fast is currently disabled (OOM on deeply nested expressions); its numbers are from the last successful run on master.
+CoBRA is validated against **76,144 lines** drawn from **35 dataset files** spanning 7 independent sources. These datasets are redistributed under their original licenses, which differ from CoBRA's Apache-2.0 license. See [THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES) for provenance and license details. Every expression is parsed, simplified, and spot-checked at runtime. The numbers below are enforced by automated test assertions in [`test/verify/test_dataset_benchmarks.cpp`](test/verify/test_dataset_benchmarks.cpp) and verified on every CI run. OSES Fast is currently disabled (OOM on deeply nested expressions); its numbers are from the last successful run on master.
 
 **Overall: 75,023 / 75,126 parsed expressions simplified (99.86%).**
 
@@ -21,7 +21,9 @@ CoBRA classifies each input expression into one of four semantic classes and sel
 
 ## Results by Dataset
 
-### Proprietary Datasets
+### MSiMBA Datasets
+
+Source: [Simplifier](https://github.com/mazeworks-security/Simplifier) (GPL-3.0-only)
 
 | Dataset | Expressions | Parsed | Simplified | Unsupported | Rate |
 |---------|:-----------:|:------:|:----------:|:-----------:|:----:|
@@ -34,12 +36,15 @@ CoBRA classifies each input expression into one of four semantic classes and sel
 - **permutation64**: High-degree polynomial expressions with `**` (exponentiation). All 13 expressions parse and simplify correctly.
 - **msimba**: Semilinear expressions with bit-extraction patterns. All 1,000 simplify via bit-partitioned semilinear techniques.
 
-### SiMBA Datasets
+### SiMBA++ Datasets
+
+All files in the `simba/` directory were taken from the [SiMBA++](https://github.com/pgarba/SiMBA-) repository (GPL-3.0-only). SiMBA++ aggregates datasets from several upstream projects; original provenance is noted per subsection.
 
 #### Expression Templates (E-Series)
 
+Originally from [SiMBA](https://github.com/DenuvoSoftwareSolutions/SiMBA) (GPL-3.0-only, Denuvo Software Solutions). Redistributed via SiMBA++.
+
 Each file contains 1,000 obfuscated linear MBA expressions plus a header comment. All 16,000 expressions across 16 files simplify at 100%.
-From the [SiMBA](https://github.com/DenuvoSoftwareSolutions/SiMBA) paper.
 
 | Dataset | Variables | Expressions | Simplified | Rate |
 |---------|:---------:|:-----------:|:----------:|:----:|
@@ -63,8 +68,7 @@ From the [SiMBA](https://github.com/DenuvoSoftwareSolutions/SiMBA) paper.
 
 #### PLDI Research Datasets
 
-Originally from the [MBA-Solver](https://github.com/softsec-unh/MBA-Solver) repository, published at [PLDI'21](https://pldi21.sigplan.org/details/pldi-2021-papers/43/Boosting-SMT-Solver-Performance-on-Mixed-Bitwise-Arithmetic-Expressions).
-Source: [SiMBA++](https://github.com/pgarba/SiMBA-)
+Originally from the [MBA-Solver](https://github.com/softsec-unh/MBA-Solver) repository (GPL-3.0-only), published at [PLDI'21](https://pldi21.sigplan.org/details/pldi-2021-papers/43/Boosting-SMT-Solver-Performance-on-Mixed-Bitwise-Arithmetic-Expressions). Redistributed via SiMBA++.
 
 | Dataset | Total Lines | Parsed | Simplified | Notes | Rate |
 |---------|:-----------:|:------:|:----------:|-------|:----:|
@@ -72,18 +76,18 @@ Source: [SiMBA++](https://github.com/pgarba/SiMBA-)
 | `pldi_poly.txt` | 1,009 | 1,008 | **1,008** | 1 comment header skipped | **100%** |
 | `pldi_nonpoly.txt` | 1,005 | 1,003 | **1,003** | 1 comment header skipped | **100%** |
 
-#### Other SiMBA Datasets
+#### MBA-Blast Datasets
 
-Originally from the [MBA-Blast](https://github.com/softsec-unh/MBA-Blast) repository, published at [USENIX Security'21](https://dl.acm.org/doi/10.1145/3453483.3454068).
-Source: [SiMBA++](https://github.com/pgarba/SiMBA-)
+Originally from the [MBA-Blast](https://github.com/softsec-unh/MBA-Blast) repository, published at [USENIX Security'21](https://dl.acm.org/doi/10.1145/3453483.3454068). Redistributed via SiMBA++.
 
 | Dataset | Total Lines | Parsed | Simplified | Rate |
 |---------|:-----------:|:------:|:----------:|:----:|
 | `blast_dataset1.txt` | 63 | 62 | **62** | **100%** |
 | `blast_dataset2.txt` | 2,501 | 2,500 | **2,500** | **100%** |
 
-[Neureduce](https://github.com/fvrmatteo/NeuReduce) dataset, published at [EMNLP'20](https://aclanthology.org/2020.findings-emnlp.56.pdf).
-Source: [SiMBA++](https://github.com/pgarba/SiMBA-)
+#### NeuReduce Dataset
+
+`test_data.txt` is the [NeuReduce](https://github.com/fvrmatteo/NeuReduce) dataset (published at [EMNLP'20](https://aclanthology.org/2020.findings-emnlp.56.pdf)) under a different filename. Redistributed via SiMBA++. A second copy with minor variable renaming (`b` &rarr; `t`) exists as `gamba/neureduce.txt` via GAMBA.
 
 | Dataset | Total Lines | Parsed | Simplified | Rate |
 |---------|:-----------:|:------:|:----------:|:----:|
@@ -92,7 +96,7 @@ Source: [SiMBA++](https://github.com/pgarba/SiMBA-)
 
 ### GAMBA Datasets
 
-Source: [GAMBA](https://github.com/DenuvoSoftwareSolutions/GAMBA) has a characterisation of the datasets.
+All files in the `gamba/` directory were taken from [GAMBA](https://github.com/DenuvoSoftwareSolutions/GAMBA) (GPL-3.0-only, Denuvo Software Solutions). GAMBA aggregates datasets from several upstream projects; original provenance is noted per entry.
 
 | Dataset | Origin | Total Lines | Parsed | Simplified | Unsupported | Rate |
 |---------|--------|:-----------:|:------:|:----------:|:-----------:|:----:|
@@ -105,7 +109,7 @@ Source: [GAMBA](https://github.com/DenuvoSoftwareSolutions/GAMBA) has a characte
 | `mba_flatten.txt` | MBA-Flatten | 3,008 | 2,060 | **2,060** | 0 | **100%** |
 
 - **loki_tiny**: 25 sections covering add, subtract, AND, OR, XOR at depths 1-5. All 25,000 are 2-variable linear MBAs. From the [Loki](https://github.com/RUB-SysSec/loki) repository, published at [USENIX Security'22](https://www.usenix.org/conference/usenixsecurity22/presentation/schloegel).
-- **neureduce.txt**: 10000 linear expressions with 2 to 5 variables. From the [Neureduce](https://github.com/fvrmatteo/NeuReduce) dataset, published at [EMNLP'20](https://aclanthology.org/2020.findings-emnlp.56.pdf).
+- **neureduce.txt**: 10,000 linear expressions with 2 to 5 variables. From the [NeuReduce](https://github.com/fvrmatteo/NeuReduce) dataset, published at [EMNLP'20](https://aclanthology.org/2020.findings-emnlp.56.pdf). Same dataset as `simba/test_data.txt` with minor variable renaming (`b` &rarr; `t`).
 - **mba_obf_nonlinear** and **mba_obf_linear**: 1000 polynomial/nonpolynomial + 1000 linear expressions, all with linear ground-truth targets. All pass full-width verification. From the [MBA-Obfuscator](https://github.com/nhpcc502/MBA-Obfuscator) repo, published at [ICICS'21](https://dl.acm.org/doi/10.1007/978-3-030-86890-1_16).
 - **syntia**: All 500 expressions simplify via the orchestrator's decomposition and lifting passes. From the [QSynth](https://github.com/werew/qsynth-artifacts) repo, published at [BAR'20](https://archive.bar/pdfs/bar2020-preprint9.pdf).
 - **qsynth_ea**: The most challenging dataset. 466 of 500 expressions simplify. The 34 unsupported expressions are mixed bitwise-arithmetic expressions where CoB is boolean-correct but diverges at full width, and polynomial recovery (d=1..4) also fails — a genuine representation gap in carry-sensitive boolean-null residuals. From the [QSynth](https://github.com/werew/qsynth-artifacts) repo, published at [BAR'20](https://archive.bar/pdfs/bar2020-preprint9.pdf).
@@ -157,12 +161,30 @@ All simplified results are validated via spot-check (random-input evaluation) at
 
 ## Dataset Sources
 
-| Source | URL | Datasets |
-|--------|-----|----------|
-| SiMBA++ | https://github.com/pgarba/SiMBA- | E-series, PLDI, BLAST, test_data |
-| GAMBA | https://github.com/DenuvoSoftwareSolutions/GAMBA | loki_tiny, neureduce, mba_obf_*, mba_flatten, syntia, qsynth_ea |
-| QSynth | (via GAMBA) | qsynth_ea |
-| NeuReduce | (via GAMBA) | neureduce |
-| Syntia | (via GAMBA) | syntia |
-| LOKI | (via GAMBA) | loki_tiny |
-| OSES | https://github.com/fvrmatteo/oracle-synthesis-meets-equality-saturation | oses_all |
+### Redistribution Sources
+
+These are the repositories from which CoBRA's copies were taken.
+
+| Source | URL | License | Datasets |
+|--------|-----|---------|----------|
+| Simplifier | https://github.com/mazeworks-security/Simplifier | GPL-3.0 | univariate64, multivariate64, permutation64, msimba |
+| SiMBA++ | https://github.com/pgarba/SiMBA- | GPL-3.0 | E-series, PLDI, BLAST, test_data |
+| GAMBA | https://github.com/DenuvoSoftwareSolutions/GAMBA | GPL-3.0 | loki_tiny, neureduce, mba_obf_*, mba_flatten, syntia, qsynth_ea |
+| OSES | https://github.com/fvrmatteo/oracle-synthesis-meets-equality-saturation | — | oses_all |
+
+### Original Authors
+
+These are the upstream projects that created the datasets. Some were aggregated into SiMBA++ or GAMBA before CoBRA sourced them.
+
+| Original | URL | License | Datasets |
+|----------|-----|---------|----------|
+| SiMBA | https://github.com/DenuvoSoftwareSolutions/SiMBA | GPL-3.0 | E-series |
+| MBA-Solver | https://github.com/softsec-unh/MBA-Solver | GPL-3.0 | PLDI |
+| MBA-Blast | https://github.com/softsec-unh/MBA-Blast | — | BLAST |
+| NeuReduce | https://github.com/fvrmatteo/NeuReduce | — | test_data, neureduce |
+| Loki | https://github.com/RUB-SysSec/loki | AGPL-3.0 | loki_tiny |
+| MBA-Obfuscator | https://github.com/nhpcc502/MBA-Obfuscator | MIT | mba_obf_* |
+| QSynth | https://github.com/werew/qsynth-artifacts | — | qsynth_ea, syntia |
+| MBA-Flatten | https://tinyurl.com/y5l948pu | — | mba_flatten |
+
+See [THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES) for full provenance and license details.

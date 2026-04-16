@@ -1,3 +1,5 @@
+# Source: https://github.com/pgarba/SiMBA- (GPL-3.0-only)
+# Origin: https://github.com/softsec-unh/MBA-Blast (no license specified)
 #complex,groundtruth
 (x^y)+2*(x|~y) + 2, x-y
 x-y - 2*(x|~y)-2, x^y
