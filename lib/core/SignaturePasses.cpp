@@ -1054,6 +1054,27 @@ namespace cobra {
         const auto &sub_ctx     = sig_payload.ctx;
         const auto &sig         = sub_ctx.elimination.reduced_sig;
         const auto num_vars     = static_cast< uint32_t >(sub_ctx.real_vars.size());
+        const auto expected_len = size_t{ 1 } << num_vars;
+
+        if (sig.size() != expected_len) {
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kBlocked,
+                    .disposition = ItemDisposition::kRetainCurrent,
+                    .reason =
+                        ReasonDetail{
+                            .top = {
+                                .code = {
+                                    ReasonCategory::kGuardFailed,
+                                    ReasonDomain::kSignature,
+                                },
+                                .message =
+                                    "Reduced signature arity does not match the active variable set",
+                            },
+                        },
+                }
+            );
+        }
 
         auto coeffs = InterpolateCoefficients(sig, num_vars, ctx.bitwidth);
 

@@ -166,6 +166,19 @@ namespace cobra {
 
 #endif // COBRA_SVE2
 
+        std::vector< uint64_t > CompactSignature(
+            const std::vector< uint64_t > &sig, uint64_t live_mask, uint32_t num_vars
+        ) {
+#if COBRA_X86
+            if (has_bmi2()) { return CompactSignatureHw(sig, live_mask, num_vars); }
+            return CompactSignatureSoft(sig, live_mask, num_vars);
+#elif COBRA_SVE2
+            return CompactSignatureSve2(sig, live_mask, num_vars);
+#else
+            return CompactSignatureSoft(sig, live_mask, num_vars);
+#endif
+        }
+
     } // namespace
 
     EliminationResult EliminateAuxVars(
@@ -182,22 +195,8 @@ namespace cobra {
 
         const uint64_t kLiveMask = DetectLiveMask(sig, kNumVars);
 
-        // Compact the signature vector in a single pass
-        std::vector< uint64_t > reduced;
-#if COBRA_X86
-        if (has_bmi2()) {
-            reduced = CompactSignatureHw(sig, kLiveMask, kNumVars);
-        } else {
-            reduced = CompactSignatureSoft(sig, kLiveMask, kNumVars);
-        }
-#elif COBRA_SVE2
-        reduced = CompactSignatureSve2(sig, kLiveMask, kNumVars);
-#else
-        reduced = CompactSignatureSoft(sig, kLiveMask, kNumVars);
-#endif
-
         EliminationResult result;
-        result.reduced_sig = std::move(reduced);
+        result.reduced_sig = CompactSignature(sig, kLiveMask, kNumVars);
         for (uint32_t v = 0; v < kNumVars; ++v) {
             if ((kLiveMask & (1ULL << v)) != 0u) {
                 result.real_vars.push_back(vars[v]);
@@ -252,7 +251,7 @@ namespace cobra {
         std::sort(result.real_vars.begin(), result.real_vars.end(), by_original_index);
         std::sort(result.spurious_vars.begin(), result.spurious_vars.end(), by_original_index);
 
-        result.reduced_sig = CompactSignatureSoft(sig, live_mask, kNumVars);
+        result.reduced_sig = CompactSignature(sig, live_mask, kNumVars);
 
         return result;
     }

@@ -96,6 +96,34 @@ TEST(ArithmeticAtomLifter, CarriesParentLocalSolveContext) {
     EXPECT_EQ((*skel->original_ctx.evaluator)(std::vector< uint64_t >{ 3, 5 }), 1u);
 }
 
+TEST(ArithmeticAtomLifter, UsesFreshVirtualNamesAgainstExistingLocals) {
+    auto expr =
+        Expr::BitwiseAnd(Expr::Mul(Expr::Variable(0), Expr::Variable(0)), Expr::Variable(1));
+    auto cls = ClassifyStructural(*expr);
+
+    Options opts{ .bitwidth = 64, .max_vars = 16 };
+    auto ctx = MakeLiftCtx(opts, { "x" });
+
+    WorkItem item;
+    item.payload = AstPayload{
+        .expr           = std::move(expr),
+        .classification = cls,
+        .provenance     = Provenance::kRewritten,
+        .solve_ctx      = AstSolveContext{ .vars = { "x", "v0" } },
+    };
+    item.features.classification = cls;
+    item.features.provenance     = Provenance::kRewritten;
+
+    auto result = RunLiftArithmeticAtoms(item, ctx);
+    ASSERT_TRUE(result.has_value());
+    auto &pr = result.value();
+    ASSERT_EQ(pr.decision, PassDecision::kAdvance);
+
+    auto *skel = std::get_if< LiftedSkeletonPayload >(&pr.next[0].payload);
+    ASSERT_NE(skel, nullptr);
+    EXPECT_EQ(skel->outer_ctx.vars, (std::vector< std::string >{ "x", "v0", "v1" }));
+}
+
 // x & y -- no arithmetic atoms
 TEST(ArithmeticAtomLifter, NoAtomsReturnsNotApplicable) {
     auto expr = Expr::BitwiseAnd(Expr::Variable(0), Expr::Variable(1));
@@ -190,6 +218,35 @@ TEST(RepeatedSubexprLifter, LiftsLargeRepeatedSubtrees) {
     ASSERT_NE(skel, nullptr);
     EXPECT_EQ(skel->bindings.size(), 1);
     EXPECT_EQ(skel->bindings[0].kind, LiftedValueKind::kRepeatedSubexpression);
+}
+
+TEST(RepeatedSubexprLifter, UsesFreshVirtualNamesAgainstExistingLocals) {
+    auto repeated = []() {
+        return Expr::Mul(
+            Expr::Add(Expr::Variable(0), Expr::Variable(2)),
+            Expr::Add(Expr::Variable(0), Expr::Variable(2))
+        );
+    };
+    auto expr = Expr::BitwiseXor(repeated(), repeated());
+    Options opts{ .bitwidth = 64, .max_vars = 16 };
+    auto ctx = MakeLiftCtx(opts, { "b" });
+
+    WorkItem item;
+    item.payload = AstPayload{
+        .expr       = std::move(expr),
+        .provenance = Provenance::kRewritten,
+        .solve_ctx  = AstSolveContext{ .vars = { "b", "r1", "r0" } },
+    };
+    item.features.provenance = Provenance::kRewritten;
+
+    auto result = RunLiftRepeatedSubexpressions(item, ctx);
+    ASSERT_TRUE(result.has_value());
+    auto &pr = result.value();
+    ASSERT_EQ(pr.decision, PassDecision::kAdvance);
+
+    auto *skel = std::get_if< LiftedSkeletonPayload >(&pr.next[0].payload);
+    ASSERT_NE(skel, nullptr);
+    EXPECT_EQ(skel->outer_ctx.vars, (std::vector< std::string >{ "b", "r1", "r0", "r2" }));
 }
 
 TEST(RepeatedSubexprLifter, MaximalNonOverlapping) {

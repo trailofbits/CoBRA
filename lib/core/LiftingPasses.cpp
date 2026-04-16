@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <functional>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace cobra {
 
@@ -119,6 +120,24 @@ namespace cobra {
             std::string rendered;
             uint32_t virtual_index;
         };
+
+        std::vector< std::string > AllocateFreshVirtualNames(
+            const std::vector< std::string > &existing_vars, const std::string &prefix,
+            size_t count
+        ) {
+            std::unordered_set< std::string > used(existing_vars.begin(), existing_vars.end());
+            std::vector< std::string > names;
+            names.reserve(count);
+
+            size_t next_suffix = 0;
+            while (names.size() < count) {
+                auto candidate = prefix + std::to_string(next_suffix++);
+                if (!used.insert(candidate).second) { continue; }
+                names.push_back(std::move(candidate));
+            }
+
+            return names;
+        }
 
         std::vector< DeduplicatedAtom > DeduplicateAtoms(
             const std::vector< LiftCandidate > &candidates, uint32_t first_virtual_index
@@ -363,9 +382,11 @@ namespace cobra {
 
         // Build extended variable list: original vars + virtual vars.
         std::vector< std::string > outer_vars = vars;
-        for (size_t i = 0; i < atoms.size(); ++i) {
-            outer_vars.push_back("v" + std::to_string(i));
-        }
+        auto virtual_names = AllocateFreshVirtualNames(vars, "v", atoms.size());
+        outer_vars.insert(
+            outer_vars.end(), std::make_move_iterator(virtual_names.begin()),
+            std::make_move_iterator(virtual_names.end())
+        );
 
         // Build bindings.
         std::vector< LiftedBinding > bindings;
@@ -524,9 +545,11 @@ namespace cobra {
 
         // Build extended variable list: original vars + virtual vars.
         std::vector< std::string > outer_vars = vars;
-        for (size_t i = 0; i < selected.size(); ++i) {
-            outer_vars.push_back("r" + std::to_string(i));
-        }
+        auto virtual_names = AllocateFreshVirtualNames(vars, "r", selected.size());
+        outer_vars.insert(
+            outer_vars.end(), std::make_move_iterator(virtual_names.begin()),
+            std::make_move_iterator(virtual_names.end())
+        );
 
         // Build bindings — use atoms (which have copies of
         // rendered strings) instead of selected for subtree access.
