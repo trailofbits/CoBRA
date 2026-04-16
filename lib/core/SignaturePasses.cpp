@@ -35,7 +35,6 @@
 #include <cstdint>
 #include <numeric>
 #include <optional>
-#include <random>
 #include <ranges>
 #include <utility>
 #include <vector>
@@ -410,11 +409,10 @@ namespace cobra {
             if (!join->lhs_resolved || !join->rhs_resolved) { return pr; }
 
             // Both resolved. Build up to 3 candidates.
-            const auto &orig       = *join->original_mul;
-            auto baseline          = join->baseline_cost;
-            const auto bw          = join->bitwidth;
-            const auto num_vars    = static_cast< uint32_t >(join->vars.size());
-            const uint64_t fw_mask = Bitmask(bw);
+            const auto &orig    = *join->original_mul;
+            auto baseline       = join->baseline_cost;
+            const auto bw       = join->bitwidth;
+            const auto num_vars = static_cast< uint32_t >(join->vars.size());
 
             struct Candidate
             {
@@ -430,16 +428,8 @@ namespace cobra {
                 if (!IsBetter(c, baseline)) { return; }
                 if (best.has_value() && !IsBetter(c, best->cost)) { return; }
 
-                // 8-probe FW check matching OperandSimplifier lines 166-173
-                std::mt19937_64 rng(0xCA5E + num_vars);
-                constexpr int kProbes = 8;
-                std::vector< uint64_t > pt(num_vars);
-                for (int p = 0; p < kProbes; ++p) {
-                    for (uint32_t vi = 0; vi < num_vars; ++vi) { pt[vi] = rng() & fw_mask; }
-                    uint64_t orig_val = EvalExpr(orig, pt, bw) & fw_mask;
-                    uint64_t simp_val = EvalExpr(*mul, pt, bw) & fw_mask;
-                    if (orig_val != simp_val) { return; }
-                }
+                auto check = FullWidthCheck(orig, num_vars, *mul, {}, bw);
+                if (!check.passed) { return; }
 
                 best = Candidate{ .expr = std::move(mul), .cost = c };
             };

@@ -5,6 +5,7 @@
 #include "cobra/core/SignatureEval.h"
 #include "cobra/core/Trace.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <utility>
@@ -23,53 +24,173 @@ namespace cobra {
             return z ^ (z >> 31);
         }
 
-        // Deterministic adversarial scalar values that stress carry
-        // propagation, sign boundaries, and alternating bits.
         std::vector< uint64_t > BuildAdversarialValues(uint32_t bitwidth) {
             const uint64_t kMask = Bitmask(bitwidth);
             std::vector< uint64_t > vals;
-            vals.reserve(32);
+            vals.reserve(4 * bitwidth);
 
-            vals.push_back(0);
-            vals.push_back(1);
-            vals.push_back(kMask);
-            vals.push_back((kMask - 1) & kMask);
+            auto push = [&](uint64_t v) { vals.push_back(v & kMask); };
 
-            // Carry-propagation: 2^k - 1, 2^k, 2^k + 1
+            push(0);
+            push(1);
+            push(kMask);     // -1
+            push(kMask - 1); // -2
+            push(kMask - 2); // -3
+            push(kMask - 3); // -4
+
             for (uint32_t k = 1; k < bitwidth; ++k) {
                 uint64_t pow = uint64_t{ 1 } << k;
-                vals.push_back((pow - 1) & kMask);
-                vals.push_back(pow & kMask);
-                if (k + 1 < bitwidth) { vals.push_back((pow + 1) & kMask); }
+                push(pow - 1);
+                push(pow);
+                if (k + 1 < bitwidth) { push(pow + 1); }
             }
 
-            vals.push_back(0x5555555555555555ULL & kMask);
-            vals.push_back(0xAAAAAAAAAAAAAAAAULL & kMask);
+            push(3);
+            push(5);
+            push(7);
+            push(0x5555555555555555ULL);
+            push(0xAAAAAAAAAAAAAAAAULL);
+
+            std::sort(vals.begin(), vals.end());
+            vals.erase(std::unique(vals.begin(), vals.end()), vals.end());
 
             return vals;
+        }
+
+        void CollectConstantsAndShifts(
+            const Expr &expr, std::vector< uint64_t > &constants,
+            std::vector< uint64_t > &shift_amounts
+        ) {
+            if (expr.kind == Expr::Kind::kConstant) {
+                constants.push_back(expr.constant_val);
+            } else if (expr.kind == Expr::Kind::kShr) {
+                shift_amounts.push_back(expr.constant_val);
+            }
+            for (const auto &child : expr.children) {
+                CollectConstantsAndShifts(*child, constants, shift_amounts);
+            }
+        }
+
+        std::vector< uint64_t >
+        BuildExprDerivedProbes(const Expr *expr_a, const Expr *expr_b, uint32_t bitwidth) {
+            const uint64_t kMask = Bitmask(bitwidth);
+            std::vector< uint64_t > raw;
+            std::vector< uint64_t > shifts;
+            if (expr_a != nullptr) { CollectConstantsAndShifts(*expr_a, raw, shifts); }
+            if (expr_b != nullptr) { CollectConstantsAndShifts(*expr_b, raw, shifts); }
+
+            for (auto &c : raw) { c &= kMask; }
+            std::sort(raw.begin(), raw.end());
+            raw.erase(std::unique(raw.begin(), raw.end()), raw.end());
+            std::erase(raw, 0ULL);
+            std::erase(raw, 1ULL);
+
+            std::sort(shifts.begin(), shifts.end());
+            shifts.erase(std::unique(shifts.begin(), shifts.end()), shifts.end());
+
+            std::vector< uint64_t > derived;
+            derived.reserve(raw.size() * 6 + raw.size() * raw.size());
+            for (uint64_t c : raw) {
+                derived.push_back(c);
+                derived.push_back((c + 1) & kMask);
+                derived.push_back((c - 1) & kMask);
+                derived.push_back((~c) & kMask);
+                for (uint64_t k : shifts) {
+                    if (k < bitwidth) { derived.push_back((c >> k) & kMask); }
+                }
+            }
+
+            if (raw.size() <= 8) {
+                for (size_t i = 0; i < raw.size(); ++i) {
+                    for (size_t j = i + 1; j < raw.size(); ++j) {
+                        derived.push_back((raw[i] ^ raw[j]) & kMask);
+                        derived.push_back((raw[i] + raw[j]) & kMask);
+                        derived.push_back((raw[i] - raw[j]) & kMask);
+                    }
+                }
+            }
+
+            std::sort(derived.begin(), derived.end());
+            derived.erase(std::unique(derived.begin(), derived.end()), derived.end());
+            std::erase(derived, 0ULL);
+            std::erase(derived, 1ULL);
+
+            constexpr size_t kMaxDerived = 128;
+            if (derived.size() > kMaxDerived) { derived.resize(kMaxDerived); }
+
+            return derived;
         }
 
         template< typename ProbeFn >
         bool ForEachFullWidthProbe(
             uint32_t num_vars, uint32_t bitwidth, uint32_t num_samples,
-            std::vector< uint64_t > &inputs, ProbeFn &&probe_fn
+            std::vector< uint64_t > &inputs, const std::vector< uint64_t > &expr_constants,
+            ProbeFn &&probe_fn
         ) {
             const uint64_t kMask = Bitmask(bitwidth);
             auto adv             = BuildAdversarialValues(bitwidth);
             size_t probe_index   = 0;
 
+            auto zero_inputs = [&]() { std::fill(inputs.begin(), inputs.end(), 0); };
+
+            // Phase 1: adversarial broadcast — all vars = same value.
             for (const auto &val : adv) {
-                for (uint32_t v = 0; v < num_vars; ++v) { inputs[v] = val; }
+                std::fill(inputs.begin(), inputs.end(), val);
                 if (!probe_fn(probe_index++)) { return false; }
             }
 
+            // Phase 2: adversarial per-variable — one var = value, rest = 0.
             for (uint32_t v = 0; v < num_vars; ++v) {
                 for (const auto &val : adv) {
-                    for (uint32_t u = 0; u < num_vars; ++u) { inputs[u] = (u == v) ? val : 0; }
+                    zero_inputs();
+                    inputs[v] = val;
                     if (!probe_fn(probe_index++)) { return false; }
                 }
             }
 
+            // Phase 3: constant broadcast — all vars = same expression constant.
+            for (const auto &val : expr_constants) {
+                std::fill(inputs.begin(), inputs.end(), val);
+                if (!probe_fn(probe_index++)) { return false; }
+            }
+
+            // Phase 4: constant per-variable — one var = expression constant, rest = 0.
+            for (uint32_t v = 0; v < num_vars; ++v) {
+                for (const auto &val : expr_constants) {
+                    zero_inputs();
+                    inputs[v] = val;
+                    if (!probe_fn(probe_index++)) { return false; }
+                }
+            }
+
+            // Phase 5: two-variable constant combinations across all
+            // variable pairs. Catches multi-variable Diracs at (C_i, C_j).
+            if (num_vars >= 2 && expr_constants.size() >= 2) {
+                constexpr size_t kMaxProbes = 64;
+                size_t probes               = 0;
+                for (uint32_t va = 0; va < num_vars && probes < kMaxProbes; ++va) {
+                    for (uint32_t vb = va + 1; vb < num_vars && probes < kMaxProbes; ++vb) {
+                        for (size_t ci = 0; ci < expr_constants.size() && probes < kMaxProbes;
+                             ++ci)
+                        {
+                            for (size_t cj = ci + 1;
+                                 cj < expr_constants.size() && probes < kMaxProbes; ++cj)
+                            {
+                                zero_inputs();
+                                inputs[va] = expr_constants[ci];
+                                inputs[vb] = expr_constants[cj];
+                                if (!probe_fn(probe_index++)) { return false; }
+                                inputs[va] = expr_constants[cj];
+                                inputs[vb] = expr_constants[ci];
+                                if (!probe_fn(probe_index++)) { return false; }
+                                probes += 2;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Phase 6: random probes.
             uint64_t rng_state = (static_cast< uint64_t >(bitwidth) * 2654435761ULL)
                 + (static_cast< uint64_t >(num_vars) * 40503ULL);
             for (uint32_t s = 0; s < num_samples; ++s) {
@@ -92,7 +213,6 @@ namespace cobra {
             "Verifier", "FullWidthCheck: vars={} bitwidth={} samples={}", original_num_vars,
             bitwidth, num_samples
         );
-        const uint64_t kMask       = Bitmask(bitwidth);
         const auto original_eval   = CompileExpr(original, bitwidth);
         const auto simplified_eval = CompileExpr(simplified, bitwidth);
 
@@ -105,63 +225,35 @@ namespace cobra {
             return result;
         }
 
+        auto expr_constants = BuildExprDerivedProbes(&original, &simplified, bitwidth);
         std::vector< uint64_t > orig_inputs(original_num_vars);
         std::vector< uint64_t > simp_inputs(kSimpNumVars);
         std::vector< uint64_t > original_stack(original_eval.stack_size);
         std::vector< uint64_t > simplified_stack(simplified_eval.stack_size);
 
-        auto check_one = [&]() -> bool {
-            for (uint32_t v = 0; v < kSimpNumVars; ++v) {
-                const uint32_t kOrigIdx = var_map.empty() ? v : var_map[v];
-                simp_inputs[v]          = orig_inputs[kOrigIdx];
-            }
-            return EvalCompiledExpr(original_eval, orig_inputs, original_stack)
-                == EvalCompiledExpr(simplified_eval, simp_inputs, simplified_stack);
-        };
-
-        auto adv = BuildAdversarialValues(bitwidth);
-
-        // Phase 1a: broadcast each adversarial value to all variables.
-        for (const auto &val : adv) {
-            for (uint32_t v = 0; v < original_num_vars; ++v) { orig_inputs[v] = val; }
-            if (!check_one()) {
-                auto result =
-                    CheckResult{ .passed = false, .failing_input = std::move(orig_inputs) };
-                COBRA_TRACE("Verifier", "FullWidthCheck: passed={}", result.passed);
-                return result;
-            }
-        }
-
-        // Phase 1b: per-variable probes — set one variable to an
-        // adversarial value while others stay 0. Catches cross-variable
-        // carry interactions (e.g., f(3,0) ≠ simplified(3,0)).
-        for (uint32_t v = 0; v < original_num_vars; ++v) {
-            for (const auto &val : adv) {
-                for (uint32_t u = 0; u < original_num_vars; ++u) {
-                    orig_inputs[u] = (u == v) ? val : 0;
+        std::vector< uint64_t > failing_input;
+        const bool passed = ForEachFullWidthProbe(
+            original_num_vars, bitwidth, num_samples, orig_inputs, expr_constants,
+            [&](size_t) -> bool {
+                for (uint32_t v = 0; v < kSimpNumVars; ++v) {
+                    const uint32_t kOrigIdx = var_map.empty() ? v : var_map[v];
+                    simp_inputs[v]          = orig_inputs[kOrigIdx];
                 }
-                if (!check_one()) {
-                    auto result =
-                        CheckResult{ .passed = false, .failing_input = std::move(orig_inputs) };
-                    COBRA_TRACE("Verifier", "FullWidthCheck: passed={}", result.passed);
-                    return result;
+                if (EvalCompiledExpr(original_eval, orig_inputs, original_stack)
+                    != EvalCompiledExpr(simplified_eval, simp_inputs, simplified_stack))
+                {
+                    failing_input = orig_inputs;
+                    return false;
                 }
+                return true;
             }
-        }
+        );
 
-        // Phase 2: random full-width probes.
-        uint64_t rng_state = (static_cast< uint64_t >(bitwidth) * 2654435761ULL)
-            + (static_cast< uint64_t >(original_num_vars) * 40503ULL);
-        for (uint32_t s = 0; s < num_samples; ++s) {
-            for (uint32_t v = 0; v < original_num_vars; ++v) {
-                orig_inputs[v] = Splitmix64(rng_state) & kMask;
-            }
-            if (!check_one()) {
-                auto result =
-                    CheckResult{ .passed = false, .failing_input = std::move(orig_inputs) };
-                COBRA_TRACE("Verifier", "FullWidthCheck: passed={}", result.passed);
-                return result;
-            }
+        if (!passed) {
+            auto result =
+                CheckResult{ .passed = false, .failing_input = std::move(failing_input) };
+            COBRA_TRACE("Verifier", "FullWidthCheck: passed={}", result.passed);
+            return result;
         }
         auto result = CheckResult{ .passed = true, .failing_input = {} };
         COBRA_TRACE("Verifier", "FullWidthCheck: passed={}", result.passed);
@@ -191,28 +283,26 @@ namespace cobra {
             return result;
         }
 
+        auto expr_constants = BuildExprDerivedProbes(nullptr, &simplified, bitwidth);
         std::vector< uint64_t > inputs(num_vars);
         std::vector< uint64_t > simplified_stack(simplified_eval.stack_size);
         EvaluatorWorkspace original_workspace;
 
         std::vector< uint64_t > failing_input;
-        const bool passed = [&]() {
-            return ForEachFullWidthProbe(
-                num_vars, bitwidth, num_samples, inputs, [&](size_t) -> bool {
-                    const uint64_t original_val = eval_original.HasCompiledExpr()
-                        ? (eval_original.EvaluateWithWorkspace(inputs, original_workspace)
-                           & kMask)
-                        : (eval_original(inputs) & kMask);
-                    const uint64_t simplified_val =
-                        EvalCompiledExpr(simplified_eval, inputs, simplified_stack);
-                    if (original_val != simplified_val) {
-                        failing_input = inputs;
-                        return false;
-                    }
-                    return true;
+        const bool passed = ForEachFullWidthProbe(
+            num_vars, bitwidth, num_samples, inputs, expr_constants, [&](size_t) -> bool {
+                const uint64_t original_val = eval_original.HasCompiledExpr()
+                    ? (eval_original.EvaluateWithWorkspace(inputs, original_workspace) & kMask)
+                    : (eval_original(inputs) & kMask);
+                const uint64_t simplified_val =
+                    EvalCompiledExpr(simplified_eval, inputs, simplified_stack);
+                if (original_val != simplified_val) {
+                    failing_input = inputs;
+                    return false;
                 }
-            );
-        }();
+                return true;
+            }
+        );
 
         if (!passed) {
             auto result =

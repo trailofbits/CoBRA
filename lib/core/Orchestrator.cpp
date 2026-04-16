@@ -675,22 +675,34 @@ namespace cobra {
         ) {
             const auto num_vars = static_cast< uint32_t >(vars.size());
 
-            // Constant pruning
+            // Constant pruning: accept a constant match only when
+            // no evaluator is available or the evaluator confirms it
+            // at full width.  Dirac expressions (zero on {0,1} but
+            // nonzero at a single full-width point) would otherwise
+            // be emitted as constant 0 without any full-width check.
             auto pm = MatchPattern(sig, num_vars, ctx.bitwidth);
             if (pm && (*pm)->kind == Expr::Kind::kConstant) {
-                ItemMetadata meta;
-                meta.sig_vector   = sig;
-                meta.verification = VerificationState::kVerified;
+                bool fw_ok = true;
+                if (ctx.evaluator) {
+                    auto check =
+                        FullWidthCheckEval(*ctx.evaluator, num_vars, **pm, ctx.bitwidth);
+                    fw_ok = check.passed;
+                }
+                if (fw_ok) {
+                    ItemMetadata meta;
+                    meta.sig_vector   = sig;
+                    meta.verification = VerificationState::kVerified;
 
-                return Ok(
-                    std::optional< OrchestratorResult >(OrchestratorResult{
-                        .outcome = PassOutcome::Success(
-                            std::move(*pm), {}, VerificationState::kVerified
-                        ),
-                        .metadata     = std::move(meta),
-                        .run_metadata = ctx.run_metadata,
-                    })
-                );
+                    return Ok(
+                        std::optional< OrchestratorResult >(OrchestratorResult{
+                            .outcome = PassOutcome::Success(
+                                std::move(*pm), {}, VerificationState::kVerified
+                            ),
+                            .metadata     = std::move(meta),
+                            .run_metadata = ctx.run_metadata,
+                        })
+                    );
+                }
             }
 
             // Eliminate auxiliary variables
