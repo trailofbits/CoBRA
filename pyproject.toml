@@ -1,0 +1,58 @@
+[build-system]
+requires = [
+  "scikit-build-core>=0.8",
+  "nanobind>=1.8",
+  "cmake>=3.20",
+  "ninja",
+]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "cobra-mba"
+version = "1.0.0"
+description = "Python bindings for the CoBRA's MBA simplifier"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+keywords = ["cobra", "mba", "bindings", "nanobind"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: C++",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+]
+
+[tool.scikit-build]
+minimum-version = "0.8"
+build-dir = "build/{wheel_tag}"
+cmake.build-type = "Release"
+cmake.targets = ["cobra_mba"]
+
+[tool.scikit-build.cmake.define]
+COBRA_BUILD_PYTHON_BINDINGS = "ON"
+COBRA_BUILD_LLVM_PASS = "OFF"
+COBRA_BUILD_TESTS = "OFF"
+
+[tool.scikit-build.wheel]
+packages = []
+license-files = ["LICENSE"]
+
+[tool.cibuildwheel]
+build = "cp310-* cp311-* cp312-* cp313-*"
+skip = "*-musllinux*"
+build-verbosity = 1
+test-command = "python -c \"import cobra_mba; expr = cobra_mba.Expr('(a^b)+(a&b)'); expr.simplify(); assert str(expr) == 'a | b'\""
+
+[tool.cibuildwheel.environment]
+CMAKE_PREFIX_PATH = "{project}/build-deps/install"
+
+[tool.cibuildwheel.linux]
+before-all = "rm -rf build build-deps && python -m pip install --upgrade pip cmake ninja && cmake -S dependencies -B build-deps -G Ninja -DCMAKE_BUILD_TYPE=Release -DCOBRA_BUILD_PYTHON_BINDINGS=ON -DCOBRA_BUILD_LLVM_PASS=OFF && cmake --build build-deps"
+
+#[tool.cibuildwheel.macos] # TODO: TEST THESE
+#before-all = "rm -rf build build-deps && python -m pip install --upgrade pip cmake ninja && cmake -S dependencies -B build-deps -G Ninja -DCMAKE_BUILD_TYPE=Release -DCOBRA_BUILD_PYTHON_BINDINGS=ON -DCOBRA_BUILD_LLVM_PASS=OFF && cmake --build build-deps"
+#
+#[tool.cibuildwheel.windows]
+#before-all = "if exist build rmdir /s /q build && if exist build-deps rmdir /s /q build-deps && python -m pip install --upgrade pip cmake && cmake -S dependencies -B build-deps -G \"Visual Studio 17 2022\" -A x64 -DCOBRA_BUILD_PYTHON_BINDINGS=ON -DCOBRA_BUILD_LLVM_PASS=OFF && cmake --build build-deps --config Release"

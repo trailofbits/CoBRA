@@ -6,6 +6,27 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Prefer local dependency prefix if present (helps wheel builds find absl/hwy)
+if(DEFINED COBRA_DEPENDENCY_PREFIX)
+    list(PREPEND CMAKE_PREFIX_PATH "${COBRA_DEPENDENCY_PREFIX}")
+else()
+    set(_cobra_default_dep_prefix "${CMAKE_SOURCE_DIR}/build-deps/install")
+    if(EXISTS "${_cobra_default_dep_prefix}")
+        list(PREPEND CMAKE_PREFIX_PATH "${_cobra_default_dep_prefix}")
+    endif()
+endif()
+
+if (CMAKE_EXPORT_COMPILE_COMMANDS AND UNIX)
+    set(_cobra_cc_src "${CMAKE_SOURCE_DIR}/compile_commands.json")
+    set(_cobra_cc_bin "${CMAKE_BINARY_DIR}/compile_commands.json")
+    if (NOT EXISTS "${_cobra_cc_src}")
+        execute_process(
+            COMMAND ${CMAKE_COMMAND} -E create_symlink "${_cobra_cc_bin}" "${_cobra_cc_src}"
+            OUTPUT_QUIET ERROR_QUIET
+        )
+    endif()
+endif()
+
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
@@ -57,6 +78,7 @@ add_link_options(
 
 option(COBRA_BUILD_LLVM_PASS "Build the LLVM pass plugin (requires LLVM 19-22)" OFF)
 option(COBRA_BUILD_TESTS "Build tests (requires GoogleTest in prefix)" OFF)
+option(COBRA_BUILD_PYTHON_BINDINGS "Build Python bindings (nanobind)" OFF)
 option(COBRA_ENABLE_TRACE "Enable detailed pipeline tracing to stderr (debug builds)" OFF)
 option(COBRA_ENABLE_SIG_STATS "Enable signature evaluation counters for profiling builds" OFF)
 option(COBRA_ENABLE_TRACY "Enable Tracy profiler instrumentation" OFF)
@@ -98,6 +120,10 @@ if(COBRA_BUILD_LLVM_PASS)
     add_subdirectory(lib/llvm)
 endif()
 
+if(COBRA_BUILD_PYTHON_BINDINGS)
+    add_subdirectory(lib/bindings/python)
+endif()
+
 if(COBRA_BUILD_TESTS)
     enable_testing()
     add_subdirectory(test)
@@ -113,7 +139,11 @@ install(DIRECTORY include/cobra
 
 # Collect installed targets for the package config export set
 set(_cobra_install_targets cobra-core cobra-cli)
-if(Z3_FOUND)
+if(DEFINED SKBUILD_PLATLIB_DIR)
+    # Wheel builds only need the extension module; skip installing the CLI.
+    set(_cobra_install_targets cobra-core)
+endif()
+if(Z3_FOUND AND NOT DEFINED SKBUILD_PLATLIB_DIR)
     list(APPEND _cobra_install_targets cobra-verify)
 endif()
 
