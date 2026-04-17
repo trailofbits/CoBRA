@@ -35,6 +35,7 @@ target_sources(cobra-core PRIVATE
     DynamicMask.cpp
     MixedProductRewriter.cpp
     ExprCost.cpp
+    ExtensionLowering.cpp
     SignatureSimplifier.cpp
     BitwiseDecomposer.cpp
     HybridDecomposer.cpp

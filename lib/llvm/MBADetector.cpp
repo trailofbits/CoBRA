@@ -1,6 +1,7 @@
 #include "MBADetector.h"
 #include "cobra/core/BitWidth.h"
 #include "cobra/core/Expr.h"
+#include "cobra/core/ExtensionLowering.h"
 #include "cobra/core/Simplifier.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -13,6 +14,7 @@
 #include "llvm/Support/Casting.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -27,7 +29,9 @@ namespace cobra {
 
     namespace {
 
-        bool IsMbaOpcode(unsigned opcode) {
+        // Core MBA operations — used for classification and candidate
+        // emission.  Extensions are NOT included here.
+        bool IsCoreMbaOpcode(unsigned opcode) {
             switch (opcode) { // NOLINT(hicpp-multiway-paths-covered)
                 case llvm::Instruction::Add:
                 case llvm::Instruction::Sub:
@@ -36,12 +40,18 @@ namespace cobra {
                 case llvm::Instruction::Or:
                 case llvm::Instruction::Xor:
                 case llvm::Instruction::LShr:
-                case llvm::Instruction::ZExt:
-                case llvm::Instruction::SExt:
                     return true;
                 default:
                     return false;
             }
+        }
+
+        // Traversable tree operations — core MBA ops plus extensions.
+        // Used by CollectTree, root selection, PHI transparency, and
+        // ArmDepsInLeafSet.
+        bool IsTreeOpcode(unsigned opcode) {
+            return IsCoreMbaOpcode(opcode) || opcode == llvm::Instruction::ZExt
+                || opcode == llvm::Instruction::SExt;
         }
 
         // BFS from root following operands.  MBA-opcode instructions
@@ -65,7 +75,7 @@ namespace cobra {
                 if (!visited.insert(v).second) { continue; }
 
                 auto *inst = llvm::dyn_cast< llvm::Instruction >(v);
-                if ((inst != nullptr) && IsMbaOpcode(inst->getOpcode())) {
+                if ((inst != nullptr) && IsTreeOpcode(inst->getOpcode())) {
                     // LShr with variable shift amount is unsupported —
                     // treat the whole instruction as a leaf.
                     if (inst->getOpcode() == llvm::Instruction::LShr
@@ -88,7 +98,7 @@ namespace cobra {
                         auto *inc = phi->getIncomingValue(i);
                         if (llvm::isa< llvm::ConstantInt >(inc)) { continue; }
                         auto *inc_inst = llvm::dyn_cast< llvm::Instruction >(inc);
-                        if ((inc_inst == nullptr) || !IsMbaOpcode(inc_inst->getOpcode())) {
+                        if ((inc_inst == nullptr) || !IsTreeOpcode(inc_inst->getOpcode())) {
                             all_mba = false;
                             break;
                         }
@@ -147,11 +157,20 @@ namespace cobra {
 
                 auto *inst = llvm::cast< llvm::Instruction >(v);
 
-                if (inst->getOpcode() == llvm::Instruction::ZExt
-                    || inst->getOpcode() == llvm::Instruction::SExt)
-                {
+                if (inst->getOpcode() == llvm::Instruction::ZExt) {
                     const uint64_t operand = eval(inst->getOperand(0));
-                    cache[v]               = operand & mask;
+                    const uint32_t src_bits =
+                        inst->getOperand(0)->getType()->getIntegerBitWidth();
+                    assert(src_bits >= 1 && src_bits <= 64);
+                    cache[v] = EvalZeroExtend(operand, src_bits, mask);
+                    return cache[v];
+                }
+                if (inst->getOpcode() == llvm::Instruction::SExt) {
+                    const uint64_t operand = eval(inst->getOperand(0));
+                    const uint32_t src_bits =
+                        inst->getOperand(0)->getType()->getIntegerBitWidth();
+                    assert(src_bits >= 1 && src_bits <= 64);
+                    cache[v] = EvalSignExtend(operand, src_bits, mask);
                     return cache[v];
                 }
 
@@ -287,13 +306,21 @@ namespace cobra {
             auto *inst = llvm::dyn_cast< llvm::Instruction >(v);
             if (inst == nullptr || !tree_set.contains(inst)) { return nullptr; }
 
-            // ZExt/SExt — pass through to inner operand
-            if (inst->getOpcode() == llvm::Instruction::ZExt
-                || inst->getOpcode() == llvm::Instruction::SExt)
-            {
-                return BuildExprFromIR(
-                    inst->getOperand(0), leaves, tree_set, mask, phi_redirects
-                );
+            if (inst->getOpcode() == llvm::Instruction::ZExt) {
+                auto inner =
+                    BuildExprFromIR(inst->getOperand(0), leaves, tree_set, mask, phi_redirects);
+                if (inner == nullptr) { return nullptr; }
+                const uint32_t src_bits = inst->getOperand(0)->getType()->getIntegerBitWidth();
+                assert(src_bits >= 1 && src_bits <= 64);
+                return LowerZeroExtend(std::move(inner), src_bits);
+            }
+            if (inst->getOpcode() == llvm::Instruction::SExt) {
+                auto inner =
+                    BuildExprFromIR(inst->getOperand(0), leaves, tree_set, mask, phi_redirects);
+                if (inner == nullptr) { return nullptr; }
+                const uint32_t src_bits = inst->getOperand(0)->getType()->getIntegerBitWidth();
+                assert(src_bits >= 1 && src_bits <= 64);
+                return LowerSignExtend(std::move(inner), src_bits);
             }
 
             // LShr with constant shift amount
@@ -359,7 +386,7 @@ namespace cobra {
                 if (leaf_set.contains(v)) { continue; }
 
                 auto *inst = llvm::dyn_cast< llvm::Instruction >(v);
-                if ((inst == nullptr) || !IsMbaOpcode(inst->getOpcode())) { return false; }
+                if ((inst == nullptr) || !IsTreeOpcode(inst->getOpcode())) { return false; }
 
                 // LShr with variable shift — can't evaluate
                 if (inst->getOpcode() == llvm::Instruction::LShr
@@ -449,7 +476,7 @@ namespace cobra {
         // they can be emitted as standalone candidates.
         for (auto *bb : post_order(&f)) {
             for (auto &inst : llvm::reverse(*bb)) {
-                if (!IsMbaOpcode(inst.getOpcode())) { continue; }
+                if (!IsTreeOpcode(inst.getOpcode())) { continue; }
                 if (already_in_tree.contains(&inst) != 0u) { continue; }
 
                 if (!inst.getType()->isIntegerTy()) { continue; }
@@ -462,6 +489,17 @@ namespace cobra {
                 CollectTree(&inst, tree_insts, leaves, phi_redirects);
 
                 if (tree_insts.size() < min_ast_size) { continue; }
+
+                // At least one core MBA op required — extension-only
+                // chains are not MBA candidates.
+                bool has_core_op = false;
+                for (auto *ti : tree_insts) {
+                    if (IsCoreMbaOpcode(ti->getOpcode())) {
+                        has_core_op = true;
+                        break;
+                    }
+                }
+                if (!has_core_op) { continue; }
 
                 constexpr uint32_t kPreElimCap = 20;
                 if (leaves.size() > kPreElimCap) { continue; }
@@ -484,6 +522,15 @@ namespace cobra {
 
                     if (tree_insts.size() < min_ast_size) { continue; }
                     if (leaves.size() > kPreElimCap) { continue; }
+
+                    has_core_op = false;
+                    for (auto *ti : tree_insts) {
+                        if (IsCoreMbaOpcode(ti->getOpcode())) {
+                            has_core_op = true;
+                            break;
+                        }
+                    }
+                    if (!has_core_op) { continue; }
                 }
 
                 for (auto *ti : tree_insts) { already_in_tree.insert(ti); }
