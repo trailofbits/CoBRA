@@ -13,49 +13,6 @@
 
 namespace cobra {
 
-    uint64_t
-    EvaluateExpr(const Expr &e, const std::vector< uint64_t > &vals, uint32_t bitwidth) {
-        uint64_t mask = (bitwidth == 64) ? UINT64_MAX : ((uint64_t{ 1 } << bitwidth) - 1);
-        switch (e.kind) {
-            case Expr::Kind::kConstant:
-                return e.constant_val & mask;
-            case Expr::Kind::kVariable:
-                return vals.at(e.var_index) & mask;
-            case Expr::Kind::kAdd: {
-                uint64_t r = 0;
-                for (const auto &c : e.children) {
-                    r = (r + EvaluateExpr(*c, vals, bitwidth)) & mask;
-                }
-                return r;
-            }
-            case Expr::Kind::kMul: {
-                uint64_t r = 1;
-                for (const auto &c : e.children) {
-                    r = (r * EvaluateExpr(*c, vals, bitwidth)) & mask;
-                }
-                return r;
-            }
-            case Expr::Kind::kNeg:
-                return (-EvaluateExpr(*e.children[0], vals, bitwidth)) & mask;
-            case Expr::Kind::kAnd:
-                return EvaluateExpr(*e.children[0], vals, bitwidth)
-                    & EvaluateExpr(*e.children[1], vals, bitwidth);
-            case Expr::Kind::kOr:
-                return EvaluateExpr(*e.children[0], vals, bitwidth)
-                    | EvaluateExpr(*e.children[1], vals, bitwidth);
-            case Expr::Kind::kXor:
-                return EvaluateExpr(*e.children[0], vals, bitwidth)
-                    ^ EvaluateExpr(*e.children[1], vals, bitwidth);
-            case Expr::Kind::kNot:
-                return (~EvaluateExpr(*e.children[0], vals, bitwidth)) & mask;
-            case Expr::Kind::kShr:
-                return (EvaluateExpr(*e.children[0], vals, bitwidth)
-                        >> e.children[1]->constant_val)
-                    & mask;
-        }
-        return 0;
-    }
-
     namespace {
 
         bool IsBitwiseKind(Expr::Kind k) {

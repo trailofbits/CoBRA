@@ -99,7 +99,10 @@ namespace cobra {
                 }
                 case Expr::Kind::kShr: {
                     const uint64_t kVal = EvalConstantArith(*expr.children[0], mask, bitwidth);
-                    return (kVal >> expr.constant_val) & mask;
+                    // ModShr guards shift count >= 64 by returning 0;
+                    // sibling EvalConstantBitwise above already routes
+                    // shifts through ModShr — keep the convention uniform.
+                    return ModShr(kVal, expr.constant_val, bitwidth);
                 }
                 case Expr::Kind::kAnd:
                 case Expr::Kind::kOr:
