@@ -88,13 +88,21 @@ namespace cobra {
             std::string rendered;
         };
 
+        // Single source of truth for the lift predicate, shared by
+        // CollectLiftableAtoms and ReplaceAtomsWithVirtual. Drift between
+        // the two sites would silently corrupt the rewrite (collected
+        // atoms not replaced, or non-collected nodes replaced with
+        // virtual variables).
+        bool ShouldLift(const Expr &node, bool parent_is_bitwise) {
+            return parent_is_bitwise && IsPureArithmetic(node) && HasVarDep(node)
+                && node.kind != Expr::Kind::kVariable;
+        }
+
         void CollectLiftableAtoms(
             const Expr &node, bool parent_is_bitwise, const std::vector< std::string > &vars,
             uint32_t bitwidth, std::vector< LiftCandidate > &out
         ) {
-            if (parent_is_bitwise && IsPureArithmetic(node) && HasVarDep(node)
-                && node.kind != Expr::Kind::kVariable)
-            {
+            if (ShouldLift(node, parent_is_bitwise)) {
                 size_t h      = std::hash< Expr >{}(node);
                 auto rendered = Render(node, vars, bitwidth);
                 out.push_back(
@@ -189,17 +197,16 @@ namespace cobra {
             const std::vector< DeduplicatedAtom > &atoms,
             const std::vector< std::string > &vars, uint32_t bitwidth
         ) {
-            if (parent_is_bitwise && IsPureArithmetic(node) && HasVarDep(node)
-                && node.kind != Expr::Kind::kVariable)
-            {
+            if (ShouldLift(node, parent_is_bitwise)) {
                 uint32_t vi = FindVirtualIndex(node, atoms, vars, bitwidth);
                 return Expr::Variable(vi);
             }
 
-            auto result          = std::make_unique< Expr >();
-            result->kind         = node.kind;
-            result->constant_val = node.constant_val;
-            result->var_index    = node.var_index;
+            // Clone via CloneExpr (single source of truth for Expr field
+            // copying) and rebuild children with remapped subtrees. A future
+            // Expr field added to CloneExpr propagates here automatically.
+            auto result = CloneExpr(node);
+            result->children.clear();
 
             bool current_is_bitwise = IsBitwiseKind(node.kind);
             for (const auto &child : node.children) {
@@ -310,10 +317,12 @@ namespace cobra {
                 }
             }
 
-            auto result          = std::make_unique< Expr >();
-            result->kind         = node.kind;
-            result->constant_val = node.constant_val;
-            result->var_index    = node.var_index;
+            // Clone via CloneExpr (single source of truth for Expr field
+            // copying) and rebuild children with remapped subtrees. A
+            // future Expr field added to CloneExpr propagates here
+            // automatically.
+            auto result = CloneExpr(node);
+            result->children.clear();
 
             for (const auto &child : node.children) {
                 result->children.push_back(
