@@ -275,7 +275,12 @@ namespace cobra {
             return CompileExpr(simplified, bitwidth);
         }();
 
-        if ((eval_original.HasCompiledExpr() && eval_original.InputArity() > num_vars)
+        // InputArity()==0 is the legacy "unknown arity" sentinel for
+        // function-path Evaluators constructed without a declared arity;
+        // accept that as a wildcard. Any other value must not exceed
+        // num_vars or the closure would index its private buffer past
+        // the caller-supplied input vector.
+        if ((eval_original.InputArity() != 0 && eval_original.InputArity() > num_vars)
             || simplified_eval.arity > num_vars)
         {
             auto result = CheckResult{ .passed = false, .failing_input = {} };

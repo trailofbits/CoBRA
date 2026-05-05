@@ -68,6 +68,12 @@ namespace cobra {
                            )
                         ^ 1;
                 case Expr::Kind::kShr: {
+                    // Check the uint64 constant_val against bitwidth BEFORE
+                    // casting to uint32. A constant_val with the high bits
+                    // set (e.g., 2^32 + 5) would otherwise truncate to a
+                    // small valid-looking shift amount, sneaking past the
+                    // kSrc < bitwidth guard with a wrong source bit position.
+                    if (e.constant_val >= bitwidth) { return 0; }
                     const uint32_t kSrc = bit_pos + static_cast< uint32_t >(e.constant_val);
                     if (kSrc >= bitwidth) { return 0; }
                     return EvalAtomAtBitImpl(

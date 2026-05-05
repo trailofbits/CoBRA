@@ -847,9 +847,17 @@ namespace cobra {
 
             if (result.outcome.Succeeded()) {
                 outcome.kind      = SimplifyOutcome::Kind::kSimplified;
-                outcome.expr      = CleanupFinalExpr(result.outcome.TakeExpr(), bitwidth);
                 outcome.real_vars = result.outcome.RealVars();
-                outcome.verified = result.metadata.verification == VerificationState::kVerified;
+                // Read PassOutcome.Verification() instead of the parallel
+                // ItemMetadata.verification field. The two were initialized
+                // from the same source at every call site by convention; a
+                // future producer that stamps PassOutcome correctly but
+                // forgets the metadata field would otherwise see its
+                // verified rewrite reported as unverified. PassOutcome is
+                // the authoritative source for the success branch.
+                outcome.verified =
+                    result.outcome.Verification() == VerificationState::kVerified;
+                outcome.expr       = CleanupFinalExpr(result.outcome.TakeExpr(), bitwidth);
                 outcome.sig_vector = std::move(result.metadata.sig_vector);
             } else {
                 outcome.kind = SimplifyOutcome::Kind::kUnchangedUnsupported;
@@ -917,6 +925,17 @@ namespace cobra {
                     + ") exceeds kMaxInputVars (" + std::to_string(kMaxInputVars)
                     + "); a 2^vars.size() signature would exceed memory bounds. "
                       "Reduce vars or pre-eliminate aux variables before calling Simplify."
+            );
+        }
+
+        // Reject malformed bitwidth at the public API boundary. bitwidth=0
+        // makes Bitmask(0) return 0, silently masking every evaluator's
+        // output to 0; bitwidth>64 has no meaningful interpretation in a
+        // 64-bit modular ring and triggers shift UB downstream.
+        if (opts.bitwidth == 0 || opts.bitwidth > 64) {
+            return Err< SimplifyOutcome >(
+                CobraError::kInvalidArgument,
+                "bitwidth must be in [1, 64]; got " + std::to_string(opts.bitwidth)
             );
         }
 
