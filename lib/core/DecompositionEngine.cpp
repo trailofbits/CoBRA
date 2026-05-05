@@ -100,6 +100,15 @@ namespace cobra {
         );
     }
 
+    // Extracts product addends from the AST and assembles them into a
+    // sum-of-products `core` expression. ExtractorKind::kProductAST is
+    // the classification label, but the extracted core may include
+    // wrappers around products: SplitAddTree's IsProductAddend accepts
+    // Mul(a, b), Neg(Mul(a, b)), and Not(Mul(a, b)) (which is
+    // `-Mul(a, b) - 1`). Neg/Not subtrees go into the core verbatim,
+    // and the residual evaluator subtracts the full-width value, so
+    // the wrappers' offsets are correctly accounted. The label remains
+    // `kProductAST` despite the Neg/Not wrapping.
     SolverResult< CoreCandidate > ExtractProductCore(const DecompositionContext &ctx) {
         COBRA_ZONE_N("ExtractProductCore");
         if (ctx.current_expr == nullptr) {

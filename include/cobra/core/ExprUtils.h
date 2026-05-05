@@ -28,13 +28,23 @@ namespace cobra {
     bool IsConstantSubtree(const Expr &expr);
 
     /// Evaluate a constant-only Expr subtree (no variables allowed).
-    /// Throws std::runtime_error if a Variable node is encountered.
     /// Result is masked to Bitmask(bitwidth).
+    /// Behavior is undefined if a Variable node is encountered (the
+    /// implementation invokes std::unreachable() on the variable case).
+    /// Use IsConstantSubtree() to verify before calling.
     uint64_t EvalConstantExpr(const Expr &expr, uint32_t bitwidth);
 
     /// Cosmetic cleanup on the final simplified expression.
-    /// Chains: constant folding → negation refolding.
-    /// Semantics-preserving, no verification needed.
+    /// Chains: constant folding → negation refolding → ExtractCommonFactor
+    /// → constant folding.
+    ///
+    /// Semantics-preserving under the assumption that std::hash<Expr>
+    /// does not collide on the input AST. ExtractCommonFactor uses
+    /// hash-based factor equality, so a hash collision could in
+    /// principle produce a non-equivalent rewrite. The hash-collision
+    /// tradeoff is accepted at the project level (see audit
+    /// 2026-05-04 lifting-passes-29 / -65). Callers requiring strict
+    /// semantics-preservation must re-verify the result.
     std::unique_ptr< Expr > CleanupFinalExpr(std::unique_ptr< Expr > expr, uint32_t bitwidth);
 
     /// Check if an Expr subtree depends on any variable.
@@ -45,8 +55,16 @@ namespace cobra {
     bool HasNonleafBitwise(const Expr &expr);
 
     /// Replace AND(var-dep, var-dep) with MUL in an expression tree.
-    /// Corrects the product-shadow divergence where AND = MUL on {0,1}
-    /// but not at full width.
+    /// The rewrite `AND(P, Q) → MUL(P, Q)` is the identity `x AND y == x * y`
+    /// only when both x and y are individually in {0, 1}. At full width,
+    /// the rewrite is unsound: `2 AND 2 = 2 ≠ 2 * 2 = 4`.
+    ///
+    /// CALLER OBLIGATION: this is a candidate-shape rewrite, not a
+    /// semantics-preserving repair. The result MUST be verified at full
+    /// width (e.g., FullWidthCheckEval with kResidualGateProbeCount)
+    /// before being accepted as a verified candidate. Production
+    /// callers (RunSignatureAnf) re-verify; tests and direct callers
+    /// must do the same.
     std::unique_ptr< Expr > RepairProductShadow(std::unique_ptr< Expr > expr);
 
 } // namespace cobra
