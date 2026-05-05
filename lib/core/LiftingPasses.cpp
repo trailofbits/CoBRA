@@ -200,7 +200,10 @@ namespace cobra {
                 // invariant rather than producing Variable(UINT32_MAX)
                 // on a sentinel miss.
                 auto vi = FindVirtualIndex(node, atoms, vars, bitwidth);
-                assert(vi.has_value() && "ReplaceAtomsWithVirtual: liftable atom missing from atom table");
+                assert(
+                    vi.has_value()
+                    && "ReplaceAtomsWithVirtual: liftable atom missing from atom table"
+                );
                 return Expr::Variable(*vi);
             }
 

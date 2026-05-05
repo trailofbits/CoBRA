@@ -130,9 +130,8 @@ namespace cobra {
                     // sub-expression with var_index >= num_vars indicates a
                     // malformed AST. Return 0 (treat the variable as having
                     // no contribution) instead of an OOB read.
-                    return (expr.var_index < var_vals.size())
-                        ? var_vals[expr.var_index] & mask
-                        : 0;
+                    return (expr.var_index < var_vals.size()) ? var_vals[expr.var_index] & mask
+                                                              : 0;
                 case Expr::Kind::kNot:
                     return (~EvalAtPoint(*expr.children[0], var_vals, mask)) & mask;
                 case Expr::Kind::kNeg:
