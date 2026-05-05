@@ -85,6 +85,11 @@ namespace cobra {
     BuildRemainderEvaluator(const Evaluator &original, const Expr &core, uint32_t bitwidth) {
         auto compiled_core   = std::make_shared< CompiledExpr >(CompileExpr(core, bitwidth));
         const uint64_t kMask = Bitmask(bitwidth);
+        // The returned closure captures `original_workspace` and `core_stack`
+        // as mutable buffers reused across invocations. Concurrent calls on
+        // the same Evaluator race on those buffers — see the Evaluator
+        // thread-safety contract in Evaluator.h. Copy the Evaluator for
+        // per-thread use; lambda capture-by-value duplicates the workspaces.
         return Evaluator(
             [original, compiled_core = std::move(compiled_core), kMask,
              original_workspace = EvaluatorWorkspace{}, core_stack = std::vector< uint64_t >{}](
