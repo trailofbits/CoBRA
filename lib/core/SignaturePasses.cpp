@@ -625,7 +625,7 @@ namespace cobra {
             // disagreements not visible in the {0,1} signature space.
             // Use the residual-gate probe count to match the sibling
             // ResolveResidualRecombine (line 709 below).
-            auto check = FullWidthCheckEval(
+            auto check          = FullWidthCheckEval(
                 *cont.original_eval, num_vars, *substituted, ctx.bitwidth,
                 kResidualGateProbeCount
             );
@@ -1033,7 +1033,7 @@ namespace cobra {
                 // V2 already flagged as a known divergence between
                 // {0,1} and full-width semantics, so verify with the
                 // residual-gate probe count rather than the default.
-                auto repaired = RepairProductShadow(CloneExpr(*anf_expr));
+                auto repaired  = RepairProductShadow(CloneExpr(*anf_expr));
                 auto repair_fw = FullWidthCheckEval(
                     *mapped_eval, num_vars, *repaired, ctx.bitwidth, kResidualGateProbeCount
                 );
