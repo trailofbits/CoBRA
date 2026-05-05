@@ -11,6 +11,7 @@
 #include "cobra/core/SignatureEval.h"
 #include "cobra/core/TemplateDecomposer.h"
 #include "cobra/core/Trace.h"
+#include <cassert>
 #include <cstdint>
 #include <memory>
 #include <numeric>
@@ -83,6 +84,14 @@ namespace cobra {
 
     Evaluator
     BuildRemainderEvaluator(const Evaluator &original, const Expr &core, uint32_t bitwidth) {
+        // Mirror Simplify's public-API guard. The orchestrator already
+        // rejects bitwidth ∉ [1, 64] before any decomposition pass runs;
+        // this assert protects callers that bypass Simplify (tests,
+        // direct DecompositionContext construction).
+        assert(
+            bitwidth >= 1 && bitwidth <= 64
+            && "BuildRemainderEvaluator: bitwidth must be in [1, 64]"
+        );
         auto compiled_core   = std::make_shared< CompiledExpr >(CompileExpr(core, bitwidth));
         const uint64_t kMask = Bitmask(bitwidth);
         return Evaluator(

@@ -1901,6 +1901,46 @@ TEST(SimplifierTest, RejectsExcessiveInputVarCount) {
     EXPECT_EQ(result.error().code, CobraError::kTooManyVariables);
 }
 
+// Regression: bitwidth-precondition cluster (lifting-passes-cross-4,
+// semilinear-decomposition-cross-6, decomposition-engine-cross-2).
+// Bitmask(0) returns 0, so an unguarded bitwidth=0 silently masks every
+// evaluator's output to 0 and verification against itself passes
+// vacuously — Simplify would return an all-zero "simplified" form for
+// any input. Reject at the public-API boundary instead.
+TEST(SimplifierTest, RejectsBitwidthZero) {
+    std::vector< std::string > vars = { "x" };
+    std::vector< uint64_t > sig     = { 0, 1 };
+    Options opts{ .bitwidth = 0, .max_vars = 16, .spot_check = false };
+
+    auto result = Simplify(sig, vars, nullptr, opts);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, CobraError::kInvalidArgument);
+}
+
+TEST(SimplifierTest, RejectsBitwidthAbove64) {
+    // bitwidth=128 has no representation in the 64-bit modular ring;
+    // shift expressions downstream would be UB.
+    std::vector< std::string > vars = { "x" };
+    std::vector< uint64_t > sig     = { 0, 1 };
+    Options opts{ .bitwidth = 128, .max_vars = 16, .spot_check = false };
+
+    auto result = Simplify(sig, vars, nullptr, opts);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, CobraError::kInvalidArgument);
+}
+
+TEST(SimplifierTest, AcceptsBitwidth1) {
+    // Lower boundary of the valid range; in 1-bit modular arithmetic
+    // every variable is in {0,1} so x+y == x^y.
+    auto expr                       = Expr::Add(Expr::Variable(0), Expr::Variable(1));
+    std::vector< std::string > vars = { "x", "y" };
+    auto sig                        = EvaluateBooleanSignature(*expr, 2, 1);
+    Options opts{ .bitwidth = 1, .max_vars = 16, .spot_check = false };
+
+    auto result = Simplify(sig, vars, expr.get(), opts);
+    ASSERT_TRUE(result.has_value());
+}
+
 TEST(SimplifierTest, AcceptsInputVarCountAtCeiling) {
     // Exactly kMaxInputVars=24. The pre-check is `>` so this must
     // pass through to the normal pipeline. Constant sig of correct

@@ -920,6 +920,17 @@ namespace cobra {
             );
         }
 
+        // Reject malformed bitwidth at the public API boundary. bitwidth=0
+        // makes Bitmask(0) return 0, silently masking every evaluator's
+        // output to 0; bitwidth>64 has no meaningful interpretation in a
+        // 64-bit modular ring and triggers shift UB downstream.
+        if (opts.bitwidth == 0 || opts.bitwidth > 64) {
+            return Err< SimplifyOutcome >(
+                CobraError::kInvalidArgument,
+                "bitwidth must be in [1, 64]; got " + std::to_string(opts.bitwidth)
+            );
+        }
+
         // Dynamic masking: if the root is (2^m - 1) & g and g contains
         // no right shifts, try solving g under bitwidth=m. Modular
         // arithmetic for {+, -, *, &, |, ^, ~} is homomorphic, so
