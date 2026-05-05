@@ -65,6 +65,9 @@ namespace cobra {
 
     // Build a remainder evaluator: r(x) = (f(x) - EvalExpr(prefix, x, bw)) & mask.
     // The prefix expression is cloned internally.
+    // Precondition: bitwidth must be in [1, 64]. The orchestrator's
+    // Simplify entry already enforces this; debug builds assert at the
+    // function boundary as defense-in-depth.
     Evaluator
     BuildRemainderEvaluator(const Evaluator &original, const Expr &prefix, uint32_t bitwidth);
 

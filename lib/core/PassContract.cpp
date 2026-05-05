@@ -1,9 +1,18 @@
 #include "cobra/core/PassContract.h"
 
-#include <cassert>
+#include <cstdlib>
 #include <utility>
 
 namespace cobra {
+
+    namespace {
+        // Replaces assert() with a release-build runtime check. assert() is
+        // compiled out under -DNDEBUG, so a violation in release would
+        // dereference an empty optional / null unique_ptr → UB. std::abort
+        // matches the death-test contract while failing loud in either
+        // build mode.
+        [[noreturn]] void ContractAbort() { std::abort(); }
+    } // namespace
 
     PassOutcome::PassOutcome(OutcomeKind kind) : kind_(kind) {}
 
@@ -18,82 +27,35 @@ namespace cobra {
         return o;
     }
 
-    PassOutcome PassOutcome::Inapplicable(ReasonDetail reason) {
-        PassOutcome o(OutcomeKind::kInapplicable);
-        o.reason_.emplace(std::move(reason));
-        return o;
-    }
-
     PassOutcome PassOutcome::Blocked(ReasonDetail reason) {
         PassOutcome o(OutcomeKind::kBlocked);
         o.reason_.emplace(std::move(reason));
         return o;
     }
 
-    PassOutcome PassOutcome::Partial(
-        std::unique_ptr< Expr > expr, std::vector< std::string > real_vars,
-        VerificationState verification, PendingWork pending, ReasonDetail reason
-    ) {
-        PassOutcome o(OutcomeKind::kPartial);
-        o.expr_         = std::move(expr);
-        o.real_vars_    = std::move(real_vars);
-        o.verification_ = verification;
-        o.pending_.emplace(std::move(pending));
-        o.reason_.emplace(std::move(reason));
-        return o;
-    }
-
-    PassOutcome PassOutcome::VerifyFailed(
-        std::unique_ptr< Expr > expr, std::vector< std::string > real_vars, ReasonDetail reason
-    ) {
-        PassOutcome o(OutcomeKind::kVerifyFailed);
-        o.expr_         = std::move(expr);
-        o.real_vars_    = std::move(real_vars);
-        o.verification_ = VerificationState::kRejected;
-        o.reason_.emplace(std::move(reason));
-        return o;
-    }
-
     const Expr &PassOutcome::GetExpr() const {
-        assert(
-            kind_ == OutcomeKind::kSuccess || kind_ == OutcomeKind::kPartial
-            || kind_ == OutcomeKind::kVerifyFailed
-        );
+        if (kind_ != OutcomeKind::kSuccess) { ContractAbort(); }
         return *expr_;
     }
 
     std::unique_ptr< Expr > PassOutcome::TakeExpr() {
-        assert(
-            kind_ == OutcomeKind::kSuccess || kind_ == OutcomeKind::kPartial
-            || kind_ == OutcomeKind::kVerifyFailed
-        );
+        if (kind_ != OutcomeKind::kSuccess) { ContractAbort(); }
         return std::move(expr_);
     }
 
     const std::vector< std::string > &PassOutcome::RealVars() const {
-        assert(
-            kind_ == OutcomeKind::kSuccess || kind_ == OutcomeKind::kPartial
-            || kind_ == OutcomeKind::kVerifyFailed
-        );
+        if (kind_ != OutcomeKind::kSuccess) { ContractAbort(); }
         return real_vars_;
     }
 
     VerificationState PassOutcome::Verification() const {
-        assert(
-            kind_ == OutcomeKind::kSuccess || kind_ == OutcomeKind::kPartial
-            || kind_ == OutcomeKind::kVerifyFailed
-        );
+        if (kind_ != OutcomeKind::kSuccess) { ContractAbort(); }
         return verification_;
     }
 
     const ReasonDetail &PassOutcome::Reason() const {
-        assert(kind_ != OutcomeKind::kSuccess);
+        if (kind_ == OutcomeKind::kSuccess) { ContractAbort(); }
         return *reason_;
-    }
-
-    const PendingWork &PassOutcome::Pending() const {
-        assert(kind_ == OutcomeKind::kPartial);
-        return *pending_;
     }
 
     const std::vector< uint64_t > &PassOutcome::SigVector() const { return sig_vector_; }

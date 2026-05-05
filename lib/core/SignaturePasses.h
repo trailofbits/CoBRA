@@ -9,6 +9,12 @@ namespace cobra {
     // Returns a verified direct candidate when the existing polynomial
     // passes can solve the reduced problem inline without entering the
     // signature competition worklist.
+    //
+    // Coverage: num_vars == 1 (univariate fast-path) and 2 <= num_vars <= 4
+    // (multivar fast-path). num_vars in [5, 6] falls through to the worklist
+    // pipeline (RunSignatureMultivarPolyRecovery), which handles those vars
+    // with full classification context. Widening the fast-path to 5-6 vars
+    // would require matching that envelope here.
     std::optional< CandidateRecord >
     TryReducedPolynomialFastPath(const WorkItem &item, OrchestratorContext &ctx);
 

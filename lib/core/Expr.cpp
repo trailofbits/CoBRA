@@ -78,6 +78,13 @@ namespace cobra {
         ) {
             switch (expr.kind) {
                 case Expr::Kind::kConstant: {
+                    // bitwidth==0 has no representable sign bit; render as
+                    // plain decimal to avoid UB in `1ULL << (bitwidth - 1)`
+                    // (the uint32 underflow would shift by 0xFFFFFFFF).
+                    if (bitwidth == 0) {
+                        out << expr.constant_val;
+                        break;
+                    }
                     const uint64_t kMask =
                         (bitwidth >= 64) ? UINT64_MAX : (1ULL << bitwidth) - 1;
                     const uint64_t kHalf =

@@ -1,7 +1,27 @@
+#include "cobra/core/Result.h"
 #include "cobra/core/SemilinearNormalizer.h"
 #include <gtest/gtest.h>
 
 using namespace cobra;
+
+// Regression: semilinear-decomposition-cross-6. NormalizeToSemilinear's
+// public signature accepted any uint32_t bitwidth. With bitwidth=0,
+// Bitmask(0)=0 zeroes every coefficient, every term collapses, and the
+// pipeline silently emits Constant(0) for any input. Reject at the
+// API boundary instead.
+TEST(NormalizerTest, RejectsBitwidthZero) {
+    auto e  = Expr::BitwiseAnd(Expr::Variable(0), Expr::Constant(0xFF));
+    auto ir = NormalizeToSemilinear(*e, { "x" }, 0);
+    ASSERT_FALSE(ir.has_value());
+    EXPECT_EQ(ir.error().code, CobraError::kInvalidArgument);
+}
+
+TEST(NormalizerTest, RejectsBitwidthAbove64) {
+    auto e  = Expr::BitwiseAnd(Expr::Variable(0), Expr::Constant(0xFF));
+    auto ir = NormalizeToSemilinear(*e, { "x" }, 65);
+    ASSERT_FALSE(ir.has_value());
+    EXPECT_EQ(ir.error().code, CobraError::kInvalidArgument);
+}
 
 TEST(NormalizerTest, SingleAtom) {
     auto e  = Expr::BitwiseAnd(Expr::Variable(0), Expr::Constant(0xFF));

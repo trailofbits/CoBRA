@@ -11,6 +11,7 @@
 #include "cobra/core/SignatureEval.h"
 #include "cobra/core/TemplateDecomposer.h"
 #include "cobra/core/Trace.h"
+#include <cassert>
 #include <cstdint>
 #include <memory>
 #include <numeric>
@@ -83,6 +84,14 @@ namespace cobra {
 
     Evaluator
     BuildRemainderEvaluator(const Evaluator &original, const Expr &core, uint32_t bitwidth) {
+        // Mirror Simplify's public-API guard. The orchestrator already
+        // rejects bitwidth ∉ [1, 64] before any decomposition pass runs;
+        // this assert protects callers that bypass Simplify (tests,
+        // direct DecompositionContext construction).
+        assert(
+            bitwidth >= 1 && bitwidth <= 64
+            && "BuildRemainderEvaluator: bitwidth must be in [1, 64]"
+        );
         auto compiled_core   = std::make_shared< CompiledExpr >(CompileExpr(core, bitwidth));
         const uint64_t kMask = Bitmask(bitwidth);
         return Evaluator(
@@ -100,6 +109,15 @@ namespace cobra {
         );
     }
 
+    // Extracts product addends from the AST and assembles them into a
+    // sum-of-products `core` expression. ExtractorKind::kProductAST is
+    // the classification label, but the extracted core may include
+    // wrappers around products: SplitAddTree's IsProductAddend accepts
+    // Mul(a, b), Neg(Mul(a, b)), and Not(Mul(a, b)) (which is
+    // `-Mul(a, b) - 1`). Neg/Not subtrees go into the core verbatim,
+    // and the residual evaluator subtracts the full-width value, so
+    // the wrappers' offsets are correctly accounted. The label remains
+    // `kProductAST` despite the Neg/Not wrapping.
     SolverResult< CoreCandidate > ExtractProductCore(const DecompositionContext &ctx) {
         COBRA_ZONE_N("ExtractProductCore");
         if (ctx.current_expr == nullptr) {
