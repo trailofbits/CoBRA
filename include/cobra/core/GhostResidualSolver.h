@@ -9,6 +9,14 @@
 
 namespace cobra {
 
+    // Maximum support size for residual-family solvers (ghost basis,
+    // factored ghost, residual polynomial recovery, ExtractPolyCore).
+    // Sets the array sizes inside SolveGhostResidual (combo, args,
+    // var_indices, ProbePoint::values) AND the runtime cap enforced
+    // by every residual pass / IsBooleanNullResidual. Changing this
+    // constant requires audit of every site that previously hardcoded 6.
+    inline constexpr uint32_t kMaxResidualSupport = 6;
+
     struct GhostSolveResult
     {
         std::unique_ptr< Expr > expr;
@@ -28,7 +36,7 @@ namespace cobra {
 
     // Attempts to solve a boolean-null residual as a constant-coefficient
     // single ghost primitive. Returns expression in original variable space.
-    // Requires support.size() <= 6.
+    // Requires support.size() <= kMaxResidualSupport.
     SolverResult< GhostSolveResult > SolveGhostResidual(
         const Evaluator &residual_eval, const std::vector< uint32_t > &support,
         uint32_t num_vars, uint32_t bitwidth
@@ -38,7 +46,7 @@ namespace cobra {
     // where q is a constant polynomial and g is a ghost primitive.
     // Uses RecoverWeightedPoly with max_degree=0, grid_degree=2.
     // Enumerates ghost primitives in priority order (mul_sub_and first).
-    // Requires support.size() <= 6.
+    // Requires support.size() <= kMaxResidualSupport.
     SolverResult< GhostSolveResult > SolveFactoredGhostResidual(
         const Evaluator &residual_eval, const std::vector< uint32_t > &support,
         uint32_t num_vars, uint32_t bitwidth, uint8_t max_degree = 0, uint8_t grid_degree = 2

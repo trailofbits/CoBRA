@@ -466,7 +466,7 @@ namespace cobra {
         }
         const auto res_real_count =
             static_cast< uint32_t >(residual.remainder_elim.real_vars.size());
-        if (res_real_count > 6) {
+        if (res_real_count > kMaxResidualSupport) {
             return Ok(
                 PassResult{
                     .decision    = PassDecision::kNotApplicable,
@@ -525,7 +525,7 @@ namespace cobra {
         }
         const auto res_real_count =
             static_cast< uint32_t >(residual.remainder_elim.real_vars.size());
-        if (res_real_count > 6) {
+        if (res_real_count > kMaxResidualSupport) {
             return Ok(
                 PassResult{
                     .decision    = PassDecision::kNotApplicable,
@@ -584,7 +584,7 @@ namespace cobra {
         }
         const auto res_real_count =
             static_cast< uint32_t >(residual.remainder_elim.real_vars.size());
-        if (res_real_count > 6) {
+        if (res_real_count > kMaxResidualSupport) {
             return Ok(
                 PassResult{
                     .decision    = PassDecision::kNotApplicable,
@@ -642,7 +642,7 @@ namespace cobra {
         const auto &residual = std::get< RemainderStatePayload >(item.payload);
         const auto res_real_count =
             static_cast< uint32_t >(residual.remainder_elim.real_vars.size());
-        if (res_real_count > 6) {
+        if (res_real_count > kMaxResidualSupport) {
             return Ok(PassResult{ .decision = PassDecision::kNotApplicable });
         }
 

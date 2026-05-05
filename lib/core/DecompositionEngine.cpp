@@ -3,6 +3,7 @@
 #include "cobra/core/AuxVarEliminator.h"
 #include "cobra/core/BitWidth.h"
 #include "cobra/core/ExprUtils.h"
+#include "cobra/core/GhostResidualSolver.h"
 #include "cobra/core/MultivarPolyRecovery.h"
 #include "cobra/core/PassContract.h"
 #include "cobra/core/PolyExprBuilder.h"
@@ -202,7 +203,7 @@ namespace cobra {
         auto fw_elim          = EliminateAuxVars(ctx.sig, ctx.vars, ctx.opts.evaluator, kBw);
         const auto kRealCount = static_cast< uint32_t >(fw_elim.real_vars.size());
 
-        if (kRealCount > 6) {
+        if (kRealCount > kMaxResidualSupport) {
             return SolverResult< CoreCandidate >::Inapplicable(
                 ReasonDetail{
                     .top = { .code    = { ReasonCategory::kGuardFailed,

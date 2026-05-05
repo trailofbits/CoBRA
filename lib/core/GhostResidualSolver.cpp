@@ -28,7 +28,7 @@ namespace cobra {
         // Mixed parity gives varied 2-adic valuations.
         struct ProbePoint
         {
-            std::array< uint64_t, 6 > values{}; // max 6 vars
+            std::array< uint64_t, kMaxResidualSupport > values{};
         };
 
         constexpr int kNumProbes = 8;
@@ -62,8 +62,8 @@ namespace cobra {
                 9, 12, 17, 20, 25, 30, 35, 40, 47, 56, 63, 70, 79, 86, 95, 102,
             };
             for (size_t p = 0; p < kNumProbes; ++p) {
-                for (uint32_t v = 0; v < num_vars && v < 6; ++v) {
-                    bank[p].values[v] = kSeeds[(p * 6) + v] & kMask;
+                for (uint32_t v = 0; v < num_vars && v < kMaxResidualSupport; ++v) {
+                    bank[p].values[v] = kSeeds[(p * kMaxResidualSupport) + v] & kMask;
                 }
             }
         }
@@ -85,7 +85,7 @@ namespace cobra {
         // Condition 2: nonzero at some non-boolean full-width point
         // Probe in support-local space, map to full space via support[].
         const auto kSupportSize = static_cast< uint32_t >(support.size());
-        if (kSupportSize > 6) { return false; }
+        if (kSupportSize > kMaxResidualSupport) { return false; }
 
         std::array< ProbePoint, kNumProbes > bank{};
         GenerateProbeBank(bank, kSupportSize, bitwidth);
@@ -126,17 +126,17 @@ namespace cobra {
         }
 
         for (const auto &prim : basis) {
-            if (prim.arity > kSupportSize) { continue; }
+            if (prim.arity > kSupportSize || prim.arity > kMaxResidualSupport) { continue; }
 
             // Enumerate strictly increasing index combinations
-            std::array< uint32_t, 6 > combo{};
+            std::array< uint32_t, kMaxResidualSupport > combo{};
             for (uint8_t i = 0; i < prim.arity; ++i) { combo[i] = i; }
             auto combo_span = std::span< uint32_t >{ combo.data(), prim.arity };
 
             do {
                 // Evaluate ghost at each probe point
                 std::array< uint64_t, kNumProbes > g_vals{};
-                std::array< uint64_t, 6 > args{};
+                std::array< uint64_t, kMaxResidualSupport > args{};
                 for (int p = 0; p < kNumProbes; ++p) {
                     for (uint8_t a = 0; a < prim.arity; ++a) {
                         args[a] = bank[static_cast< size_t >(p)].values[combo[a]];
@@ -189,7 +189,7 @@ namespace cobra {
                 if (!cross_ok) { continue; }
 
                 // Build the expression: c * ghost(var_indices)
-                std::array< uint32_t, 6 > var_indices{};
+                std::array< uint32_t, kMaxResidualSupport > var_indices{};
                 for (uint8_t a = 0; a < prim.arity; ++a) { var_indices[a] = support[combo[a]]; }
                 auto ghost_expr =
                     prim.build(std::span< const uint32_t >{ var_indices.data(), prim.arity });
@@ -232,22 +232,22 @@ namespace cobra {
         const auto &basis       = GetGhostBasis();
 
         for (const auto &prim : basis) {
-            if (prim.arity > kSupportSize) { continue; }
+            if (prim.arity > kSupportSize || prim.arity > kMaxResidualSupport) { continue; }
 
             // Enumerate strictly increasing index combinations
-            std::array< uint32_t, 6 > combo{};
+            std::array< uint32_t, kMaxResidualSupport > combo{};
             for (uint8_t i = 0; i < prim.arity; ++i) { combo[i] = i; }
             auto combo_span = std::span< uint32_t >{ combo.data(), prim.arity };
 
             do {
                 // Map support-local combo to original-space variable indices
-                std::array< uint32_t, 6 > var_indices{};
+                std::array< uint32_t, kMaxResidualSupport > var_indices{};
                 for (uint8_t a = 0; a < prim.arity; ++a) { var_indices[a] = support[combo[a]]; }
 
                 // Build weight function from ghost primitive + tuple
                 WeightFn weight =
                     [&prim, combo](std::span< const uint64_t > args, uint32_t bw) -> uint64_t {
-                    std::array< uint64_t, 6 > ghost_args{};
+                    std::array< uint64_t, kMaxResidualSupport > ghost_args{};
                     for (uint8_t a = 0; a < prim.arity; ++a) { ghost_args[a] = args[combo[a]]; }
                     return prim.eval(
                         std::span< const uint64_t >{ ghost_args.data(), prim.arity }, bw
