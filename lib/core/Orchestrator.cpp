@@ -847,9 +847,16 @@ namespace cobra {
 
             if (result.outcome.Succeeded()) {
                 outcome.kind      = SimplifyOutcome::Kind::kSimplified;
-                outcome.expr      = CleanupFinalExpr(result.outcome.TakeExpr(), bitwidth);
                 outcome.real_vars = result.outcome.RealVars();
-                outcome.verified = result.metadata.verification == VerificationState::kVerified;
+                // Read PassOutcome.Verification() instead of the parallel
+                // ItemMetadata.verification field. The two were initialized
+                // from the same source at every call site by convention; a
+                // future producer that stamps PassOutcome correctly but
+                // forgets the metadata field would otherwise see its
+                // verified rewrite reported as unverified. PassOutcome is
+                // the authoritative source for the success branch.
+                outcome.verified = result.outcome.Verification() == VerificationState::kVerified;
+                outcome.expr      = CleanupFinalExpr(result.outcome.TakeExpr(), bitwidth);
                 outcome.sig_vector = std::move(result.metadata.sig_vector);
             } else {
                 outcome.kind = SimplifyOutcome::Kind::kUnchangedUnsupported;
