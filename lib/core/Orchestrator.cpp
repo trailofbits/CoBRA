@@ -855,8 +855,9 @@ namespace cobra {
                 // forgets the metadata field would otherwise see its
                 // verified rewrite reported as unverified. PassOutcome is
                 // the authoritative source for the success branch.
-                outcome.verified = result.outcome.Verification() == VerificationState::kVerified;
-                outcome.expr      = CleanupFinalExpr(result.outcome.TakeExpr(), bitwidth);
+                outcome.verified =
+                    result.outcome.Verification() == VerificationState::kVerified;
+                outcome.expr       = CleanupFinalExpr(result.outcome.TakeExpr(), bitwidth);
                 outcome.sig_vector = std::move(result.metadata.sig_vector);
             } else {
                 outcome.kind = SimplifyOutcome::Kind::kUnchangedUnsupported;
