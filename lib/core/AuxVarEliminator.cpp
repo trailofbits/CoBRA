@@ -3,10 +3,12 @@
 #include "cobra/core/Trace.h"
 #include <algorithm>
 #include <bit>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -225,6 +227,16 @@ namespace cobra {
 
         // Re-check each spurious variable at full width
         const auto kNumVars = static_cast< uint32_t >(vars.size());
+        // var_idx maps each variable name back to its original index. If
+        // `vars` contains duplicate names, the second insertion overwrites
+        // the first and `var_idx.at(sv)` returns the wrong index — the
+        // IsSpuriousFullWidth probe targets the wrong variable. The Simplify
+        // public-API caller deduplicates, but tests and direct callers may
+        // not; assert at the boundary to fail loud on misuse.
+        assert(
+            (std::unordered_set< std::string >(vars.begin(), vars.end()).size() == vars.size())
+            && "EliminateAuxVars: vars must contain unique names"
+        );
         std::unordered_map< std::string, uint32_t > var_idx;
         for (uint32_t j = 0; j < kNumVars; ++j) { var_idx[vars[j]] = j; }
 

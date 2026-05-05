@@ -109,3 +109,18 @@ TEST(SemilinearSignatureTest, LinearShortcutFalseForSemilinear) {
         Expr::Mul(Expr::Constant(3), Expr::BitwiseAnd(Expr::Variable(0), Expr::Constant(0x0F)));
     EXPECT_FALSE(IsLinearShortcut(*e, 1, 8));
 }
+
+// Regression: semilinear-decomposition-7. EvalAtPoint indexed
+// var_vals[expr.var_index] without checking var_index < var_vals.size().
+// A malformed AST with Variable indices past num_vars triggered an
+// out-of-bounds vector read. The fix returns 0 for out-of-range
+// indices so the evaluator is robust against caller mistakes.
+TEST(SemilinearSignatureTest, OutOfRangeVarIndexHandledByLinearShortcut) {
+    // Build "Variable(5) + Variable(0)" but tell IsLinearShortcut that
+    // num_vars=1. Variable(5) is OOB; EvalAtPoint must not read past the
+    // 1-element assignment buffer. The resulting expression is constant-
+    // ish from the evaluator's view (Variable(5) always returns 0), so
+    // it should still be classified as linear.
+    auto expr = Expr::Add(Expr::Variable(5), Expr::Variable(0));
+    EXPECT_TRUE(IsLinearShortcut(*expr, 1, 8));
+}

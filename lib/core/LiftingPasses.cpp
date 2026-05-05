@@ -7,7 +7,9 @@
 #include "cobra/core/SignatureEval.h"
 
 #include <algorithm>
+#include <cassert>
 #include <functional>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -172,7 +174,7 @@ namespace cobra {
             return result;
         }
 
-        uint32_t FindVirtualIndex(
+        std::optional< uint32_t > FindVirtualIndex(
             const Expr &node, const std::vector< DeduplicatedAtom > &atoms,
             const std::vector< std::string > &vars, uint32_t bitwidth
         ) {
@@ -181,7 +183,7 @@ namespace cobra {
             for (const auto &atom : atoms) {
                 if (atom.hash == h && atom.rendered == rendered) { return atom.virtual_index; }
             }
-            return UINT32_MAX;
+            return std::nullopt;
         }
 
         std::unique_ptr< Expr > ReplaceAtomsWithVirtual(
@@ -192,8 +194,14 @@ namespace cobra {
             if (parent_is_bitwise && IsPureArithmetic(node) && HasVarDep(node)
                 && node.kind != Expr::Kind::kVariable)
             {
-                uint32_t vi = FindVirtualIndex(node, atoms, vars, bitwidth);
-                return Expr::Variable(vi);
+                // CollectLiftableAtoms walks the same predicate before
+                // ReplaceAtomsWithVirtual runs, so every node reaching
+                // this branch must already be in `atoms`. Assert the
+                // invariant rather than producing Variable(UINT32_MAX)
+                // on a sentinel miss.
+                auto vi = FindVirtualIndex(node, atoms, vars, bitwidth);
+                assert(vi.has_value() && "ReplaceAtomsWithVirtual: liftable atom missing from atom table");
+                return Expr::Variable(*vi);
             }
 
             auto result          = std::make_unique< Expr >();
