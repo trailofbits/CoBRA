@@ -193,6 +193,17 @@ namespace cobra {
             return { .reduced_sig = sig, .real_vars = {}, .spurious_vars = {} };
         }
 
+        // IsSpurious computes `1ULL << kNumVars` (UB for >= 64) and
+        // `1U << var_bit` (UB for var_bit >= 32). The orchestrator's
+        // max_vars policy and Simplify's kMaxInputVars=24 cap keep this
+        // in range; this guard returns "no elimination" for callers
+        // (tests, future code) that would otherwise hit the UB. The
+        // full-width overload calls into this one, so the guard
+        // covers the composition gap as well.
+        if (kNumVars >= 64) {
+            return { .reduced_sig = sig, .real_vars = vars, .spurious_vars = {} };
+        }
+
         const uint64_t kLiveMask = DetectLiveMask(sig, kNumVars);
 
         EliminationResult result;

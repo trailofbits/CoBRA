@@ -3,6 +3,7 @@
 #include "cobra/core/Expr.h"
 #include "cobra/core/Profile.h"
 #include <algorithm>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -105,6 +106,10 @@ namespace cobra {
     std::vector< uint64_t >
     EvaluateBooleanSignature(const Expr &expr, uint32_t num_vars, uint32_t bitwidth) {
         COBRA_ZONE_N("EvaluateBooleanSignature");
+        // 1 << num_vars is UB for num_vars >= 64. The orchestrator's
+        // max_vars policy keeps callers in range; this assert protects
+        // tests and direct callers.
+        assert(num_vars < 64 && "EvaluateBooleanSignature: 1 << num_vars UB for num_vars >= 64");
 #ifdef COBRA_SIG_STATS
         auto t0 = std::chrono::high_resolution_clock::now();
 #endif
@@ -120,6 +125,8 @@ namespace cobra {
 
     std::vector< uint64_t >
     EvaluateBooleanSignature(const Evaluator &eval, uint32_t num_vars, uint32_t bitwidth) {
+        // Same UB as the Expr overload — guarded uniformly.
+        assert(num_vars < 64 && "EvaluateBooleanSignature: 1 << num_vars UB for num_vars >= 64");
 #ifdef COBRA_SIG_STATS
         auto t0 = std::chrono::high_resolution_clock::now();
 #endif

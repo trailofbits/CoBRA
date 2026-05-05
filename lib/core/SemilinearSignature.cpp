@@ -3,6 +3,7 @@
 #include "cobra/core/Expr.h"
 #include "cobra/core/Trace.h"
 #include <algorithm>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -107,6 +108,11 @@ namespace cobra {
     std::vector< uint64_t > EvaluateSemilinearRow(
         const Expr &expr, uint32_t num_vars, uint32_t bitwidth, uint32_t bit_pos
     ) {
+        // 1 << num_vars is UB for num_vars >= 64. Even though no
+        // production code calls this evaluator today (it is reachable
+        // only from tests of the per-row strategy), guard the boundary
+        // so the UB cannot reach a future caller.
+        assert(num_vars < 64 && "EvaluateSemilinearRow: 1 << num_vars UB for num_vars >= 64");
         const size_t kLen = size_t{ 1 } << num_vars;
         auto result       = EvalSemilinearRecursive(expr, kLen, bitwidth, bit_pos);
 

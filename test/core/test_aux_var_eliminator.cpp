@@ -171,6 +171,25 @@ TEST(AuxVarEliminatorTest, FullWidthKeepsLiveVar) {
     EXPECT_EQ(result.spurious_vars.size(), 0u);
 }
 
+// Regression: expr-foundation-3 / expr-foundation-cross-3.
+// IsSpurious uses 1ULL << kNumVars (UB at kNumVars >= 64) and
+// 1U << var_bit (UB at var_bit >= 32). The orchestrator's max_vars
+// policy keeps callers in range, but the function itself had no
+// boundary guard. The fix early-returns "no elimination" at
+// num_vars >= 64 so the boolean overload — and the full-width
+// composition that calls into it — both avoid the shift UB without
+// requiring redundant guards at every caller.
+TEST(AuxVarEliminatorTest, NumVarsAtOrAboveSixtyFourReturnsAllReal) {
+    std::vector< std::string > vars(64);
+    for (size_t i = 0; i < vars.size(); ++i) { vars[i] = "v" + std::to_string(i); }
+    std::vector< uint64_t > sig(8, 0); // size irrelevant; guard fires first
+
+    auto result = EliminateAuxVars(sig, vars);
+    EXPECT_EQ(result.real_vars.size(), 64u);
+    EXPECT_EQ(result.spurious_vars.size(), 0u);
+    EXPECT_EQ(result.reduced_sig, sig);
+}
+
 // Full-width sensitivity: y is truly spurious at all widths.
 TEST(AuxVarEliminatorTest, FullWidthEliminatesGenuineSpurious) {
     // f(x,y) = x + 0*y = x. y never affects the output.

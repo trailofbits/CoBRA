@@ -1,6 +1,7 @@
 #include "cobra/core/CoeffInterpolator.h"
 #include "cobra/core/BitWidth.h"
 #include "cobra/core/Trace.h"
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -10,6 +11,12 @@ namespace cobra {
     std::vector< uint64_t > InterpolateCoefficients(
         std::vector< uint64_t > sig, uint32_t num_vars, uint32_t bitwidth
     ) { // NOLINT(readability-identifier-naming)
+        // The butterfly stride is `1U << var` (uint32) for var in [0, num_vars).
+        // For num_vars >= 32 the shift would be UB. Callers gate on
+        // ctx.opts.max_vars (default 16); the assert protects against
+        // any caller that bypasses that gate (RunPrepareCoeffModel adds
+        // an explicit policy check at its boundary, mirroring RunSignatureAnf).
+        assert(num_vars < 32 && "InterpolateCoefficients: 1U << var UB for num_vars >= 32");
         const uint64_t mask = Bitmask(bitwidth);
         const size_t len    = sig.size();
         COBRA_TRACE(

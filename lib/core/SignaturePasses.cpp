@@ -1077,6 +1077,30 @@ namespace cobra {
         const auto num_vars     = static_cast< uint32_t >(sub_ctx.real_vars.size());
         const auto expected_len = size_t{ 1 } << num_vars;
 
+        // Mirror RunSignatureAnf's max_vars gate. InterpolateCoefficients
+        // shifts by var in [0, num_vars), so num_vars >= 32 would be UB
+        // in CoeffInterpolator. The default opts.max_vars=16 keeps this
+        // in range; an explicit check at this boundary makes the contract
+        // local instead of inherited.
+        if (num_vars > ctx.opts.max_vars) {
+            return Ok(
+                PassResult{
+                    .decision    = PassDecision::kBlocked,
+                    .disposition = ItemDisposition::kRetainCurrent,
+                    .reason =
+                        ReasonDetail{
+                            .top = {
+                                .code = {
+                                    ReasonCategory::kGuardFailed,
+                                    ReasonDomain::kSignature,
+                                },
+                                .message = "num_vars exceeds max_vars policy",
+                            },
+                        },
+                }
+            );
+        }
+
         if (sig.size() != expected_len) {
             return Ok(
                 PassResult{
