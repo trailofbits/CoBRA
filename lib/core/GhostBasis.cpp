@@ -15,8 +15,7 @@ namespace cobra {
         constexpr uint8_t kMul3SubAnd3Arity = 3;
 
         static_assert(
-            kMulSubAndArity <= kMaxResidualSupport
-            && kMul3SubAnd3Arity <= kMaxResidualSupport,
+            kMulSubAndArity <= kMaxResidualSupport && kMul3SubAnd3Arity <= kMaxResidualSupport,
             "Ghost primitive arity exceeds kMaxResidualSupport — "
             "consumer buffers (combo, args, var_indices) would overflow"
         );
