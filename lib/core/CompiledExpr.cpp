@@ -8,6 +8,13 @@
 
 namespace cobra {
 
+    // EvalInstr captures only `kind` and a single `operand` derived from
+    // `constant_val` or `var_index` — it is intentionally narrower than
+    // Expr. CompileExpr therefore cannot reuse CloneExpr's field-copy
+    // pattern. Adding a new field to Expr (see lib/core/Expr.cpp's
+    // CloneExpr) requires explicit consideration of compiled-program
+    // semantics here: pick a representation, extend EvalInstr, or
+    // declare the new field unmaterialized.
     CompiledExpr CompileExpr(const Expr &expr, uint32_t bitwidth) {
         struct CompileFrame
         {

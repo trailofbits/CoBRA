@@ -82,6 +82,16 @@ TEST(ExprTest, RenderPositiveConstant8) {
     EXPECT_EQ(Render(*e, {}, 8), "127");
 }
 
+// Regression: expr-foundation-1. RenderImpl's negative-constant
+// detection computed `1ULL << (bitwidth - 1)` unconditionally; on
+// bitwidth=0 the uint32 underflow propagated into a shift count of
+// 0xFFFFFFFF, which is C++ UB. The fix renders bitwidth=0 constants
+// as plain decimal (no representable sign bit).
+TEST(ExprTest, RenderConstantBitwidthZero) {
+    auto e = Expr::Constant(42);
+    EXPECT_EQ(Render(*e, {}, 0), "42");
+}
+
 TEST(ExprTest, LogicalShrConstruction) {
     auto shr = Expr::LogicalShr(Expr::Variable(0), 3);
     EXPECT_EQ(shr->kind, Expr::Kind::kShr);

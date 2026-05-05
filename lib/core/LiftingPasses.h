@@ -9,8 +9,4 @@ namespace cobra {
     Result< PassResult >
     RunLiftRepeatedSubexpressions(const WorkItem &item, OrchestratorContext &ctx);
 
-    /// Evaluate an Expr tree at a full-width input point.
-    uint64_t
-    EvaluateExpr(const Expr &e, const std::vector< uint64_t > &vals, uint32_t bitwidth);
-
 } // namespace cobra

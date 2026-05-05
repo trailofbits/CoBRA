@@ -12,6 +12,7 @@ namespace cobra {
         kTooManyVariables,
         kNoReduction,
         kVerificationFailed,
+        kInvalidArgument,
     };
 
     struct ErrorInfo

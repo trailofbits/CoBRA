@@ -4,6 +4,7 @@
 #include "cobra/core/Profile.h"
 
 #include <algorithm>
+#include <cassert>
 #include <concepts>
 #include <cstdint>
 #include <functional>
@@ -41,6 +42,18 @@ namespace cobra {
         Evaluator &operator=(const Evaluator &)     = default;
         Evaluator &operator=(Evaluator &&) noexcept = default;
 
+        // Function-based ctor with explicit arity. Prefer this overload
+        // wherever the caller knows how many inputs the closure expects;
+        // it makes InputArity() meaningful for the function-path branch
+        // so consumers (EvaluateBooleanSignature, FullWidthCheckEval)
+        // can size their input buffer correctly without HasCompiledExpr()
+        // guards.
+        explicit Evaluator(Function fn, uint32_t arity, EvaluatorTraceKind trace_kind)
+            : fn_(std::move(fn)), input_arity_(arity), trace_kind_(trace_kind) {}
+
+        // Legacy zero-arity ctor. Sets input_arity_ = 0, signalling
+        // "unknown arity — trust the caller's num_vars". Consumers that
+        // bound-check against InputArity() must accept 0 as a wildcard.
         explicit Evaluator(
             Function fn, EvaluatorTraceKind trace_kind = EvaluatorTraceKind::kNone
         )
@@ -131,6 +144,11 @@ namespace cobra {
             // remapped through the elimination pipeline).
             uint32_t buf_size = source_arity;
             for (uint32_t idx : idx_map) { buf_size = std::max(buf_size, idx + 1); }
+            // The remapped Evaluator expects exactly `idx_map.size()`
+            // inputs from its caller (the closure indexes
+            // reduced_vals[i] for i < idx_map.size()). Pass that as the
+            // declared arity so InputArity() is meaningful for the
+            // function-path branch too.
             return Evaluator(
                 [base, idx_map, original_vals = std::vector< uint64_t >(buf_size, 0)](
                     const std::vector< uint64_t > &reduced_vals
@@ -144,7 +162,7 @@ namespace cobra {
                     }
                     return result;
                 },
-                trace_kind
+                static_cast< uint32_t >(idx_map.size()), trace_kind
             );
         }
 
@@ -206,6 +224,13 @@ namespace cobra {
             const std::vector< uint64_t > *inputs = &vals;
 
             if (!input_map_.empty()) {
+                // Caller must supply at least one value per input_map_
+                // entry; the loop below indexes vals[i] for each entry.
+                // If vals is undersized, the read would be out-of-bounds.
+                assert(
+                    vals.size() >= input_map_.size()
+                    && "Evaluator::InvokeUntraced: vals smaller than remapped arity"
+                );
                 size_t remapped_arity = compiled_->arity;
                 for (uint32_t idx : input_map_) {
                     remapped_arity = std::max(remapped_arity, static_cast< size_t >(idx) + 1);

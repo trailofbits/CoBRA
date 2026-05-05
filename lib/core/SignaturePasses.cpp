@@ -155,6 +155,10 @@ namespace cobra {
             const WorkItem &item, const SignatureSubproblemContext &sub_ctx
         ) {
             const auto num_vars = sub_ctx.real_vars.size();
+            // Fast-path is intentionally narrower than
+            // RunSignatureMultivarPolyRecovery's 6-var envelope: 5-6 var
+            // problems get the worklist pipeline's full classification
+            // context. See SignaturePasses.h coverage note.
             if (num_vars < 2 || num_vars > 4 || !item.features.classification) { return false; }
 
             const auto &cls = *item.features.classification;

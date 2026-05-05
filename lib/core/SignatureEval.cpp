@@ -131,6 +131,17 @@ namespace cobra {
         assert(
             num_vars < 64 && "EvaluateBooleanSignature: 1 << num_vars UB for num_vars >= 64"
         );
+        // Enforce the producer/consumer arity contract on remapped or
+        // arity-aware Evaluators. Function-path Evaluators constructed
+        // without an explicit arity report InputArity() == 0 — accept
+        // those as a wildcard ("trust the caller's num_vars"). Any
+        // Evaluator that DOES report an arity must agree with num_vars,
+        // or the closure would index its private buffer past num_vars.
+        [[maybe_unused]] const auto kArity = eval.InputArity();
+        assert(
+            (kArity == 0 || kArity == num_vars)
+            && "EvaluateBooleanSignature: Evaluator arity disagrees with num_vars"
+        );
 #ifdef COBRA_SIG_STATS
         auto t0 = std::chrono::high_resolution_clock::now();
 #endif
