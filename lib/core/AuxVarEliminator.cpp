@@ -1,5 +1,6 @@
 #include "cobra/core/AuxVarEliminator.h"
 #include "cobra/core/Profile.h"
+#include "cobra/core/SignatureChecker.h"
 #include "cobra/core/Trace.h"
 #include <algorithm>
 #include <bit>
@@ -71,7 +72,13 @@ namespace cobra {
         bool IsSpuriousFullWidth(
             const Evaluator &eval, uint32_t var_index, uint32_t num_vars, uint32_t bitwidth
         ) {
-            constexpr uint32_t kNumSamples = 8;
+            // 8 probes are enough for densely-dependent expressions
+            // (the {0,1} sig already disagrees) but can miss
+            // sparsely-dependent vars whose effect surfaces only on a
+            // small subset of full-width inputs. Match the residual
+            // gate's strength so the spurious-classification depth is
+            // uniform with downstream verification.
+            constexpr uint32_t kNumSamples = kResidualGateProbeCount;
             const uint64_t kMask = (bitwidth >= 64) ? UINT64_MAX : ((1ULL << bitwidth) - 1);
             uint64_t rng_state   = (static_cast< uint64_t >(var_index) * 2654435761ULL)
                 + (static_cast< uint64_t >(num_vars) * 40503ULL) + 0xDEADBEEFULL;

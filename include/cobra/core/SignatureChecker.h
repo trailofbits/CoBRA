@@ -7,6 +7,22 @@
 
 namespace cobra {
 
+    // Default probe count for FullWidthCheck / FullWidthCheckEval.
+    // Sufficient for shape-deterministic rewrites (e.g., AnfCleanup,
+    // RefoldNegation, single-pattern matchers) where the candidate's
+    // shape is fully determined by the input and only randomized
+    // sampling is needed to exercise full-width modular arithmetic.
+    inline constexpr uint32_t kDefaultProbeCount = 8;
+
+    // Strengthened probe count for "post-solver verification" gates —
+    // the boundary between a numeric solver (CoB, ANF→Mul shadow,
+    // singleton polynomial reconstruction, lifted-substitute) and
+    // candidate emission. The 64-probe count is the documented
+    // residual-gate strength: it catches boolean-correct /
+    // full-width-incorrect false positives that the 8-probe default
+    // fails to surface against shape-non-deterministic rewrites.
+    inline constexpr uint32_t kResidualGateProbeCount = 64;
+
     struct CheckResult
     {
         bool passed;
