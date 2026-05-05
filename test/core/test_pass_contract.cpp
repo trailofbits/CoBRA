@@ -107,13 +107,13 @@ TEST(PassOutcomeTest, SuccessCarriesExprAndVars) {
     EXPECT_EQ(o.GetExpr().constant_val, 42);
 }
 
-TEST(PassOutcomeTest, InapplicableHasNoExpr) {
-    ReasonDetail reason{ .top = { .code = { .category = ReasonCategory::kGuardFailed,
+TEST(PassOutcomeTest, BlockedHasReasonNoExpr) {
+    ReasonDetail reason{ .top = { .code = { .category = ReasonCategory::kRepresentationGap,
                                             .domain   = ReasonDomain::kSemilinear } } };
-    auto o = PassOutcome::Inapplicable(std::move(reason));
+    auto o = PassOutcome::Blocked(std::move(reason));
     EXPECT_FALSE(o.Succeeded());
-    EXPECT_EQ(o.Kind(), OutcomeKind::kInapplicable);
-    EXPECT_EQ(o.Reason().top.code.category, ReasonCategory::kGuardFailed);
+    EXPECT_EQ(o.Kind(), OutcomeKind::kBlocked);
+    EXPECT_EQ(o.Reason().top.code.category, ReasonCategory::kRepresentationGap);
 }
 
 TEST(PassOutcomeTest, SigVectorThreadsThrough) {
@@ -126,48 +126,18 @@ TEST(PassOutcomeTest, SigVectorThreadsThrough) {
     EXPECT_EQ(o.SigVector()[3], 4);
 }
 
-TEST(PassOutcomeTest, PartialCarriesExprAndPending) {
-    auto residual = Expr::Variable(0);
-    Classification residual_cls{ .semantic = SemanticClass::kLinear, .flags = kSfNone };
-    PendingWork pw{ .residual = std::move(residual), .residual_classification = residual_cls };
-    ReasonDetail reason{
-        .top = { .code    = { .category = ReasonCategory::kRepresentationGap,
-                              .domain   = ReasonDomain::kDecomposition },
-                .message = "partial decomposition" }
-    };
-    auto o = PassOutcome::Partial(
-        Expr::Constant(7), { "x" }, VerificationState::kUnverified, std::move(pw),
-        std::move(reason)
-    );
-    EXPECT_FALSE(o.Succeeded());
-    EXPECT_EQ(o.Kind(), OutcomeKind::kPartial);
-    EXPECT_EQ(o.GetExpr().constant_val, 7);
-    EXPECT_EQ(o.RealVars().size(), 1);
-    EXPECT_EQ(o.Verification(), VerificationState::kUnverified);
-    EXPECT_EQ(o.Pending().residual->kind, Expr::Kind::kVariable);
-    EXPECT_EQ(o.Reason().top.code.category, ReasonCategory::kRepresentationGap);
-}
+// --- PassOutcome contract violations now abort in both debug and
+// release builds (no more #ifdef NDEBUG skip). The accessors check
+// kind_ at runtime via std::abort(), matching SolverResult's design.
 
-// --- PassOutcome death tests (assert-guarded, debug builds only) ---
-
-#ifdef NDEBUG
-TEST(PassOutcomeDeathTest, ExprOnBlockedAsserts) {
-    GTEST_SKIP() << "assert() compiled out in Release builds";
-}
-
-TEST(PassOutcomeDeathTest, PendingOnNonPartialAsserts) {
-    GTEST_SKIP() << "assert() compiled out in Release builds";
-}
-#else
-TEST(PassOutcomeDeathTest, ExprOnBlockedAsserts) {
+TEST(PassOutcomeDeathTest, ExprOnBlockedAborts) {
     ReasonDetail reason{ .top = { .code = { .category = ReasonCategory::kRepresentationGap,
                                             .domain   = ReasonDomain::kSemilinear } } };
     auto o = PassOutcome::Blocked(std::move(reason));
     EXPECT_DEATH(o.GetExpr(), "");
 }
 
-TEST(PassOutcomeDeathTest, PendingOnNonPartialAsserts) {
+TEST(PassOutcomeDeathTest, ReasonOnSuccessAborts) {
     auto o = PassOutcome::Success(Expr::Constant(0), {}, VerificationState::kVerified);
-    EXPECT_DEATH(o.Pending(), "");
+    EXPECT_DEATH(o.Reason(), "");
 }
-#endif

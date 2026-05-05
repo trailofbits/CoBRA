@@ -23,12 +23,14 @@ TEST(ResultTest, AllErrorCodes) {
     auto toomany = Err< int >(CobraError::kTooManyVariables, "");
     auto noreduc = Err< int >(CobraError::kNoReduction, "");
     auto verify  = Err< int >(CobraError::kVerificationFailed, "");
+    auto invalid = Err< int >(CobraError::kInvalidArgument, "");
 
     EXPECT_EQ(parse.error().code, CobraError::kParseError);
     EXPECT_EQ(nonlin.error().code, CobraError::kNonLinearInput);
     EXPECT_EQ(toomany.error().code, CobraError::kTooManyVariables);
     EXPECT_EQ(noreduc.error().code, CobraError::kNoReduction);
     EXPECT_EQ(verify.error().code, CobraError::kVerificationFailed);
+    EXPECT_EQ(invalid.error().code, CobraError::kInvalidArgument);
 }
 
 TEST(ResultTest, MoveOnlyValue) {

@@ -232,6 +232,16 @@ namespace cobra {
         return Ok(std::move(result));
     }
 
+    // Self-check pass for the normalized semilinear IR. Despite the
+    // name, this pass DOES mutate the IR before checking: SimplifyStructure
+    // runs first to merge like atoms, recognize complement-pairs, and
+    // apply per-atom algebraic identities (De Morgan, double-NOT, etc.).
+    // The self-check then validates the post-SimplifyStructure form
+    // against the original AST, and the CheckedSemilinearPayload that
+    // flows downstream carries that mutated IR. RecoverStructure (later
+    // in the pipeline) reads the SimplifyStructure-rewritten atoms via
+    // DecomposeAtom — so the semilinear pipeline's "structural"
+    // transforms in fact begin here, not at RunSemilinearRewrite.
     Result< PassResult > RunSemilinearCheck(const WorkItem &item, OrchestratorContext &ctx) {
         COBRA_ZONE_N("RunSemilinearCheck");
         if (!std::holds_alternative< NormalizedSemilinearPayload >(item.payload)) {

@@ -99,7 +99,10 @@ namespace cobra {
                 }
                 case Expr::Kind::kShr: {
                     const uint64_t kVal = EvalConstantArith(*expr.children[0], mask, bitwidth);
-                    return (kVal >> expr.constant_val) & mask;
+                    // ModShr guards shift count >= 64 by returning 0;
+                    // sibling EvalConstantBitwise above already routes
+                    // shifts through ModShr — keep the convention uniform.
+                    return ModShr(kVal, expr.constant_val, bitwidth);
                 }
                 case Expr::Kind::kAnd:
                 case Expr::Kind::kOr:
@@ -386,6 +389,16 @@ namespace cobra {
         COBRA_TRACE(
             "Semilinear", "NormalizeToSemilinear: vars={} bitwidth={}", vars.size(), bitwidth
         );
+        // bitwidth=0 makes Bitmask(0) return 0, which would zero every
+        // coefficient and drop every term — the pipeline silently emits
+        // Constant(0) for any input. bitwidth>64 has no meaningful
+        // interpretation in this 64-bit modular ring.
+        if (bitwidth == 0 || bitwidth > 64) {
+            return Err< SemilinearIR >(
+                CobraError::kInvalidArgument,
+                "bitwidth must be in [1, 64]; got " + std::to_string(bitwidth)
+            );
+        }
         CollectCtx ctx; // NOLINT(misc-const-correctness)
         ctx.bitwidth = bitwidth;
         ctx.mask     = Bitmask(bitwidth);

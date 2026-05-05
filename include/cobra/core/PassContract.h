@@ -1,6 +1,5 @@
 #pragma once
 
-#include "cobra/core/Classification.h"
 #include "cobra/core/Expr.h"
 
 #include <cassert>
@@ -163,12 +162,14 @@ namespace cobra {
         kRejected,
     };
 
-    struct PendingWork
-    {
-        std::unique_ptr< Expr > residual;
-        Classification residual_classification;
-    };
-
+    // PassOutcome currently uses only kSuccess and kBlocked from OutcomeKind.
+    // The kInapplicable/kPartial/kVerifyFailed variants of OutcomeKind are
+    // produced exclusively by SolverResult — PassOutcome's named constructors
+    // for those variants were declared but never called in production code.
+    // They were removed; if a future pass needs partial-residual or
+    // verify-failed semantics, add a fresh deliberate PassOutcome variant
+    // with a dedicated consumer branch in ToSimplifyOutcome rather than
+    // repurposing the SolverResult enum tags.
     class [[nodiscard]] PassOutcome
     {
       public:
@@ -179,18 +180,7 @@ namespace cobra {
             VerificationState verification
         );
 
-        static PassOutcome Inapplicable(ReasonDetail reason);
         static PassOutcome Blocked(ReasonDetail reason);
-
-        static PassOutcome Partial(
-            std::unique_ptr< Expr > expr, std::vector< std::string > real_vars,
-            VerificationState verification, PendingWork pending, ReasonDetail reason
-        );
-
-        static PassOutcome VerifyFailed(
-            std::unique_ptr< Expr > expr, std::vector< std::string > real_vars,
-            ReasonDetail reason
-        );
 
         OutcomeKind Kind() const { return kind_; }
 
@@ -203,7 +193,6 @@ namespace cobra {
         VerificationState Verification() const;
 
         const ReasonDetail &Reason() const;
-        const PendingWork &Pending() const;
 
         const std::vector< uint64_t > &SigVector() const;
         void SetSigVector(std::vector< uint64_t > sv);
@@ -219,7 +208,6 @@ namespace cobra {
         std::vector< std::string > real_vars_;
         VerificationState verification_ = VerificationState::kUnverified;
         std::optional< ReasonDetail > reason_;
-        std::optional< PendingWork > pending_;
         std::vector< uint64_t > sig_vector_;
         std::optional< DecompositionMeta > decomposition_meta_;
     };
