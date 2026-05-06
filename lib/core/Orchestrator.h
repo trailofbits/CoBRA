@@ -405,7 +405,12 @@ namespace cobra {
         bool HasAttempted(const StateFingerprint &fp, PassId pass) const;
 
       private:
-        absl::flat_hash_map< StateFingerprint, std::vector< PassId > > cache_;
+        // Bitmask keyed per fingerprint — PassId fits in 64 entries by
+        // construction (see static_assert in OrchestratorPasses.h), so a
+        // single uint64_t per fingerprint is enough. This makes Record /
+        // HasAttempted O(1) and prevents the unbounded vector growth a
+        // future fingerprint refactor could otherwise expose.
+        absl::flat_hash_map< StateFingerprint, uint64_t > cache_;
     };
 
     // ---------------------------------------------------------------

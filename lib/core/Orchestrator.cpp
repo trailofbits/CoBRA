@@ -304,14 +304,13 @@ size_t std::hash< cobra::SemilinearFingerprintKey >::operator()(
 namespace cobra {
 
     void PassAttemptCache::Record(const StateFingerprint &fp, PassId pass) {
-        cache_[fp].push_back(pass);
+        cache_[fp] |= (uint64_t{ 1 } << static_cast< uint8_t >(pass));
     }
 
     bool PassAttemptCache::HasAttempted(const StateFingerprint &fp, PassId pass) const {
         auto it = cache_.find(fp);
         if (it == cache_.end()) { return false; }
-        const auto &passes = it->second;
-        return std::find(passes.begin(), passes.end(), pass) != passes.end();
+        return (it->second & (uint64_t{ 1 } << static_cast< uint8_t >(pass))) != 0;
     }
 
     void Worklist::Push(WorkItem item) {
