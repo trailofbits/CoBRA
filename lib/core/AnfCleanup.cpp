@@ -76,7 +76,11 @@ namespace cobra {
 
         uint32_t CountOrChainDepth(const Expr &expr) {
             if (expr.kind != Expr::Kind::kOr) { return 0; }
-            return 1 + CountOrChainDepth(*expr.children[0]);
+            uint32_t deepest = 0;
+            for (const auto &child : expr.children) {
+                deepest = std::max(deepest, CountOrChainDepth(*child));
+            }
+            return 1 + deepest;
         }
 
         std::optional< uint32_t > DetectOrFamily(const std::vector< uint32_t > &monomials) {
