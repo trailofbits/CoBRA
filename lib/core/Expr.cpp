@@ -84,8 +84,7 @@ namespace cobra {
                     // representable sign bit at bitwidth=0).
                     const uint64_t kMask = Bitmask(bitwidth);
                     const uint64_t kHalf = SignBitMask(bitwidth);
-                    if (kHalf != 0 && expr.constant_val >= kHalf
-                        && expr.constant_val <= kMask)
+                    if (kHalf != 0 && expr.constant_val >= kHalf && expr.constant_val <= kMask)
                     {
                         const uint64_t kNeg = (kMask - expr.constant_val) + 1;
                         out << "-" << kNeg;

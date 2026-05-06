@@ -83,7 +83,7 @@ namespace cobra {
             // uniform with downstream verification.
             constexpr uint32_t kNumSamples = kResidualGateProbeCount;
             const uint64_t kMask           = Bitmask(bitwidth);
-            uint64_t rng_state   = (static_cast< uint64_t >(var_index) * 2654435761ULL)
+            uint64_t rng_state = (static_cast< uint64_t >(var_index) * 2654435761ULL)
                 + (static_cast< uint64_t >(num_vars) * 40503ULL) + 0xDEADBEEFULL;
 
             std::vector< uint64_t > inputs(num_vars);
