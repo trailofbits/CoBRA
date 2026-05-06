@@ -203,50 +203,57 @@ namespace cobra {
             uint32_t first_preorder;
         };
 
-        void CollectNonLeafSubtrees(
+        // Returns the subtree node count via post-order summation,
+        // eliminating per-node CountNodes calls (was O(n^2)). Render is
+        // deferred until a hash-bucket hit forces disambiguation; the
+        // first registration in a bucket stores rendered as empty and
+        // back-fills it lazily on the next hit.
+        uint32_t CollectNonLeafSubtrees(
             const Expr &node, uint32_t &preorder_counter,
             const std::vector< std::string > &vars, uint32_t bitwidth,
             std::unordered_map< size_t, std::vector< size_t > > &by_hash,
             std::vector< RepeatEntry > &entries
         ) {
-            uint32_t my_order = preorder_counter++;
-            bool is_leaf =
-                (node.kind == Expr::Kind::kConstant || node.kind == Expr::Kind::kVariable);
-            if (!is_leaf) {
-                size_t h       = std::hash< Expr >{}(node);
-                auto rendered  = Render(node, vars, bitwidth);
-                auto node_size = CountNodes(node);
-
-                bool found = false;
-                auto hit   = by_hash.find(h);
-                if (hit != by_hash.end()) {
-                    for (size_t idx : hit->second) {
-                        if (entries[idx].rendered == rendered) {
-                            entries[idx].count++;
-                            found = true;
-                            break;
-                        }
-                    }
-                }
-                if (!found) {
-                    by_hash[h].push_back(entries.size());
-                    entries.push_back(
-                        RepeatEntry{
-                            .hash             = h,
-                            .rendered         = std::move(rendered),
-                            .first_occurrence = &node,
-                            .count            = 1,
-                            .size             = node_size,
-                            .first_preorder   = my_order,
-                        }
-                    );
-                }
-            }
+            const uint32_t my_order = preorder_counter++;
+            uint32_t subtree_size   = 1;
             for (const auto &child : node.children) {
-                CollectNonLeafSubtrees(
+                subtree_size += CollectNonLeafSubtrees(
                     *child, preorder_counter, vars, bitwidth, by_hash, entries
                 );
             }
+
+            const bool kIsLeaf =
+                (node.kind == Expr::Kind::kConstant || node.kind == Expr::Kind::kVariable);
+            if (kIsLeaf) { return subtree_size; }
+
+            const size_t kHash = std::hash< Expr >{}(node);
+            auto hit           = by_hash.find(kHash);
+            if (hit != by_hash.end()) {
+                auto rendered = Render(node, vars, bitwidth);
+                for (size_t idx : hit->second) {
+                    if (entries[idx].rendered.empty()) {
+                        entries[idx].rendered =
+                            Render(*entries[idx].first_occurrence, vars, bitwidth);
+                    }
+                    if (entries[idx].rendered == rendered) {
+                        entries[idx].count++;
+                        return subtree_size;
+                    }
+                }
+            }
+
+            by_hash[kHash].push_back(entries.size());
+            entries.push_back(
+                RepeatEntry{
+                    .hash             = kHash,
+                    .rendered         = {},
+                    .first_occurrence = &node,
+                    .count            = 1,
+                    .size             = subtree_size,
+                    .first_preorder   = my_order,
+                }
+            );
+            return subtree_size;
         }
 
         bool IsAncestorOf(const Expr *ancestor, const Expr *descendant) {
