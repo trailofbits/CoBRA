@@ -9,6 +9,15 @@ namespace cobra {
         return (1ULL << bitwidth) - 1;
     }
 
+    // Mask with the sign bit set (1 << (bitwidth - 1)), guarded so that
+    // bitwidth==0 returns 0 rather than triggering shift UB. Use for
+    // negative-constant detection paired with Bitmask(bitwidth).
+    inline uint64_t SignBitMask(uint32_t bitwidth) {
+        if (bitwidth == 0) { return 0; }
+        if (bitwidth >= 64) { return 1ULL << 63; }
+        return 1ULL << (bitwidth - 1);
+    }
+
     inline uint64_t ModAdd(uint64_t a, uint64_t b, uint32_t bitwidth) {
         return (a + b) & Bitmask(bitwidth);
     }

@@ -43,7 +43,7 @@ namespace cobra {
     inline uint64_t ModInverseOdd(uint64_t x, uint32_t bits) {
         assert(bits >= 1);
         assert(x & 1);
-        const uint64_t kModMask = (bits >= 64) ? UINT64_MAX : (1ULL << bits) - 1;
+        const uint64_t kModMask = Bitmask(bits);
         uint64_t inv            = x & kModMask;
         for (uint32_t b = 3; b < bits; b *= 2) { inv = (inv * (2 - (x * inv))) & kModMask; }
         return inv & kModMask;
