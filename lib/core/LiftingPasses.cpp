@@ -185,9 +185,19 @@ namespace cobra {
             for (const auto &c : e.children) { CollectVarSupport(*c, out); }
         }
 
+        // Iterative pre-order walk: this function gates the
+        // 50 000-node limit before subsequent recursive helpers run,
+        // so it must itself tolerate adversarially deep input ASTs
+        // that would blow a recursive call stack.
         uint32_t CountNodes(const Expr &e) {
-            uint32_t count = 1;
-            for (const auto &c : e.children) { count += CountNodes(*c); }
+            uint32_t count = 0;
+            std::vector< const Expr * > stack{ &e };
+            while (!stack.empty()) {
+                const Expr *node = stack.back();
+                stack.pop_back();
+                ++count;
+                for (const auto &c : node->children) { stack.push_back(c.get()); }
+            }
             return count;
         }
 
