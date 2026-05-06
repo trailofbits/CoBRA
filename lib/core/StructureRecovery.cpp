@@ -41,6 +41,46 @@ namespace cobra {
             return CreateAtom(ir, CloneExpr(basis), OperatorFamily::kMixed);
         }
 
+        /// Find or create an atom for `Var(var_idx) & Constant(mask)`,
+        /// or a bare `Var(var_idx)` when mask == kMod. Prevents
+        /// FlattenComplexAtoms from emitting duplicate canonical atoms
+        /// when multiple complex atoms flatten to the same shape.
+        AtomId FindOrCreateMaskedVariableAtom(
+            SemilinearIR &ir, GlobalVarIdx var_idx, uint64_t mask, uint64_t mod_mask
+        ) {
+            const bool kBare = (mask == mod_mask);
+            for (size_t k = 0; k < ir.atom_table.size(); ++k) {
+                const auto &subtree = *ir.atom_table[k].original_subtree;
+                if (kBare) {
+                    if (subtree.kind == Expr::Kind::kVariable
+                        && subtree.var_index == var_idx)
+                    {
+                        return static_cast< AtomId >(k);
+                    }
+                    continue;
+                }
+                if (subtree.kind != Expr::Kind::kAnd || subtree.children.size() != 2) {
+                    continue;
+                }
+                const auto &lhs = *subtree.children[0];
+                const auto &rhs = *subtree.children[1];
+                if (lhs.kind == Expr::Kind::kVariable && lhs.var_index == var_idx
+                    && rhs.kind == Expr::Kind::kConstant && rhs.constant_val == mask)
+                {
+                    return static_cast< AtomId >(k);
+                }
+                if (rhs.kind == Expr::Kind::kVariable && rhs.var_index == var_idx
+                    && lhs.kind == Expr::Kind::kConstant && lhs.constant_val == mask)
+                {
+                    return static_cast< AtomId >(k);
+                }
+            }
+            auto expr = kBare
+                ? Expr::Variable(var_idx)
+                : Expr::BitwiseAnd(Expr::Variable(var_idx), Expr::Constant(mask));
+            return CreateAtom(ir, std::move(expr), OperatorFamily::kAnd);
+        }
+
         /// Rebuild ir.terms from basis groups + non-group terms.
         void RebuildTerms(
             SemilinearIR &ir,
@@ -354,19 +394,15 @@ namespace cobra {
 
             // +coeff * (x & pass_mask)
             if (kPassMask != 0) {
-                auto pass_expr = (kPassMask == kMod)
-                    ? Expr::Variable(kVarIdx)
-                    : Expr::BitwiseAnd(Expr::Variable(kVarIdx), Expr::Constant(kPassMask));
-                AtomId pass_id = CreateAtom(ir, std::move(pass_expr), OperatorFamily::kAnd);
+                AtomId pass_id =
+                    FindOrCreateMaskedVariableAtom(ir, kVarIdx, kPassMask, kMod);
                 new_terms.push_back({ .coeff = term.coeff, .atom_id = pass_id });
             }
 
             // -coeff * (x & invert_mask)
             if (kInvertMask != 0) {
-                auto inv_expr = (kInvertMask == kMod)
-                    ? Expr::Variable(kVarIdx)
-                    : Expr::BitwiseAnd(Expr::Variable(kVarIdx), Expr::Constant(kInvertMask));
-                AtomId inv_id = CreateAtom(ir, std::move(inv_expr), OperatorFamily::kAnd);
+                AtomId inv_id =
+                    FindOrCreateMaskedVariableAtom(ir, kVarIdx, kInvertMask, kMod);
                 const uint64_t kNegCoeff = ModNeg(term.coeff, ir.bitwidth);
                 new_terms.push_back({ .coeff = kNegCoeff, .atom_id = inv_id });
             }
