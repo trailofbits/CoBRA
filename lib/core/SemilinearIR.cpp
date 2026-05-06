@@ -117,18 +117,10 @@ namespace cobra {
         return {};
     }
 
-    void CollectVarsFromExpr(const Expr &expr, std::vector< GlobalVarIdx > &out) {
-        if (expr.kind == Expr::Kind::kVariable) {
-            out.push_back(expr.var_index);
-            return;
-        }
-        for (const auto &child : expr.children) { CollectVarsFromExpr(*child, out); }
-    }
-
     AtomId
     CreateAtom(SemilinearIR &ir, std::unique_ptr< Expr > subtree, OperatorFamily provenance) {
         std::vector< GlobalVarIdx > support;
-        CollectVarsFromExpr(*subtree, support);
+        CollectVariables(*subtree, support);
         std::sort(support.begin(), support.end());
         support.erase(std::unique(support.begin(), support.end()), support.end());
 

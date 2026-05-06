@@ -3,6 +3,7 @@
 #include "cobra/core/Profile.h"
 #include "cobra/core/SignatureSimplifier.h"
 #include <algorithm>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -21,6 +22,15 @@ namespace cobra {
             case Expr::Kind::kConstant:
                 return Expr::Constant(expr.constant_val);
             case Expr::Kind::kVariable:
+                // Caller (ExtractTemplateCore, RunResidualTemplate) sizes
+                // index_map to cover the template-generated expression's
+                // variable space. A var_index past index_map's end means
+                // the caller passed a mismatched map — debug-assert at the
+                // boundary; the read is otherwise unchecked.
+                assert(
+                    expr.var_index < index_map.size()
+                    && "RemapVars: var_index out of range for index_map"
+                );
                 return Expr::Variable(index_map[expr.var_index]);
             case Expr::Kind::kAdd:
                 return Expr::Add(

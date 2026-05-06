@@ -60,6 +60,21 @@ namespace cobra {
         });
     }
 
+    bool ContainsShr(const Expr &expr) {
+        if (expr.kind == Expr::Kind::kShr) { return true; }
+        return std::ranges::any_of(expr.children, [](const auto &child) {
+            return ContainsShr(*child);
+        });
+    }
+
+    void CollectVariables(const Expr &expr, std::vector< uint32_t > &out) {
+        if (expr.kind == Expr::Kind::kVariable) {
+            out.push_back(expr.var_index);
+            return;
+        }
+        for (const auto &child : expr.children) { CollectVariables(*child, out); }
+    }
+
     uint64_t EvalConstantExpr(const Expr &expr, uint32_t bitwidth) {
         const uint64_t kMask = Bitmask(bitwidth);
 

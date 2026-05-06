@@ -3,6 +3,7 @@
 #include "cobra/core/AuxVarEliminator.h"
 #include "cobra/core/BitWidth.h"
 #include "cobra/core/ExprUtils.h"
+#include "cobra/core/GhostResidualSolver.h"
 #include "cobra/core/MultivarPolyRecovery.h"
 #include "cobra/core/PassContract.h"
 #include "cobra/core/PolyExprBuilder.h"
@@ -94,6 +95,11 @@ namespace cobra {
         );
         auto compiled_core   = std::make_shared< CompiledExpr >(CompileExpr(core, bitwidth));
         const uint64_t kMask = Bitmask(bitwidth);
+        // The returned closure captures `original_workspace` and `core_stack`
+        // as mutable buffers reused across invocations. Concurrent calls on
+        // the same Evaluator race on those buffers — see the Evaluator
+        // thread-safety contract in Evaluator.h. Copy the Evaluator for
+        // per-thread use; lambda capture-by-value duplicates the workspaces.
         return Evaluator(
             [original, compiled_core = std::move(compiled_core), kMask,
              original_workspace = EvaluatorWorkspace{}, core_stack = std::vector< uint64_t >{}](
@@ -220,7 +226,7 @@ namespace cobra {
         auto fw_elim          = EliminateAuxVars(ctx.sig, ctx.vars, ctx.opts.evaluator, kBw);
         const auto kRealCount = static_cast< uint32_t >(fw_elim.real_vars.size());
 
-        if (kRealCount > 6) {
+        if (kRealCount > kMaxResidualSupport) {
             return SolverResult< CoreCandidate >::Inapplicable(
                 ReasonDetail{
                     .top = { .code    = { ReasonCategory::kGuardFailed,

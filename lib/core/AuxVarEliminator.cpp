@@ -1,13 +1,16 @@
 #include "cobra/core/AuxVarEliminator.h"
 #include "cobra/core/BitWidth.h"
 #include "cobra/core/Profile.h"
+#include "cobra/core/SignatureChecker.h"
 #include "cobra/core/Trace.h"
 #include <algorithm>
 #include <bit>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -72,8 +75,14 @@ namespace cobra {
         bool IsSpuriousFullWidth(
             const Evaluator &eval, uint32_t var_index, uint32_t num_vars, uint32_t bitwidth
         ) {
-            constexpr uint32_t kNumSamples = 8;
-            const uint64_t kMask = Bitmask(bitwidth);
+            // 8 probes are enough for densely-dependent expressions
+            // (the {0,1} sig already disagrees) but can miss
+            // sparsely-dependent vars whose effect surfaces only on a
+            // small subset of full-width inputs. Match the residual
+            // gate's strength so the spurious-classification depth is
+            // uniform with downstream verification.
+            constexpr uint32_t kNumSamples = kResidualGateProbeCount;
+            const uint64_t kMask           = Bitmask(bitwidth);
             uint64_t rng_state   = (static_cast< uint64_t >(var_index) * 2654435761ULL)
                 + (static_cast< uint64_t >(num_vars) * 40503ULL) + 0xDEADBEEFULL;
 
@@ -237,6 +246,16 @@ namespace cobra {
 
         // Re-check each spurious variable at full width
         const auto kNumVars = static_cast< uint32_t >(vars.size());
+        // var_idx maps each variable name back to its original index. If
+        // `vars` contains duplicate names, the second insertion overwrites
+        // the first and `var_idx.at(sv)` returns the wrong index — the
+        // IsSpuriousFullWidth probe targets the wrong variable. The Simplify
+        // public-API caller deduplicates, but tests and direct callers may
+        // not; assert at the boundary to fail loud on misuse.
+        assert(
+            (std::unordered_set< std::string >(vars.begin(), vars.end()).size() == vars.size())
+            && "EliminateAuxVars: vars must contain unique names"
+        );
         std::unordered_map< std::string, uint32_t > var_idx;
         for (uint32_t j = 0; j < kNumVars; ++j) { var_idx[vars[j]] = j; }
 

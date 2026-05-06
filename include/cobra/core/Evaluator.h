@@ -31,6 +31,33 @@ namespace cobra {
         std::vector< uint64_t > stack;
     };
 
+    // ---------------------------------------------------------------
+    // Thread-safety contract
+    // ---------------------------------------------------------------
+    // Evaluator instances are NOT thread-safe. Two threads calling
+    // operator() on the same instance race on:
+    //   1. The function-path closure built by Remap, whose `original_vals`
+    //      buffer is captured by-value (mutable per closure invocation).
+    //      The buffer is reset to 0 after each invocation, but neither
+    //      the write nor the reset is atomic.
+    //   2. The compiled-path workspace path: when no explicit
+    //      EvaluatorWorkspace is supplied, InvokeUntraced allocates a
+    //      local one — that's per-call safe — but callers that pass a
+    //      shared `EvaluatorWorkspace` for performance must not share
+    //      that workspace across threads.
+    //   3. BuildRemainderEvaluator (DecompositionEngine) returns a closure
+    //      capturing `original_workspace` and `core_stack` as mutable;
+    //      the same race applies to that closure.
+    //
+    // For cross-thread use, copy the Evaluator first — each copy holds
+    // an independent std::function (lambdas capture by value, so the
+    // `original_vals` and similar workspace buffers are duplicated). The
+    // shared_ptr<CompiledExpr> is a refcounted handle and is itself
+    // safe to share across threads as long as each thread owns its own
+    // EvaluatorWorkspace.
+    //
+    // The orchestrator is single-threaded today; the compiler enforces
+    // nothing about that, so this contract lives in documentation.
     class Evaluator
     {
       public:
@@ -144,6 +171,12 @@ namespace cobra {
             // remapped through the elimination pipeline).
             uint32_t buf_size = source_arity;
             for (uint32_t idx : idx_map) { buf_size = std::max(buf_size, idx + 1); }
+            // The captured `original_vals` is mutable: invocations write
+            // reduced_vals into it, then reset to 0 on exit. Concurrent
+            // calls on the same Evaluator instance race on this buffer
+            // — see the thread-safety contract above. Copy the Evaluator
+            // for per-thread use.
+            //
             // The remapped Evaluator expects exactly `idx_map.size()`
             // inputs from its caller (the closure indexes
             // reduced_vals[i] for i < idx_map.size()). Pass that as the

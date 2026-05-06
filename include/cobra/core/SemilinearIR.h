@@ -77,9 +77,6 @@ namespace cobra {
     /// Returns invalid for opaque atoms that don't fit this pattern.
     Decomposed DecomposeAtom(const AtomInfo &info, uint64_t modmask);
 
-    /// Collect variable indices from an expression tree.
-    void CollectVarsFromExpr(const Expr &expr, std::vector< GlobalVarIdx > &out);
-
     /// Create a new atom entry in the IR and return its ID.
     AtomId
     CreateAtom(SemilinearIR &ir, std::unique_ptr< Expr > subtree, OperatorFamily provenance);

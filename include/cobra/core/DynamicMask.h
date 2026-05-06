@@ -28,7 +28,4 @@ namespace cobra {
     // the inner expression g.
     std::optional< MaskInfo > DetectRootLowBitMask(const Expr &expr, uint32_t bitwidth);
 
-    // Returns true if any node in the AST is kShr.
-    bool ContainsShr(const Expr &expr);
-
 } // namespace cobra

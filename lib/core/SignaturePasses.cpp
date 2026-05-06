@@ -623,8 +623,16 @@ namespace cobra {
                 return pr;
             }
             const auto num_vars = static_cast< uint32_t >(cont.original_vars.size());
-            auto check =
-                FullWidthCheckEval(*cont.original_eval, num_vars, *substituted, ctx.bitwidth);
+            // Post-solver verification gate: the substituted Expr fuses
+            // a winner candidate (chosen by signature competition) with
+            // its lifted bindings, which can introduce full-width
+            // disagreements not visible in the {0,1} signature space.
+            // Use the residual-gate probe count to match the sibling
+            // ResolveResidualRecombine (line 709 below).
+            auto check          = FullWidthCheckEval(
+                *cont.original_eval, num_vars, *substituted, ctx.bitwidth,
+                kResidualGateProbeCount
+            );
             if (!check.passed) {
                 pr.decision = PassDecision::kBlocked;
                 pr.reason   = ReasonDetail{
@@ -1025,9 +1033,14 @@ namespace cobra {
             if (!fw.passed) {
                 // Product-shadow repair: AND = MUL on {0,1} but not
                 // at full width. Try replacing AND(var,var) with MUL.
-                auto repaired = RepairProductShadow(CloneExpr(*anf_expr));
-                auto repair_fw =
-                    FullWidthCheckEval(*mapped_eval, num_vars, *repaired, ctx.bitwidth);
+                // The repair sits on the AND/MUL semantic boundary
+                // V2 already flagged as a known divergence between
+                // {0,1} and full-width semantics, so verify with the
+                // residual-gate probe count rather than the default.
+                auto repaired  = RepairProductShadow(CloneExpr(*anf_expr));
+                auto repair_fw = FullWidthCheckEval(
+                    *mapped_eval, num_vars, *repaired, ctx.bitwidth, kResidualGateProbeCount
+                );
                 if (repair_fw.passed) {
                     anf_expr = std::move(repaired);
                 } else {
@@ -1363,7 +1376,16 @@ namespace cobra {
             }
             if (!combined) { combined = Expr::Constant(0); }
 
-            auto fw = FullWidthCheckEval(*mapped_eval, num_vars, *combined, ctx.bitwidth);
+            // Override-path candidates take the recursive signature
+            // chain's residual-gate strength, matching the non-override
+            // path that emits a kRemainderState child whose
+            // ResolveResidualRecombine verifies at 64 probes. Without
+            // this, the override branch would commit a kVerified
+            // candidate after only 8 probes against a Mul(coeff, anf)
+            // shape that has known full-width false-positive risk.
+            auto fw = FullWidthCheckEval(
+                *mapped_eval, num_vars, *combined, ctx.bitwidth, kResidualGateProbeCount
+            );
             if (!fw.passed) {
                 return Ok(
                     PassResult{

@@ -132,7 +132,12 @@ namespace cobra {
                 case Expr::Kind::kConstant:
                     return expr.constant_val & mask;
                 case Expr::Kind::kVariable:
-                    return var_vals[expr.var_index] & mask;
+                    // var_vals is sized to num_vars by IsLinearShortcut; a
+                    // sub-expression with var_index >= num_vars indicates a
+                    // malformed AST. Return 0 (treat the variable as having
+                    // no contribution) instead of an OOB read.
+                    return (expr.var_index < var_vals.size()) ? var_vals[expr.var_index] & mask
+                                                              : 0;
                 case Expr::Kind::kNot:
                     return (~EvalAtPoint(*expr.children[0], var_vals, mask)) & mask;
                 case Expr::Kind::kNeg:

@@ -10,6 +10,7 @@
 #include "cobra/core/DynamicMask.h"
 #include "cobra/core/Expr.h"
 #include "cobra/core/ExprCost.h"
+#include "cobra/core/ExprUtils.h"
 #include "cobra/core/PatternMatcher.h"
 #include "cobra/core/SignatureEval.h"
 #include "cobra/core/Simplifier.h"

@@ -1,6 +1,7 @@
 #include "cobra/core/SemilinearNormalizer.h"
 #include "cobra/core/BitWidth.h"
 #include "cobra/core/Expr.h"
+#include "cobra/core/ExprUtils.h"
 #include "cobra/core/Result.h"
 #include "cobra/core/SemilinearIR.h"
 #include "cobra/core/Trace.h"
@@ -72,13 +73,6 @@ namespace cobra {
             return 0;
         }
 
-        bool ContainsShr(const Expr &expr) {
-            if (expr.kind == Expr::Kind::kShr) { return true; }
-            return std::ranges::any_of(expr.children, [](const auto &child) {
-                return ContainsShr(*child);
-            });
-        }
-
         uint64_t EvalConstantArith(const Expr &expr, uint64_t mask, uint32_t bitwidth) {
             switch (expr.kind) {
                 case Expr::Kind::kConstant:
@@ -113,14 +107,6 @@ namespace cobra {
                     break;
             }
             return 0;
-        }
-
-        void CollectVariables(const Expr &expr, std::vector< GlobalVarIdx > &out) {
-            if (expr.kind == Expr::Kind::kVariable) {
-                out.push_back(expr.var_index);
-                return;
-            }
-            for (const auto &child : expr.children) { CollectVariables(*child, out); }
         }
 
         bool HasConstant(const Expr &expr) {
