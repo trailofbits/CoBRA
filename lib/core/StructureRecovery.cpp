@@ -52,9 +52,7 @@ namespace cobra {
             for (size_t k = 0; k < ir.atom_table.size(); ++k) {
                 const auto &subtree = *ir.atom_table[k].original_subtree;
                 if (kBare) {
-                    if (subtree.kind == Expr::Kind::kVariable
-                        && subtree.var_index == var_idx)
-                    {
+                    if (subtree.kind == Expr::Kind::kVariable && subtree.var_index == var_idx) {
                         return static_cast< AtomId >(k);
                     }
                     continue;
@@ -75,9 +73,8 @@ namespace cobra {
                     return static_cast< AtomId >(k);
                 }
             }
-            auto expr = kBare
-                ? Expr::Variable(var_idx)
-                : Expr::BitwiseAnd(Expr::Variable(var_idx), Expr::Constant(mask));
+            auto expr = kBare ? Expr::Variable(var_idx)
+                              : Expr::BitwiseAnd(Expr::Variable(var_idx), Expr::Constant(mask));
             return CreateAtom(ir, std::move(expr), OperatorFamily::kAnd);
         }
 
@@ -394,15 +391,13 @@ namespace cobra {
 
             // +coeff * (x & pass_mask)
             if (kPassMask != 0) {
-                AtomId pass_id =
-                    FindOrCreateMaskedVariableAtom(ir, kVarIdx, kPassMask, kMod);
+                AtomId pass_id = FindOrCreateMaskedVariableAtom(ir, kVarIdx, kPassMask, kMod);
                 new_terms.push_back({ .coeff = term.coeff, .atom_id = pass_id });
             }
 
             // -coeff * (x & invert_mask)
             if (kInvertMask != 0) {
-                AtomId inv_id =
-                    FindOrCreateMaskedVariableAtom(ir, kVarIdx, kInvertMask, kMod);
+                AtomId inv_id = FindOrCreateMaskedVariableAtom(ir, kVarIdx, kInvertMask, kMod);
                 const uint64_t kNegCoeff = ModNeg(term.coeff, ir.bitwidth);
                 new_terms.push_back({ .coeff = kNegCoeff, .atom_id = inv_id });
             }
