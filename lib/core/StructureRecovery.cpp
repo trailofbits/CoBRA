@@ -1,6 +1,7 @@
 #include "cobra/core/StructureRecovery.h"
 #include "cobra/core/BitWidth.h"
 #include "cobra/core/Expr.h"
+#include "cobra/core/ExprUtils.h"
 #include "cobra/core/SemilinearIR.h"
 #include "cobra/core/SignatureChecker.h"
 #include "cobra/core/Trace.h"
@@ -75,13 +76,6 @@ namespace cobra {
                     return a.atom_id < b.atom_id;
                 }
             );
-        }
-
-        bool HasShr(const Expr &expr) {
-            if (expr.kind == Expr::Kind::kShr) { return true; }
-            return std::ranges::any_of(expr.children, [](const auto &child) {
-                return HasShr(*child);
-            });
         }
 
     } // namespace
@@ -329,7 +323,7 @@ namespace cobra {
             // Only flatten single-variable atoms without shifts.
             // Shifts mix bits across positions, breaking the per-bit
             // decomposition f(x) = f(0) + (x & pass) - (x & invert).
-            if (info.key.support.size() != 1 || HasShr(*info.original_subtree)) {
+            if (info.key.support.size() != 1 || ContainsShr(*info.original_subtree)) {
                 new_terms.push_back(term);
                 continue;
             }

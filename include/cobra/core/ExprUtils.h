@@ -27,6 +27,14 @@ namespace cobra {
     /// Check if an Expr subtree contains only constants (no variables).
     bool IsConstantSubtree(const Expr &expr);
 
+    /// Returns true if any node in the AST is kShr.
+    bool ContainsShr(const Expr &expr);
+
+    /// Append the var_index of every kVariable node (pre-order). Duplicates
+    /// are preserved; callers that want a deduplicated support set must
+    /// sort + unique the output themselves.
+    void CollectVariables(const Expr &expr, std::vector< uint32_t > &out);
+
     /// Evaluate a constant-only Expr subtree (no variables allowed).
     /// Result is masked to Bitmask(bitwidth).
     /// Behavior is undefined if a Variable node is encountered (the

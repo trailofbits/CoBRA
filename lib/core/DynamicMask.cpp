@@ -40,12 +40,4 @@ namespace cobra {
         return MaskInfo{ .effective_width = *m, .inner = other_child };
     }
 
-    bool ContainsShr(const Expr &expr) {
-        if (expr.kind == Expr::Kind::kShr) { return true; }
-        for (const auto &child : expr.children) {
-            if (ContainsShr(*child)) { return true; }
-        }
-        return false;
-    }
-
 } // namespace cobra

@@ -1,5 +1,6 @@
 #include "cobra/core/DynamicMask.h"
 #include "cobra/core/Expr.h"
+#include "cobra/core/ExprUtils.h"
 #include <gtest/gtest.h>
 
 using namespace cobra;
