@@ -560,4 +560,3 @@ namespace cobra {
     }
 
 } // namespace cobra
-
