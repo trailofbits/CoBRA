@@ -60,6 +60,7 @@ option(COBRA_BUILD_TESTS "Build tests (requires GoogleTest in prefix)" OFF)
 option(COBRA_ENABLE_TRACE "Enable detailed pipeline tracing to stderr (debug builds)" OFF)
 option(COBRA_ENABLE_SIG_STATS "Enable signature evaluation counters for profiling builds" OFF)
 option(COBRA_ENABLE_TRACY "Enable Tracy profiler instrumentation" OFF)
+option(COBRA_BUILD_IDA_PLUGIN "Build IDA Pro plugin (requires IDA_SDK_DIR)" OFF)
 
 if(COBRA_BUILD_LLVM_PASS)
     find_package(LLVM REQUIRED CONFIG)
@@ -96,6 +97,10 @@ endif()
 
 if(COBRA_BUILD_LLVM_PASS)
     add_subdirectory(lib/llvm)
+endif()
+
+if(COBRA_BUILD_IDA_PLUGIN)
+    add_subdirectory(lib/ida)
 endif()
 
 if(COBRA_BUILD_TESTS)

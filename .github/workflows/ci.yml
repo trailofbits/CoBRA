@@ -88,6 +88,7 @@ jobs:
             -DCMAKE_C_COMPILER="${CC:-${{ matrix.cc }}}" \
             -DCMAKE_CXX_COMPILER="${CXX:-${{ matrix.cxx }}}" \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCOBRA_ENABLE_LLVM=ON \
             -DUSE_EXTERNAL_LLVM=ON \
             -DCOBRA_BUILD_TESTS=ON
           cmake --build build-deps
@@ -127,3 +128,141 @@ jobs:
         run: |
           find include lib tools \( -name '*.h' -o -name '*.cpp' \) -print0 \
             | xargs -0 clang-format-22 --dry-run --Werror
+
+  ida-plugin:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            cc: gcc-14
+            cxx: g++-14
+            name: Linux
+          - os: macos-15
+            cc: clang
+            cxx: clang++
+            name: macOS
+          - os: windows-latest
+            name: Windows
+
+    name: IDA Plugin (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Clone IDA SDK
+        run: >
+          git clone --depth 1 --branch v9.3.0-sdk.3
+          https://github.com/HexRaysSA/ida-sdk.git ida-sdk
+
+      - name: Install Ninja (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y -qq ninja-build
+
+      - name: Install Ninja (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: Install Ninja (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ninja -y
+
+      - name: Cache dependencies
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: build-deps/install
+          key: deps-ida-${{ matrix.os }}-${{ hashFiles('dependencies/*.cmake') }}
+
+      - name: Build dependencies (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cmake -S dependencies -B build-deps -G Ninja \
+            -DCMAKE_C_COMPILER="${CC:-${{ matrix.cc }}}" \
+            -DCMAKE_CXX_COMPILER="${CXX:-${{ matrix.cxx }}}" \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-deps
+
+      - name: Build dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cmake -S dependencies -B build-deps -G Ninja `
+            -DCMAKE_C_COMPILER=clang-cl `
+            -DCMAKE_CXX_COMPILER=clang-cl `
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-deps
+
+      - name: Build IDA plugin (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_C_COMPILER="${CC:-${{ matrix.cc }}}" \
+            -DCMAKE_CXX_COMPILER="${CXX:-${{ matrix.cxx }}}" \
+            -DCMAKE_PREFIX_PATH="$(pwd)/build-deps/install" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCOBRA_BUILD_IDA_PLUGIN=ON \
+            -DIDA_SDK_DIR="$(pwd)/ida-sdk/src"
+          cmake --build build --target ida-cobra
+
+      - name: Build IDA plugin (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cmake -S . -B build -G Ninja `
+            -DCMAKE_C_COMPILER=clang-cl `
+            -DCMAKE_CXX_COMPILER=clang-cl `
+            -DCMAKE_PREFIX_PATH="$(Resolve-Path build-deps/install)" `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCOBRA_BUILD_IDA_PLUGIN=ON `
+            -DIDA_SDK_DIR="$(Resolve-Path ida-sdk/src)"
+          cmake --build build --target ida-cobra
+
+      - name: Upload plugin artifact
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ida-cobra-${{ matrix.name }}
+          path: |
+            build/lib/ida/ida-cobra.*
+            lib/ida/ida-cobra.cfg
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, lint, ida-plugin]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Download all IDA plugin artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdceab917 # v4.3.0
+        with:
+          pattern: ida-cobra-*
+          path: release-artifacts/
+
+      - name: Rename artifacts with version and platform
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          mkdir -p release
+          cp lib/ida/ida-cobra.cfg "release/ida-cobra.cfg"
+          for dir in release-artifacts/ida-cobra-*; do
+            platform="$(echo "$(basename "$dir" | sed 's/ida-cobra-//')" | tr '[:upper:]' '[:lower:]')"
+            for bin in "$dir"/build/lib/ida/ida-cobra.*; do
+              ext="${bin##*.}"
+              cp "$bin" "release/ida-cobra-${platform}-${version}.${ext}"
+            done
+          done
+
+      - name: Upload to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes \
+            release/*

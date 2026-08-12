@@ -6,6 +6,7 @@
 #   cmake --build build-deps
 #
 # Options:
+#   COBRA_ENABLE_LLVM       (default OFF) - Enable LLVM dependency
 #   USE_EXTERNAL_LLVM       (default ON)  - Use system LLVM vs build from source
 #   USE_EXTERNAL_HIGHWAY    (default OFF) - Use system highway vs build from source
 #   COBRA_BUILD_TESTS       (default OFF) - Build GoogleTest for tests
@@ -16,6 +17,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(cobra-dependencies LANGUAGES C CXX)
 
+option(COBRA_ENABLE_LLVM "Enable LLVM dependency" OFF)
 option(USE_EXTERNAL_LLVM "Use system LLVM instead of building from source" ON)
 option(USE_EXTERNAL_ABSEIL "Use system abseil instead of building from source" OFF)
 option(USE_EXTERNAL_HIGHWAY "Use system highway instead of building from source" OFF)
@@ -28,7 +30,10 @@ include(superbuild.cmake)
 
 include(abseil.cmake)
 include(highway.cmake)
-include(llvm.cmake)
+
+if(COBRA_ENABLE_LLVM)
+    include(llvm.cmake)
+endif()
 
 if(COBRA_BUILD_TESTS)
     include(googletest.cmake)
